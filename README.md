@@ -139,11 +139,15 @@ cp libsystemmonitor_native.so ../../backend/SystemMonitor.Api/
 
 ### 2. Start the .NET Backend API
 
+<<<<<<< HEAD
 ```bash
 cd backend/SystemMonitor.Api
 dotnet run
 ```
 *API will spin up on `http://localhost:5000` (or `https://localhost:5001`).*
+=======
+Open `http://localhost:XXXX`.
+>>>>>>> a069fe5221194950f0716c86b88a4147d7f648ca
 
 ### 3. Launch the Frontend
 
