@@ -143,7 +143,7 @@ cp libsystemmonitor_native.so ../../backend/SystemMonitor.Api/
 cd backend/SystemMonitor.Api
 dotnet run
 ```
-*API will spin up on `http://localhost:5000` (or `https://localhost:5001`).*
+*API will spin up on `http://localhost:XXXX` (or `https://localhost:XXXX`).*
 =======
 Open `http://localhost:XXXX`.
 
