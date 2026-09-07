@@ -139,7 +139,6 @@ cp libsystemmonitor_native.so ../../backend/SystemMonitor.Api/
 
 ### 2. Start the .NET Backend API
 
-<<<<<<< HEAD
 ```bash
 cd backend/SystemMonitor.Api
 dotnet run
@@ -155,7 +154,7 @@ cd frontend
 npm install
 npm run dev
 ```
-*Dashboard will be available at `http://localhost:5173`.*
+*Dashboard will be available at `http://localhost:XXXX`.*
 
 <br>
 
