@@ -235,7 +235,6 @@ when mastering the machine is the entire point.
 
 <div align="center">
 
-Released under the [MIT License](LICENSE).<br>
 Crafted with curiosity, raw memory buffers, and assembly instructions.
 
 </div>
