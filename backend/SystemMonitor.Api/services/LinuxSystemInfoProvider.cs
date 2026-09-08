@@ -54,42 +54,49 @@ public class LinuxSystemInfoProvider : ISystemInfoProvider
         return new CpuInfo(Math.Round(usedPercent, 1));
     }
 
-    public Task<List<ProcessInfo>> GetProcessesAsync()
-    {
-        var processes = new List<ProcessInfo>();
+public async Task<List<ProcessInfo>> GetProcessesAsync()
+{
+    var pidDirs = Directory.GetDirectories("/proc")
+        .Where(dir => int.TryParse(Path.GetFileName(dir), out _))
+        .ToList();
 
-        foreach (var dir in Directory.GetDirectories("/proc"))
+    var tasks = pidDirs.Select(dir => Task.Run(() =>
+    {
+        try
         {
             var pidStr = Path.GetFileName(dir);
-            if (!int.TryParse(pidStr, out int pid)) continue;
+            if (!int.TryParse(pidStr, out int pid)) return null;
 
-            try
+            var statusPath = Path.Combine(dir, "status");
+            if (!File.Exists(statusPath)) return null;
+
+            var lines = File.ReadAllLines(statusPath);
+            string name = lines.FirstOrDefault(l => l.StartsWith("Name:"))?.Split(':', 2)[1].Trim() ?? "unknown";
+            string vmRssLine = lines.FirstOrDefault(l => l.StartsWith("VmRSS:")) ?? "";
+            long memoryKb = 0;
+            if (vmRssLine.Length > 0)
             {
-                var statusPath = Path.Combine(dir, "status");
-                if (!File.Exists(statusPath)) continue;
-
-                var lines = File.ReadAllLines(statusPath);
-                string name = lines.FirstOrDefault(l => l.StartsWith("Name:"))?.Split(':', 2)[1].Trim() ?? "unknown";
-                string vmRssLine = lines.FirstOrDefault(l => l.StartsWith("VmRSS:")) ?? "";
-                long memoryKb = 0;
-                if (vmRssLine.Length > 0)
-                {
-                    var numPart = vmRssLine.Split(':', 2)[1].Replace("kB", "").Trim();
-                    long.TryParse(numPart, out memoryKb);
-                }
-
-                processes.Add(new ProcessInfo(pid, name, memoryKb / 1024));
+                var numPart = vmRssLine.Split(':', 2)[1].Replace("kB", "").Trim();
+                long.TryParse(numPart, out memoryKb);
             }
-            catch
-            {
-                // process exited mid-read — skip it
-            }
+
+            return new ProcessInfo(pid, name, memoryKb / 1024);
         }
+        catch
+        {
+            return null;
+        }
+    }));
 
-        var top50 = processes.OrderByDescending(p => p.MemoryMB).Take(50).ToList();
-        return Task.FromResult(top50);
-    }
+    var results = await Task.WhenAll(tasks);
 
+    return results
+        .Where(p => p != null)
+        .Cast<ProcessInfo>()
+        .OrderByDescending(p => p.MemoryMB)
+        .Take(50)
+        .ToList();
+}
     public List<DiskInfo> GetDisks()
     {
         var drives = new List<DiskInfo>();

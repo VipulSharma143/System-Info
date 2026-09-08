@@ -17,6 +17,8 @@ else
 {
     throw new PlatformNotSupportedException("This application only supports Windows and Linux.");
 }
+builder.Services.AddSingleton<SystemMonitorBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemMonitorBackgroundService>());
 
 builder.Services.AddOpenApi();
 
@@ -28,6 +30,15 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod()
               .AllowAnyHeader();
     });
+});
+
+// HttpClient for calling the Python analytics_service.py (FastAPI, localhost:8001).
+// Named client so the base address and any future auth/headers/timeouts live in
+// one place, same reasoning as keeping hardware-provider selection centralized here.
+builder.Services.AddHttpClient("AnalyticsService", client =>
+{
+    client.BaseAddress = new Uri("http://localhost:8001");
+    client.Timeout = TimeSpan.FromSeconds(10);
 });
 
 var app = builder.Build();
@@ -42,5 +53,6 @@ app.UseCors("AllowFrontend");
 
 app.MapSystemEndpoints();
 app.MapNativeEndpoints();
+app.MapAnalyticsEndpoints();
 
 app.Run();

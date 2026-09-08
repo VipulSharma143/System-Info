@@ -2,6 +2,9 @@
 """
 analyze_snapshots.py
 
+Place this in: ./analytics/analyze_snapshots.py  (project root)
+
+First milestone for Phase 7 (Python Analytics). Reads the JSONL log
 produced by SnapshotLogger.cs and prints basic stats (mean/min/max) over
 a requested time window. No HTTP service yet — just proving the pipeline
 (C# background loop -> file -> Python) produces correct numbers before
