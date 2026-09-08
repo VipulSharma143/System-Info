@@ -193,3 +193,4 @@ dist
 # Native build artifacts
 *.so
 native/build/
+backend/SystemMonitor.Api/data/
