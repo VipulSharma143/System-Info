@@ -1193,3 +1193,13 @@
 {"timestamp":"2026-09-08T04:02:31.4230537+00:00","cpuUsedPercent":22.5,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":0,"txKBps":0}]}
 {"timestamp":"2026-09-08T04:02:32.1282172+00:00","cpuUsedPercent":28.2,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":0,"txKBps":0}]}
 {"timestamp":"2026-09-08T04:02:32.8318217+00:00","cpuUsedPercent":35.9,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":0.2,"txKBps":0.4}]}
+{"timestamp":"2026-09-08T04:02:33.5353895+00:00","cpuUsedPercent":37.5,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":0.3,"txKBps":0}]}
+{"timestamp":"2026-09-08T04:02:34.2406513+00:00","cpuUsedPercent":77.5,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":0,"txKBps":0}]}
+{"timestamp":"2026-09-08T04:02:34.9427994+00:00","cpuUsedPercent":70,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":0,"txKBps":0}]}
+{"timestamp":"2026-09-08T04:02:35.6474711+00:00","cpuUsedPercent":10,"network":[{"iface":"lo","rxKBps":1.6,"txKBps":1.6},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":0.8,"txKBps":21.5}]}
+{"timestamp":"2026-09-08T04:02:36.3486997+00:00","cpuUsedPercent":42.1,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":15.3,"txKBps":4.4}]}
+{"timestamp":"2026-09-08T04:02:37.1084276+00:00","cpuUsedPercent":90,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":0,"txKBps":0}]}
+{"timestamp":"2026-09-08T04:02:37.8144984+00:00","cpuUsedPercent":100,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":0,"txKBps":0}]}
+{"timestamp":"2026-09-08T04:02:38.5356146+00:00","cpuUsedPercent":100,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":0,"txKBps":0}]}
+{"timestamp":"2026-09-08T04:02:39.2365169+00:00","cpuUsedPercent":97.5,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":14.1,"txKBps":18}]}
+{"timestamp":"2026-09-08T04:02:39.9380024+00:00","cpuUsedPercent":35,"network":[{"iface":"lo","rxKBps":0,"txKBps":0},{"iface":"enp4s0f0","rxKBps":0,"txKBps":0},{"iface":"wlp3s0","rxKBps":4.1,"txKBps":69.2}]}
