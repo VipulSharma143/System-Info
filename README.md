@@ -63,8 +63,11 @@ Dynamically traverses `/sys/class/drm`, resolving and dispatching vendor-specifi
 ### 🧮 Hand-Crafted x86-64 Assembly
 A real CPU benchmark compute loop written directly in NASM Assembly, featuring a companion SIMD (SSE2) implementation to measure real scalar-vs-vector execution deltas.
 
+### 📈 Python Analytics Service
+A background service continuously logs CPU and network samples to a JSON Lines file. A FastAPI service reads that log to compute rolling stats, linear trend detection (climbing/dropping/flat), and bottleneck detection — sustained high-load episodes and isolated spikes, classified as CPU-bound or combined CPU+network load. The .NET backend proxies to this service over HTTP, degrading gracefully if it's not running.
+
 ### 🛡️ Graceful Degradation Throughout
-Missing thermal sensors, unreadable fans, or headless GPUs report `"unavailable"` with integrity rather than returning faked dummy metrics or crashing the runtime.
+Missing thermal sensors, unreadable fans, headless GPUs, or an unreachable analytics service all report `"unavailable"` with integrity rather than returning faked dummy metrics or crashing the runtime.
 
 <br>
 
@@ -85,13 +88,14 @@ Missing thermal sensors, unreadable fans, or headless GPUs report `"unavailable"
 │    │          ISystemInfoProvider Interface        │    │
 │    │   Linux (/proc, /sys)   │   Windows (WMI)     │    │
 │    └───────────────────────────────────────────────┘    │
-└─────────────┬───────────────────────────────────────────┘
-              │ P/Invoke (Native FFI)
-┌─────────────▼───────────────────────────────────────────┐
-│                     Native Engine                       │
-│                      C++ (CMake)                        │
-│         Hardware reads · Thermals · GPU parsing         │
-└─────────────┬───────────────────────────────────────────┘
+└─────────────┬───────────────────────────────┬───────────┘
+              │ P/Invoke (Native FFI)          │ HTTP (proxy)
+┌─────────────▼───────────────────────┐  ┌─────▼─────────────┐
+│           Native Engine              │  │  Analytics Service │
+│              C++ (CMake)             │  │  Python (FastAPI)  │
+│  Hardware reads · Thermals · GPU     │  │  Stats · Trend ·   │
+│                                       │  │  Bottleneck detect │
+└─────────────┬─────────────────────────┘  └────────────────────┘
               │ Direct Object Linkage
 ┌─────────────▼───────────────────────────────────────────┐
 │                   Performance Layer                     │
@@ -110,7 +114,7 @@ Missing thermal sensors, unreadable fans, or headless GPUs report `"unavailable"
 | **Backend** | C#, .NET 10 Web API | REST endpoints, system orchestration, platform dispatch |
 | **Native Engine** | C++20, CMake | Kernel file descriptor reads, hardware identification |
 | **Performance** | x86-64 Assembly (NASM) | Scalar & SIMD instruction benchmarking |
-| **Analytics** *(Planned)* | Python | Bottleneck detection, statistical trend calculation |
+| **Analytics** | Python, FastAPI | Bottleneck detection, trend analysis, HTTP analytics service |
 | **Storage** *(Planned)* | PostgreSQL | Historical metric logging, benchmark persistence |
 
 <br>
@@ -121,6 +125,7 @@ Missing thermal sensors, unreadable fans, or headless GPUs report `"unavailable"
 
 - **.NET SDK:** 10.0+
 - **Node.js:** 20.x or higher
+- **Python:** 3.10+ (for the analytics service)
 - **Build Tools:** CMake 3.20+, NASM 2.15+
 - **Compiler:** GCC/G++ 12+ (Linux) or MSVC / Visual Studio 2022+ (Windows)
 
@@ -144,8 +149,6 @@ cd backend/SystemMonitor.Api
 dotnet run
 ```
 *API will spin up on `http://localhost:XXXX` (or `https://localhost:XXXX`).*
-=======
-Open `http://localhost:XXXX`.
 
 ### 3. Launch the Frontend
 
@@ -155,6 +158,15 @@ npm install
 npm run dev
 ```
 *Dashboard will be available at `http://localhost:XXXX`.*
+
+### 4. (Optional) Start the Analytics Service
+
+```bash
+pip install fastapi uvicorn
+cd analytics
+uvicorn analytics_service:app --reload --port 8001
+```
+*Enables `/api/analytics/stats`, `/api/analytics/trend`, and `/api/analytics/bottlenecks` on the backend. The dashboard and core system endpoints work fine without this running — analytics endpoints degrade gracefully to a 503 if it's not up.*
 
 <br>
 
@@ -168,9 +180,10 @@ npm run dev
 - [x] **Phase 4: Native C++ Integration** — P/Invoke interop, CPU temp, thermal throttling checks.
 - [x] **Phase 5: Vendor GPU & Fan Detection** — Scanning `/sys/class/drm` and dynamic fallback routing.
 - [x] **Phase 6: x86-64 Assembly Engine** — Hand-crafted NASM scalar + SSE2 SIMD benchmark workloads.
-- [x] **Phase 7: Platform Abstraction** — Unified `ISystemInfoProvider` for Linux & Windows runtime switching.
-- [ ] **Phase 8: Python Analytics Engine** *(In Progress)* — Real-time bottleneck detection & anomaly discovery.
-- [ ] **Phase 9: Persistence Layer** — PostgreSQL telemetry ingestion for long-term historical charts.
+- [x] **Cross-Platform Refactor** — Unified `ISystemInfoProvider` for Linux & Windows, plus a matching native C++ provider split; Windows paths compile but are untested (no Windows hardware available).
+- [x] **Phase 7: Python Analytics Engine** — Background CPU/network snapshot logging, statistical trend analysis, and sustained-load bottleneck detection with CPU-bound vs combined-load classification, exposed via a FastAPI service the .NET backend calls over HTTP.
+- [ ] **Phase 8: Persistence Layer** — PostgreSQL telemetry ingestion for long-term historical charts, replacing the current flat-file (JSONL) snapshot log.
+- [ ] **Phase 9: Advanced Dashboard** — Not yet started.
 
 <br>
 
@@ -187,18 +200,20 @@ system-info/
 │
 ├── backend/                      # .NET 10 API Solution
 │   └── SystemMonitor.Api/
-│       ├── Controllers/          # Performance & metric endpoints
-│       ├── Interfaces/           # ISystemInfoProvider contracts
-│       ├── Native/               # P/Invoke bridge bindings
-│       └── Providers/            # Linux & Windows system data providers
+│       ├── Endpoints/             # System, native & analytics HTTP endpoints
+│       ├── interface/             # ISystemInfoProvider contract & DTOs
+│       ├── Native/                # P/Invoke bridge bindings
+│       └── services/              # Linux & Windows providers, background sampler, snapshot logger
 │
 ├── native/                       # Low-level Native Engine
-│   ├── asm/                      # x86-64 Assembly Workloads
-│   │   ├── benchmark_scalar.asm  # Standard scalar compute routine
-│   │   └── benchmark_simd.asm    # Vectorized SSE2 compute routine
 │   ├── include/                  # C++ Header declarations
 │   ├── src/                      # Hardware & thermal sensors implementations
 │   └── CMakeLists.txt
+│
+├── assembly/                     # x86-64 Assembly Workloads (NASM)
+│
+├── analytics/                    # Python analytics: stats, trend, bottleneck
+│   │                              detection, and the FastAPI service exposing them
 │
 └── PROJECT_STATUS.md             # Detailed engineering build log
 ```
