@@ -1,67 +1,72 @@
+// SnapshotLogger.cs
+// Same public interface as before (Append(cpu, network)) — only the
+// destination changed, from a JSONL file to a MongoDB Atlas collection
+// (SystemMonitorDB.snapshots), matching the document shape already
+// proven in test_mongo_insert.py.
+//
+// Reads the connection string from the MONGO_URI environment variable,
+// same variable already set in ~/.bashrc and used by the Python side —
+// one shared secret, not duplicated across languages.
+//
+// Graceful degradation preserved: a failed insert is logged to stderr
+// and does not crash the background sampling loop.
 
-// Appends one JSON line per background-service sample to
-// backend/SystemMonitor.Api/data/snapshots.jsonl
-//
-// Matches the real CpuInfo/NetworkInfo record shapes from
-// backend/SystemMonitor.Api/interface/ISystemInfoProvider.cs:
-//   public record CpuInfo(double UsedPercent);
-//   public record NetworkInfo(string Iface, double RxKBps, double TxKBps);
-//
-// Does not touch RAM/processes/disks — those aren't sampled by the
-// background loop (per SystemMonitorBackgroundService.cs), so logging
-// them here would mean extra slow reads inside a loop that's currently
-// fast specifically because it only does CPU+network. If you want
-// RAM/disk/process history too, that's a separate decision, not a
-// silent addition to this loop.
-//
-// Never throws — a logging failure must not kill the background loop,
-// same principle as the existing catch-and-continue in ExecuteAsync.
-
+using MongoDB.Bson;
+using MongoDB.Driver;
 using SystemMonitor.Api.Interface;
-using System.Text.Json;
 
 namespace SystemMonitor.Api.Services;
 
 public static class SnapshotLogger
 {
-    private static readonly object _lock = new();
+    private static readonly IMongoCollection<BsonDocument>? Collection = InitCollection();
 
-    private static readonly string LogPath = Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "data", "snapshots.jsonl");
-    // AppContext.BaseDirectory points at bin/Debug/net.../ when running via
-    // `dotnet run`, so we walk back up to the project root (SystemMonitor.Api/)
-    // with "..", "..", ".." — three levels: net.../ -> Debug/ -> bin/ -> project root.
-    // If this ends up in the wrong place on your machine, just hardcode an
-    // absolute path here instead; it's a dev-mode logging path, not a
-    // deployment concern yet.
-
-    private static readonly JsonSerializerOptions Options = new()
+    private static IMongoCollection<BsonDocument>? InitCollection()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+        var uri = Environment.GetEnvironmentVariable("MONGO_URI");
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            Console.Error.WriteLine("[SnapshotLogger] MONGO_URI not set — snapshot logging disabled.");
+            return null;
+        }
+
+        try
+        {
+            var client = new MongoClient(uri);
+            var db = client.GetDatabase("SystemMonitorDB");
+            return db.GetCollection<BsonDocument>("snapshots");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[SnapshotLogger] failed to connect to Mongo: {ex.Message}");
+            return null;
+        }
+    }
 
     public static void Append(CpuInfo? cpu, List<NetworkInfo>? network)
     {
+        if (Collection is null)
+            return;
+
         try
         {
-            var fullPath = Path.GetFullPath(LogPath);
-            var dir = Path.GetDirectoryName(fullPath)!;
-            if (!Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
+            var networkArray = new BsonArray(
+                (network ?? new List<NetworkInfo>()).Select(n => new BsonDocument
+                {
+                    { "iface", n.Iface },
+                    { "rxKBps", n.RxKBps },
+                    { "txKBps", n.TxKBps }
+                })
+            );
 
-            var record = new
+            var doc = new BsonDocument
             {
-                timestamp = DateTimeOffset.UtcNow,
-                cpuUsedPercent = cpu?.UsedPercent,
-                network = network?.Select(n => new { n.Iface, n.RxKBps, n.TxKBps })
+                { "timestamp", DateTime.UtcNow },
+                { "cpuUsedPercent", cpu?.UsedPercent ?? 0 },
+                { "network", networkArray }
             };
 
-            var line = JsonSerializer.Serialize(record, Options);
-
-            lock (_lock)
-            {
-                File.AppendAllText(fullPath, line + Environment.NewLine);
-            }
+            Collection.InsertOne(doc);
         }
         catch (Exception ex)
         {

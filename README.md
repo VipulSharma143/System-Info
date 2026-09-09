@@ -115,7 +115,7 @@ Missing thermal sensors, unreadable fans, headless GPUs, or an unreachable analy
 | **Native Engine** | C++20, CMake | Kernel file descriptor reads, hardware identification |
 | **Performance** | x86-64 Assembly (NASM) | Scalar & SIMD instruction benchmarking |
 | **Analytics** | Python, FastAPI | Bottleneck detection, trend analysis, HTTP analytics service |
-| **Storage** *(Planned)* | PostgreSQL | Historical metric logging, benchmark persistence |
+| **Storage** | MongoDB Atlas | Historical snapshot persistence, queried by the analytics service |
 
 <br>
 
@@ -162,11 +162,12 @@ npm run dev
 ### 4. (Optional) Start the Analytics Service
 
 ```bash
-pip install fastapi uvicorn
+pip install fastapi uvicorn pymongo
+export MONGO_URI="mongodb+srv://user:pass@cluster.../SystemMonitorDB"
 cd analytics
 uvicorn analytics_service:app --reload --port 8001
 ```
-*Enables `/api/analytics/stats`, `/api/analytics/trend`, and `/api/analytics/bottlenecks` on the backend. The dashboard and core system endpoints work fine without this running — analytics endpoints degrade gracefully to a 503 if it's not up.*
+*Enables `/api/analytics/stats`, `/api/analytics/trend`, and `/api/analytics/bottlenecks` on the backend, backed by MongoDB Atlas. The dashboard and core system endpoints work fine without this running — analytics endpoints degrade gracefully to a 503 if it's not up. `MONGO_URI` must also be set in the environment `dotnet run` starts in, since `SnapshotLogger.cs` uses the same variable to write snapshots.*
 
 <br>
 
@@ -182,7 +183,7 @@ uvicorn analytics_service:app --reload --port 8001
 - [x] **Phase 6: x86-64 Assembly Engine** — Hand-crafted NASM scalar + SSE2 SIMD benchmark workloads.
 - [x] **Cross-Platform Refactor** — Unified `ISystemInfoProvider` for Linux & Windows, plus a matching native C++ provider split; Windows paths compile but are untested (no Windows hardware available).
 - [x] **Phase 7: Python Analytics Engine** — Background CPU/network snapshot logging, statistical trend analysis, and sustained-load bottleneck detection with CPU-bound vs combined-load classification, exposed via a FastAPI service the .NET backend calls over HTTP.
-- [ ] **Phase 8: Persistence Layer** — PostgreSQL telemetry ingestion for long-term historical charts, replacing the current flat-file (JSONL) snapshot log.
+- [x] **Phase 8: Persistence Layer** — MongoDB Atlas replacing the flat-file (JSONL) snapshot log. `SnapshotLogger.cs` inserts directly into a `SystemMonitorDB.snapshots` collection; the analytics service queries it instead of re-reading a file on every request.
 - [ ] **Phase 9: Advanced Dashboard** — Not yet started.
 
 <br>

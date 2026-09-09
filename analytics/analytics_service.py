@@ -4,77 +4,103 @@ analytics_service.py
 
 Place this in: ./analytics/analytics_service.py
 
-Fourth milestone for Phase 7. Wraps the three proven analysis scripts
-(analyze_snapshots.py, trend_analysis.py, bottleneck_detection.py) as a
-small FastAPI service, so the .NET backend can call this instead of you
-running scripts by hand.
+Phase 8 update: reads from MongoDB Atlas (SystemMonitorDB.snapshots)
+instead of the JSONL file. SnapshotLogger.cs now writes there directly,
+so this replaces the file-based load_snapshots() with a Mongo query.
+Everything downstream (stats/trend/bottleneck logic) is unchanged —
+only where the data comes from changed.
 
-This does NOT replace those scripts — they're still useful standalone for
-quick command-line checks. This file re-implements the same logic as
-importable functions and exposes them over HTTP. Kept in one file for now
-rather than importing across three separate CLI scripts, to avoid
-argparse/__main__ complications; if this grows, splitting into a shared
-lib.py + api.py is the natural next refactor (not needed yet).
+The `file` query param from the Phase 7 version is gone; callers no
+longer need to know or pass a file path.
 
 SETUP (run once):
-    pip install fastapi uvicorn
+    pip install fastapi uvicorn pymongo
+
+Requires MONGO_URI set in the environment (same variable used by
+SnapshotLogger.cs and the earlier test scripts):
+    export MONGO_URI="mongodb+srv://user:pass@cluster.../SystemMonitorDB"
 
 RUN:
     cd analytics
-    uvicorn analytics_service:app --reload --port 8001
+    uvicorn analytics_service:app --reload --port 8001 --ws none
 
-Then test in your browser or with curl:
+Then:
     http://localhost:8001/health
-    http://localhost:8001/stats?file=../backend/SystemMonitor.Api/data/snapshots.jsonl
-    http://localhost:8001/trend?file=../backend/SystemMonitor.Api/data/snapshots.jsonl
-    http://localhost:8001/bottlenecks?file=../backend/SystemMonitor.Api/data/snapshots.jsonl
-
-FastAPI also auto-generates interactive docs at:
-    http://localhost:8001/docs
-
-NOTE on the `file` query param: passed explicitly rather than hardcoded,
-since dev-mode paths differ by how you run things. Once this is stable,
-consider hardcoding a default path (or reading it from an env var / a
-small config file) so .NET doesn't need to know the path at all — not
-done here since you're still verifying this by hand first.
+    http://localhost:8001/stats
+    http://localhost:8001/trend
+    http://localhost:8001/bottlenecks
+    http://localhost:8001/docs   (interactive API docs)
 """
 
-import json
+import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from pymongo import MongoClient, ASCENDING
 
-app = FastAPI(title="System Monitor Analytics", version="0.1.0")
+app = FastAPI(title="System Monitor Analytics", version="0.2.0")
+
+# ---------------------------------------------------------------------------
+# Mongo connection (one client, reused across requests)
+# ---------------------------------------------------------------------------
+
+MONGO_URI = os.environ.get("MONGO_URI")
+_client: Optional[MongoClient] = None
+_collection = None
+
+if MONGO_URI:
+    _client = MongoClient(MONGO_URI)
+    _collection = _client["SystemMonitorDB"]["snapshots"]
+
+
+def get_collection():
+    if _collection is None:
+        raise HTTPException(
+            status_code=500,
+            detail="MONGO_URI not set — analytics service has no database connection.",
+        )
+    return _collection
 
 
 # ---------------------------------------------------------------------------
-# Shared loading logic (same as the three CLI scripts)
+# Shared loading logic — now a Mongo query instead of a file read
 # ---------------------------------------------------------------------------
 
-def load_snapshots(path: Path, since: Optional[datetime]):
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"file not found: {path}")
+def load_snapshots(since: Optional[datetime]):
+    """
+    Returns a list of (timestamp, record) tuples, sorted oldest-first,
+    same shape the rest of this file already expects — so stats/trend/
+    bottleneck logic below needed no changes.
+    """
+    collection = get_collection()
+
+    query = {}
+    if since is not None:
+        # Docs are stored as naive UTC datetimes (written via C#'s
+        # DateTime.UtcNow); strip tzinfo so the comparison matches.
+        query["timestamp"] = {"$gte": since.replace(tzinfo=None)}
+
+    cursor = collection.find(query).sort("timestamp", ASCENDING)
 
     snapshots = []
-    with path.open("r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
+    for doc in cursor:
+        ts = doc.get("timestamp")
+        if ts is None:
+            continue
+        # Defensive: handle both native Mongo datetimes (written by
+        # SnapshotLogger.cs) and ISO-format strings (e.g. leftover from
+        # manual test inserts) so a stray document of the wrong shape
+        # doesn't crash every query.
+        if isinstance(ts, str):
             try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
+                ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except ValueError:
                 continue
-            ts_raw = record.get("timestamp")
-            try:
-                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-            except Exception:
-                continue
-            if since is not None and ts < since:
-                continue
-            snapshots.append((ts, record))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        snapshots.append((ts, doc))
+
     return snapshots
 
 
@@ -97,19 +123,22 @@ def resolve_since(minutes: Optional[float]):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    if _collection is None:
+        return {"status": "degraded", "detail": "MONGO_URI not set"}
+    try:
+        _client.admin.command("ping")
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        return {"status": "degraded", "detail": str(e)}
 
 
 # ---------------------------------------------------------------------------
-# /stats  (same as analyze_snapshots.py)
+# /stats
 # ---------------------------------------------------------------------------
 
 @app.get("/stats")
-def stats(
-    file: str = Query(..., description="Path to snapshots.jsonl"),
-    minutes: Optional[float] = Query(None, description="Only analyze the last N minutes"),
-):
-    snapshots = load_snapshots(Path(file), resolve_since(minutes))
+def stats(minutes: Optional[float] = Query(None, description="Only analyze the last N minutes")):
+    snapshots = load_snapshots(resolve_since(minutes))
     if not snapshots:
         return {"message": "no snapshots found in requested window", "count": 0}
 
@@ -150,7 +179,7 @@ def stats(
 
 
 # ---------------------------------------------------------------------------
-# /trend  (same as trend_analysis.py)
+# /trend
 # ---------------------------------------------------------------------------
 
 def linear_trend_slope(timestamps, values):
@@ -184,11 +213,10 @@ def describe_trend(slope_per_sec):
 
 @app.get("/trend")
 def trend(
-    file: str = Query(..., description="Path to snapshots.jsonl"),
     minutes: Optional[float] = Query(None, description="Only analyze the last N minutes"),
     window: int = Query(20, description="Rolling mean window size in samples"),
 ):
-    snapshots = load_snapshots(Path(file), resolve_since(minutes))
+    snapshots = load_snapshots(resolve_since(minutes))
     if not snapshots:
         return {"message": "no snapshots found in requested window", "count": 0}
 
@@ -220,7 +248,7 @@ def trend(
 
 
 # ---------------------------------------------------------------------------
-# /bottlenecks  (same as bottleneck_detection.py)
+# /bottlenecks
 # ---------------------------------------------------------------------------
 
 def find_sustained_episodes(timestamps, values, threshold, min_samples):
@@ -263,7 +291,6 @@ def classify_episode(cpu_episode, net_values, net_threshold):
 
 @app.get("/bottlenecks")
 def bottlenecks(
-    file: str = Query(..., description="Path to snapshots.jsonl"),
     minutes: Optional[float] = Query(None),
     cpu_sustained_threshold: float = Query(85.0),
     cpu_sustained_min_samples: int = Query(5),
@@ -272,7 +299,7 @@ def bottlenecks(
     net_sustained_min_samples: int = Query(5),
     skip_first: int = Query(10, description="Skip first N samples (startup transient)"),
 ):
-    snapshots = load_snapshots(Path(file), resolve_since(minutes))
+    snapshots = load_snapshots(resolve_since(minutes))
     if len(snapshots) <= skip_first:
         return {"message": f"not enough data after skipping first {skip_first} samples", "count": len(snapshots)}
 
