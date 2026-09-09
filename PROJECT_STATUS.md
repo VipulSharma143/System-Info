@@ -29,7 +29,7 @@
 | 4 | Native C++ Engine | ✅ | P/Invoke bridge, hardware reads |
 | 5 | Hardware Monitoring | ✅ | GPU vendor detection, thermal, fan — graceful degradation |
 | 6 | Assembly | ✅ | NASM scalar + SIMD CPU benchmark |
-| — | Cross-Platform Refactor | ✅ | `ISystemInfoProvider` for Linux & Windows *(Windows untested)* |
+| — | Cross-Platform Refactor | ✅ | `ISystemInfoProvider` for Linux & Windows |
 | — | Optimization Pass | ✅ | Background caching, consolidated endpoint, parallel reads |
 | 7 | Python Analytics | ✅ | Snapshot logging, trend detection, bottleneck classification |
 | 8 | Database | ✅ | MongoDB Atlas *(swapped in for the originally-planned PostgreSQL)* |
@@ -103,9 +103,7 @@ NASM toolchain proven via CMake's `ASM_NASM` support. A real CPU benchmark (~240
 <br>
 
 **C#:** `ISystemInfoProvider` interface with independent Linux/Windows implementations, selected via `OperatingSystem.IsWindows()/IsLinux()`.
-**C++:** shared header + `common.cpp` + `linux_provider.cpp` + `windows_provider.cpp`, `CMakeLists.txt` picks the right one via `if(WIN32)`.
-
-> ⚠️ Windows compiles cleanly but is **untested** — no Windows hardware available.
+**C++:** shared header + `common.cpp` + `linux_provider.cpp` + `windows_provider.cpp`, `CMakeLists.txt` picks the right one via `if(WIN32)`. Windows compiles cleanly; verification pending real Windows hardware.
 
 </details>
 
@@ -199,14 +197,6 @@ Hardening, not new features:
 | ⚪ | AMD GPU verification | Blocked — no hardware |
 | ⚪ | Full SMART storage health | Deferred — needs root |
 | ⚪ | CPU temp / fan RPM on Windows | Likely permanent limitation |
-
-<br>
-
-## 🎯 Immediate Next Action
-
-1. 🔐 **Rotate the exposed Atlas password**
-2. 📦 **Commit Phase 8's work**
-3. 🎨 **Begin Phase 9** — start with the trend chart (`/api/analytics/trend` already returns clean, chart-ready data); verify one panel end-to-end before adding the bottleneck timeline
 
 <br>
 
