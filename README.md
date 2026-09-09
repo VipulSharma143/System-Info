@@ -128,6 +128,28 @@ flowchart TB
 
 ---
 
+### ⚡ Quick Start (recommended)
+
+```bash
+./setup.sh
+```
+
+Checks every prerequisite, installs anything missing, builds the native engine, installs frontend/analytics dependencies, and walks you through setting `MONGO_URI` — then offers to launch everything immediately. Safe to re-run any time.
+
+Already set up? Just run:
+
+```bash
+./start-all.sh
+```
+
+Starts the backend, analytics service, and frontend together — waits for each to actually be ready before starting the next, and fails loudly with the real error log if something doesn't come up correctly. One command, no juggling terminals.
+
+---
+
+### Manual Setup
+
+If you'd rather run each piece yourself, or `setup.sh` doesn't fit your environment:
+
 ### 1. Build the Native Engine & Assembly Layer
 
 ```bash

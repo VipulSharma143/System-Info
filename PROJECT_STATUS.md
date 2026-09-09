@@ -281,7 +281,8 @@ Five staged, individually-verified steps:
 
 **Goal:** harden what already exists, rather than add new features.
 
-- [x] **One-command launcher** (`start-all.sh`) — starts backend, analytics service, and frontend together, logs to `./logs/` instead of requiring 3+ manual terminals
+- [x] **Setup wizard** (`setup.sh`) — checks all prerequisites, offers to install anything missing via apt, builds the native engine, installs frontend/analytics dependencies, and walks through setting `MONGO_URI` interactively. Safe to re-run any time.
+- [x] **One-command launcher** (`start-all.sh`) — starts backend, analytics service, and frontend together, logging to `./logs/` instead of requiring 3+ manual terminals. Waits for each service to actually respond (polls the real "listening" state, not a fixed delay) before starting the next, and fails loudly with the relevant log's last 20 lines if a service doesn't come up in time — verified end-to-end, including a real timing bug caught and fixed (an earlier fixed-delay version raced ahead of the .NET build and failed the first live test).
 - [ ] **Real installer** (`.exe` / `.dmg`, double-clickable icon) — packaging so a non-technical user can install and run this without a terminal at all. A genuinely separate, larger effort from the launcher script above (Electron, Inno Setup, or similar).
 - [ ] **MongoDB retention policy** — no TTL/expiry yet; collection will grow unbounded over time
 - [ ] **Windows verification** — compiles, never executed end-to-end (blocked on hardware access)
