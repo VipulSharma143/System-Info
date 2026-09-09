@@ -7,14 +7,16 @@
 **A from-scratch system profiler built by reading raw kernel interfaces directly —
 no wrapper libraries, no shell commands, just pure low-level engineering.**
 
-[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![React](https://img.shields.io/badge/React-18+-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![C++](https://img.shields.io/badge/C++-20-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
-[![Assembly](https://img.shields.io/badge/Assembly-x86--64-FF6600?style=for-the-badge&logo=assemblyscript&logoColor=white)](https://www.nasm.us/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)
+![React](https://img.shields.io/badge/React-18+-61DAFB?style=for-the-badge&logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![C++](https://img.shields.io/badge/C++-20-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)
+![Assembly](https://img.shields.io/badge/Assembly-x86--64-FF6600?style=for-the-badge&logo=assemblyscript&logoColor=white)
+![Python](https://img.shields.io/badge/Python-FastAPI-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)
 
-[Getting Started](#-getting-started) • [Architecture](#-architecture) • [Features](#-features) • [Project Status](#-project-status)
+[What is this?](#-what-is-this) • [Features](#-features) • [Architecture](#%EF%B8%8F-architecture) • [Getting Started](#-getting-started) • [Project Status](#-project-status)
 
 ---
 
@@ -22,13 +24,15 @@ no wrapper libraries, no shell commands, just pure low-level engineering.**
 
 ## 🎯 What is this?
 
-A full-stack system monitor where **every layer does real, non-trivial work** — CPU, memory, disk, network, and process data read directly from Linux `/proc` and `/sys`, a native C++ engine for hardware sensors, and hand-optimized x86-64 Assembly for CPU benchmarking with scalar-vs-SIMD comparison.
+A full-stack system monitor where **every layer does real, non-trivial work** — CPU, memory, disk, network, and process data read directly from Linux `/proc` and `/sys`, a native C++ engine for hardware sensors, hand-optimized x86-64 Assembly for CPU benchmarking, a Python analytics engine for trend and bottleneck detection, and persistent historical storage in MongoDB.
 
 ```
-React (TypeScript) ──► .NET 10 (C#) ──► C++ (CMake) ──► x86-64 Assembly (NASM)
+React (TS) ──► .NET 10 (C#) ──► C++ (CMake) ──► x86-64 Assembly (NASM)
+                    │
+                    ├──► Python (FastAPI) ──► MongoDB Atlas
 ```
 
-> **This is not a wrapper.** Most system monitors shell out to existing CLI tools or import high-level metrics libraries. This project deliberately avoids that: every single data point is sourced directly from kernel interfaces and first-principles native code.
+> **This is not a wrapper.** Most system monitors shell out to existing CLI tools or import high-level metrics libraries. This project deliberately avoids that: every data point is sourced directly from kernel interfaces, first-principles native code, or hand-written analysis logic.
 
 <br>
 
@@ -37,71 +41,63 @@ React (TypeScript) ──► .NET 10 (C#) ──► C++ (CMake) ──► x86-64
 | Typical Monitor | System Info |
 |---|---|
 | Wraps `psutil` or shells out to `top` | Reads `/proc/stat`, `/proc/meminfo`, `/sys/class/hwmon` directly |
-| Monolithic / single-language | Five-language pipeline with real managed-to-native FFI |
+| Monolithic / single-language | Six-piece pipeline with real managed-to-native FFI and a service boundary |
 | CPU metrics from an opaque API call | Hand-written Assembly benchmark with SIMD optimization proof |
 | Single-platform or platform-coupled | Clean `ISystemInfoProvider` decoupling Linux & Windows |
-| Crashes on missing hardware | Graceful degradation with honest status reporting |
+| Live numbers only, no history | Background snapshot logging + trend/bottleneck detection over time |
+| Crashes on missing hardware | Graceful degradation with honest status reporting, end to end |
 
 <br>
 
 ## ✨ Features
 
 ### 📊 Live System Dashboard
-Real-time CPU load %, RAM consumption breakdown, disk read/write throughput, network I/O, and an active process explorer — polled and refreshed every 2 seconds.
+Real-time CPU load %, RAM breakdown, disk throughput, network I/O, and an active process explorer — polled and refreshed every 2 seconds via a single consolidated endpoint.
 
 ### 🐧 Cross-Platform Backend Abstraction
-A clean, modular `ISystemInfoProvider` interface with independent implementations:
-- **Linux:** Direct parsing of `/proc` and `/sys` filesystems.
-- **Windows:** Native integrations via WMI and `PerformanceCounter`.
+A clean `ISystemInfoProvider` interface with independent implementations — Linux via direct `/proc`/`/sys` parsing, Windows via WMI and `PerformanceCounter`.
 
 ### ⚙️ Native C++ Engine
-Hardware-level reads — CPU model string extraction, thermal zone monitoring, and GPU vendor resolution — exposed cleanly to managed C# code via high-performance P/Invoke.
+Hardware-level reads — CPU model extraction, thermal zone monitoring, GPU vendor resolution — exposed to C# via P/Invoke.
 
 ### 🎮 Vendor-Aware GPU Detection
-Dynamically traverses `/sys/class/drm`, resolving and dispatching vendor-specific logic (NVIDIA, AMD, Intel) while failing gracefully on unsupported devices.
+Dynamically traverses `/sys/class/drm`, dispatching vendor-specific logic (NVIDIA, AMD, Intel) while failing gracefully on unsupported devices.
 
 ### 🧮 Hand-Crafted x86-64 Assembly
-A real CPU benchmark compute loop written directly in NASM Assembly, featuring a companion SIMD (SSE2) implementation to measure real scalar-vs-vector execution deltas.
+A real CPU benchmark loop written directly in NASM, with a companion SIMD (SSE2) implementation measuring real scalar-vs-vector speedup (3.94–3.95×).
 
 ### 📈 Python Analytics Service
-A background service continuously logs CPU and network samples to a JSON Lines file. A FastAPI service reads that log to compute rolling stats, linear trend detection (climbing/dropping/flat), and bottleneck detection — sustained high-load episodes and isolated spikes, classified as CPU-bound or combined CPU+network load. The .NET backend proxies to this service over HTTP, degrading gracefully if it's not running.
+A background service logs CPU/network snapshots to MongoDB. A FastAPI service computes rolling stats, linear trend detection (climbing/dropping/flat), and bottleneck detection — sustained high-load episodes and isolated spikes, classified as CPU-bound or combined CPU+network load.
+
+### 🗄️ Persistent Historical Storage
+MongoDB Atlas stores every snapshot, queried directly by the analytics service — no flat files, no unbounded growth, indexed time-range queries.
 
 ### 🛡️ Graceful Degradation Throughout
-Missing thermal sensors, unreadable fans, headless GPUs, or an unreachable analytics service all report `"unavailable"` with integrity rather than returning faked dummy metrics or crashing the runtime.
+Missing sensors, an unreachable analytics service, or a dropped database connection all report `"unavailable"`/`"degraded"` honestly rather than faking data or crashing.
 
 <br>
 
 ## 🏗️ Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                        Frontend                         │
-│                React + TypeScript (Vite)                │
-│           Live dashboard · Polling · Rendering          │
-└────────────────────────────┬────────────────────────────┘
-                             │ HTTP / JSON REST
-┌────────────────────────────▼────────────────────────────┐
-│                        Backend                          │
-│                     C# / .NET 10                        │
-│          REST API · Cross-platform orchestration        │
-│    ┌───────────────────────────────────────────────┐    │
-│    │          ISystemInfoProvider Interface        │    │
-│    │   Linux (/proc, /sys)   │   Windows (WMI)     │    │
-│    └───────────────────────────────────────────────┘    │
-└─────────────┬───────────────────────────────┬───────────┘
-              │ P/Invoke (Native FFI)          │ HTTP (proxy)
-┌─────────────▼───────────────────────┐  ┌─────▼─────────────┐
-│           Native Engine              │  │  Analytics Service │
-│              C++ (CMake)             │  │  Python (FastAPI)  │
-│  Hardware reads · Thermals · GPU     │  │  Stats · Trend ·   │
-│                                       │  │  Bottleneck detect │
-└─────────────┬─────────────────────────┘  └────────────────────┘
-              │ Direct Object Linkage
-┌─────────────▼───────────────────────────────────────────┐
-│                   Performance Layer                     │
-│                 x86-64 Assembly (NASM)                  │
-│        Scalar Compute  │  Vectorized SIMD (SSE2)        │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    U((User)) --> FE[React + TypeScript<br/>Frontend]
+    FE -- HTTP/JSON --> API[.NET 10 Web API]
+
+    subgraph Providers["ISystemInfoProvider"]
+        direction LR
+        LIN["Linux<br/>(/proc, /sys)"]
+        WIN["Windows<br/>(WMI)"]
+    end
+
+    API --> Providers
+    API -- P/Invoke --> CPP[C++ Native Engine<br/>CMake]
+    CPP -- linked --> ASM[x86-64 Assembly<br/>NASM · Scalar + SIMD]
+
+    API -- HTTP proxy<br/>graceful 503 on failure --> PY[Python Analytics<br/>FastAPI]
+    PY -- stats / trend / bottlenecks --> API
+    PY -- query --> DB[(MongoDB Atlas)]
+    API -- write snapshots --> DB
 ```
 
 <br>
@@ -126,6 +122,7 @@ Missing thermal sensors, unreadable fans, headless GPUs, or an unreachable analy
 - **.NET SDK:** 10.0+
 - **Node.js:** 20.x or higher
 - **Python:** 3.10+ (for the analytics service)
+- **MongoDB Atlas:** a cluster + connection string (or adapt to a local MongoDB instance)
 - **Build Tools:** CMake 3.20+, NASM 2.15+
 - **Compiler:** GCC/G++ 12+ (Linux) or MSVC / Visual Studio 2022+ (Windows)
 
@@ -138,53 +135,56 @@ cd native
 mkdir -p build && cd build
 cmake ..
 make
-# Copy the compiled shared library to the API bin directory
 cp libsystemmonitor_native.so ../../backend/SystemMonitor.Api/
 ```
 
-### 2. Start the .NET Backend API
+### 2. Set the database connection string
+
+```bash
+export MONGO_URI="mongodb+srv://user:pass@cluster.xxxxx.mongodb.net/SystemMonitorDB"
+```
+*Required by both the backend (`SnapshotLogger.cs`) and the analytics service — set it once in your shell profile (`~/.bashrc`) so every terminal has it.*
+
+### 3. Start the .NET Backend API
 
 ```bash
 cd backend/SystemMonitor.Api
 dotnet run
 ```
-*API will spin up on `http://localhost:XXXX` (or `https://localhost:XXXX`).*
+*API listens on `http://localhost:XXXX`.*
 
-### 3. Launch the Frontend
+### 4. Launch the Frontend
 
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-*Dashboard will be available at `http://localhost:XXXX`.*
+*Dashboard available at `http://localhost:5173`.*
 
-### 4. (Optional) Start the Analytics Service
+### 5. Start the Analytics Service
 
 ```bash
 pip install fastapi uvicorn pymongo
-export MONGO_URI="mongodb+srv://user:pass@cluster.../SystemMonitorDB"
 cd analytics
 uvicorn analytics_service:app --reload --port 8001
 ```
-*Enables `/api/analytics/stats`, `/api/analytics/trend`, and `/api/analytics/bottlenecks` on the backend, backed by MongoDB Atlas. The dashboard and core system endpoints work fine without this running — analytics endpoints degrade gracefully to a 503 if it's not up. `MONGO_URI` must also be set in the environment `dotnet run` starts in, since `SnapshotLogger.cs` uses the same variable to write snapshots.*
+*Enables `/api/analytics/stats`, `/api/analytics/trend`, and `/api/analytics/bottlenecks` on the backend. The dashboard and core system endpoints work fine without this running — analytics endpoints degrade gracefully to a 503 if it's not up.*
 
 <br>
 
 ## 📍 Project Status
 
-> Development follows a verified, phase-by-phase roadmap. Every tier is tested and benchmarked before the next layer is integrated. See [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) for the deep-dive dev log.
+| # | Phase | Status |
+|:-:|---|:-:|
+| 1–6 | Environment → Assembly benchmark | ✅ Done |
+| — | Cross-platform refactor & optimization pass | ✅ Done |
+| 7 | Python analytics (trend + bottleneck detection) | ✅ Done |
+| 8 | Database (MongoDB Atlas) | ✅ Done |
+| 9 | Advanced dashboard UI | ⬜ Planned |
+| 10 | Maintenance & extensibility | ⬜ Planned |
 
-- [x] **Phase 1: Environment & Foundations** — Cross-compilation toolchains & workspace scaffolding.
-- [x] **Phase 2: Full-Stack Pipeline** — React dashboard connected to .NET 10 controller layer.
-- [x] **Phase 3: Kernel System Monitoring** — Parsing raw `/proc/stat`, `/proc/meminfo`, `/proc/[pid]/`.
-- [x] **Phase 4: Native C++ Integration** — P/Invoke interop, CPU temp, thermal throttling checks.
-- [x] **Phase 5: Vendor GPU & Fan Detection** — Scanning `/sys/class/drm` and dynamic fallback routing.
-- [x] **Phase 6: x86-64 Assembly Engine** — Hand-crafted NASM scalar + SSE2 SIMD benchmark workloads.
-- [x] **Cross-Platform Refactor** — Unified `ISystemInfoProvider` for Linux & Windows, plus a matching native C++ provider split; Windows paths compile but are untested (no Windows hardware available).
-- [x] **Phase 7: Python Analytics Engine** — Background CPU/network snapshot logging, statistical trend analysis, and sustained-load bottleneck detection with CPU-bound vs combined-load classification, exposed via a FastAPI service the .NET backend calls over HTTP.
-- [x] **Phase 8: Persistence Layer** — MongoDB Atlas replacing the flat-file (JSONL) snapshot log. `SnapshotLogger.cs` inserts directly into a `SystemMonitorDB.snapshots` collection; the analytics service queries it instead of re-reading a file on every request.
-- [ ] **Phase 9: Advanced Dashboard** — Not yet started.
+> Full phase-by-phase engineering log, verification steps, bugs found & fixed, and performance metrics live in [`PROJECT_STATUS.md`](./PROJECT_STATUS.md).
 
 <br>
 
@@ -193,30 +193,29 @@ uvicorn analytics_service:app --reload --port 8001
 ```
 system-info/
 ├── frontend/                     # React + TypeScript Web App
-│   ├── src/
-│   │   ├── components/           # Real-time UI widgets & charts
-│   │   ├── hooks/                # Metric polling & lifecycle hooks
-│   │   └── types/                # System metric TypeScript interfaces
-│   └── package.json
+│   └── src/
+│       ├── components/           # Real-time UI widgets & charts
+│       ├── hooks/                # Metric polling & lifecycle hooks
+│       └── types/                # System metric TypeScript interfaces
 │
 ├── backend/                      # .NET 10 API Solution
 │   └── SystemMonitor.Api/
 │       ├── Endpoints/             # System, native & analytics HTTP endpoints
 │       ├── interface/             # ISystemInfoProvider contract & DTOs
 │       ├── Native/                # P/Invoke bridge bindings
-│       └── services/              # Linux & Windows providers, background sampler, snapshot logger
+│       └── services/              # Providers, background sampler, snapshot logger
 │
 ├── native/                       # Low-level Native Engine
-│   ├── include/                  # C++ Header declarations
-│   ├── src/                      # Hardware & thermal sensors implementations
+│   ├── include/                  # C++ header declarations
+│   ├── src/                      # Hardware & thermal sensor implementations
 │   └── CMakeLists.txt
 │
-├── assembly/                     # x86-64 Assembly Workloads (NASM)
+├── assembly/                     # x86-64 Assembly workloads (NASM)
 │
 ├── analytics/                    # Python analytics: stats, trend, bottleneck
 │   │                              detection, and the FastAPI service exposing them
 │
-└── PROJECT_STATUS.md             # Detailed engineering build log
+└── PROJECT_STATUS.md             # Full engineering build log
 ```
 
 <br>
@@ -236,6 +235,7 @@ when mastering the machine is the entire point.
 
 <div align="center">
 
+Released under the [MIT License](LICENSE).<br>
 Crafted with curiosity, raw memory buffers, and assembly instructions.
 
 </div>
