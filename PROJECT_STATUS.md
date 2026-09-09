@@ -281,6 +281,8 @@ Five staged, individually-verified steps:
 
 **Goal:** harden what already exists, rather than add new features.
 
+- [x] **One-command launcher** (`start-all.sh`) — starts backend, analytics service, and frontend together, logs to `./logs/` instead of requiring 3+ manual terminals
+- [ ] **Real installer** (`.exe` / `.dmg`, double-clickable icon) — packaging so a non-technical user can install and run this without a terminal at all. A genuinely separate, larger effort from the launcher script above (Electron, Inno Setup, or similar).
 - [ ] **MongoDB retention policy** — no TTL/expiry yet; collection will grow unbounded over time
 - [ ] **Windows verification** — compiles, never executed end-to-end (blocked on hardware access)
 - [ ] **AMD GPU verification** — blocked on hardware access
