@@ -1,40 +1,45 @@
+import { HardDrive } from 'lucide-react';
 import type { DiskInfo } from '../types/system';
-import UsageBar from './UsageBar';
+import Panel from './common/Panel';
+import { Th, Td, Tr } from './common/Table';
+import { EmptyState } from './common/States';
+import UsageBar from './common/UsageBar';
 
 interface DiskTableProps {
   disks: DiskInfo[];
 }
 
 export default function DiskTable({ disks }: DiskTableProps) {
-  if (disks.length === 0) return null;
-
   return (
-    <div className="panel">
-      <h2 className="panel__title">Disk</h2>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Mount</th>
-            <th>Type</th>
-            <th>Used</th>
-            <th>Total</th>
-            <th>Usage</th>
-          </tr>
-        </thead>
-        <tbody>
-          {disks.map((d) => (
-            <tr key={d.name}>
-              <td>{d.name}</td>
-              <td>{d.driveType}</td>
-              <td>{d.usedGB} GB</td>
-              <td>{d.totalGB} GB</td>
-              <td>
-                <UsageBar percent={d.usedPercent} />
-              </td>
+    <Panel title="Disks" meta={disks.length ? `${disks.length} volumes` : undefined} noPad>
+      {disks.length === 0 ? (
+        <EmptyState icon={HardDrive} title="No disk volumes reported" />
+      ) : (
+        <table className="w-full border-collapse">
+          <thead>
+            <tr>
+              <Th>Mount</Th>
+              <Th>Type</Th>
+              <Th className="text-right">Used</Th>
+              <Th className="text-right">Total</Th>
+              <Th className="w-36">Usage</Th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {disks.map((d) => (
+              <Tr key={d.name}>
+                <Td className="font-medium">{d.name}</Td>
+                <Td className="text-[var(--text-muted)]">{d.driveType}</Td>
+                <Td className="tabular text-right text-[var(--text-muted)]">{d.usedGB} GB</Td>
+                <Td className="tabular text-right text-[var(--text-muted)]">{d.totalGB} GB</Td>
+                <Td>
+                  <UsageBar percent={d.usedPercent} compact />
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Panel>
   );
 }

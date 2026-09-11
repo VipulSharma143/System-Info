@@ -1,7 +1,11 @@
 import { Fragment, useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { BottleneckEpisode, BottlenecksResponse } from '../types/analytics';
 import { formatNumber, formatTimeSafe } from '../lib/format';
 import type { ProcessSnapshot } from '../hooks/useProcessHistory';
+import Panel from './common/Panel';
+import { Th, Td, Tr } from './common/Table';
+import { EmptyState } from './common/States';
 import SpikeDetail from './SpikeDetail';
 
 interface BottleneckTimelineProps {
@@ -35,28 +39,22 @@ export default function BottleneckTimeline({ bottlenecks, findNearest }: Bottlen
   const openSpikeIndex = openRow?.startsWith('spike-') ? Number(openRow.split('-')[1]) : null;
 
   return (
-    <div className="analytics-block">
-      <h3 className="analytics-block__title">
-        Bottlenecks{' '}
-        <span className="analytics-block__meta">
-          {bottlenecks.summary.sustained_cpu_episode_count} CPU ·{' '}
-          {bottlenecks.summary.sustained_network_episode_count} network ·{' '}
-          {bottlenecks.summary.isolated_cpu_spike_count} spikes
-        </span>
-      </h3>
-
-      {!hasAny && <p className="analytics-block__empty">No bottleneck episodes in this window.</p>}
+    <Panel
+      title="Bottlenecks"
+      meta={`${bottlenecks.summary.sustained_cpu_episode_count} CPU · ${bottlenecks.summary.sustained_network_episode_count} network · ${bottlenecks.summary.isolated_cpu_spike_count} spikes`}
+    >
+      {!hasAny && <EmptyState title="No bottleneck episodes in this window" />}
 
       {sustained.length > 0 && (
-        <table className="data-table">
+        <table className="w-full border-collapse">
           <thead>
             <tr>
-              <th />
-              <th>Type</th>
-              <th>Start</th>
-              <th>Duration</th>
-              <th>Peak</th>
-              <th>Class</th>
+              <Th className="w-6" />
+              <Th>Type</Th>
+              <Th>Start</Th>
+              <Th>Duration</Th>
+              <Th className="text-right">Peak</Th>
+              <Th>Class</Th>
             </tr>
           </thead>
           <tbody>
@@ -66,20 +64,24 @@ export default function BottleneckTimeline({ bottlenecks, findNearest }: Bottlen
               const isOpen = openRow === key;
               return (
                 <Fragment key={key}>
-                  <tr
-                    className={`data-table__row--clickable ${isOpen ? 'is-open' : ''}`}
+                  <Tr
+                    className={t ? 'cursor-pointer' : ''}
                     onClick={() => t && setOpenRow(isOpen ? null : key)}
                   >
-                    <td className="data-table__chevron">{t ? (isOpen ? '▾' : '▸') : ''}</td>
-                    <td>{ep.__label}</td>
-                    <td>{formatTimeSafe(t)}</td>
-                    <td>{ep.duration_sec != null ? `${ep.duration_sec}s` : '—'}</td>
-                    <td>{peakOf(ep)}</td>
-                    <td>{ep.classification ?? '—'}</td>
-                  </tr>
+                    <Td className="text-[var(--text-faint)]">
+                      {t ? (isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />) : null}
+                    </Td>
+                    <Td className="font-medium">{ep.__label}</Td>
+                    <Td className="tabular text-[var(--text-muted)]">{formatTimeSafe(t)}</Td>
+                    <Td className="tabular text-[var(--text-muted)]">
+                      {ep.duration_sec != null ? `${ep.duration_sec}s` : '—'}
+                    </Td>
+                    <Td className="tabular text-right">{peakOf(ep)}</Td>
+                    <Td className="text-[var(--text-muted)]">{ep.classification ?? '—'}</Td>
+                  </Tr>
                   {isOpen && t && (
-                    <tr className="data-table__detail-row">
-                      <td colSpan={6}>
+                    <tr>
+                      <td colSpan={6} className="px-3 pb-3">
                         <SpikeDetail snapshot={findNearest(t)} spikeTime={t} />
                       </td>
                     </tr>
@@ -93,10 +95,10 @@ export default function BottleneckTimeline({ bottlenecks, findNearest }: Bottlen
 
       {spikes.length > 0 && (
         <>
-          <p className="analytics-block__lead" style={{ marginTop: sustained.length ? '1rem' : 0 }}>
-            Isolated spikes — click one to see what was running
+          <p className={`text-[12px] text-[var(--text-muted)] ${sustained.length ? 'mt-4' : ''} mb-2`}>
+            Isolated spikes — select one to see what was running
           </p>
-          <div className="spike-list">
+          <div className="flex flex-wrap gap-1.5">
             {spikes.map((s, i) => {
               const peakVal = s.peak ?? s.value;
               const critical = typeof peakVal === 'number' && peakVal >= 100;
@@ -107,9 +109,15 @@ export default function BottleneckTimeline({ bottlenecks, findNearest }: Bottlen
                 <button
                   key={key}
                   type="button"
-                  className={`spike-chip ${critical ? 'spike-chip--critical' : ''} ${isOpen ? 'spike-chip--active' : ''}`}
                   onClick={() => t && setOpenRow(isOpen ? null : key)}
                   disabled={!t}
+                  className={`tabular rounded-md border px-2.5 py-1 text-[12px] transition-colors disabled:opacity-40 ${
+                    isOpen
+                      ? 'border-[var(--accent)] text-[var(--accent)]'
+                      : critical
+                        ? 'border-[var(--critical)]/40 text-[var(--critical)] hover:bg-[var(--surface-hover)]'
+                        : 'border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--surface-hover)]'
+                  }`}
                 >
                   {formatTimeSafe(t)} · {peakOf(s)}
                 </button>
@@ -120,10 +128,14 @@ export default function BottleneckTimeline({ bottlenecks, findNearest }: Bottlen
             spikes[openSpikeIndex] &&
             (() => {
               const t = timeOf(spikes[openSpikeIndex]);
-              return t ? <SpikeDetail snapshot={findNearest(t)} spikeTime={t} /> : null;
+              return t ? (
+                <div className="mt-3">
+                  <SpikeDetail snapshot={findNearest(t)} spikeTime={t} />
+                </div>
+              ) : null;
             })()}
         </>
       )}
-    </div>
+    </Panel>
   );
 }

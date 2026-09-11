@@ -1,40 +1,40 @@
 import type { StatsResponse } from '../types/analytics';
+import Panel from './common/Panel';
+import { Th, Td, Tr } from './common/Table';
 
-interface StatsSummaryProps {
-  stats: StatsResponse;
-}
-
-export default function StatsSummary({ stats }: StatsSummaryProps) {
+export default function StatsSummary({ stats }: { stats: StatsResponse }) {
+  const networkEntries = Object.entries(stats.network);
   return (
-    <div className="analytics-block">
-      <h3 className="analytics-block__title">
-        Stats <span className="analytics-block__meta">{stats.count} samples</span>
-      </h3>
-      <p className="analytics-block__lead">
-        CPU mean {stats.cpu_percent.mean}% · min {stats.cpu_percent.min}% · max {stats.cpu_percent.max}%
-      </p>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Interface</th>
-            <th>RX KB/s (mean / min / max)</th>
-            <th>TX KB/s (mean / min / max)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(stats.network).map(([iface, n]) => (
-            <tr key={iface}>
-              <td>{iface}</td>
-              <td>
-                {n.rx_kbps.mean} / {n.rx_kbps.min} / {n.rx_kbps.max}
-              </td>
-              <td>
-                {n.tx_kbps.mean} / {n.tx_kbps.min} / {n.tx_kbps.max}
-              </td>
+    <Panel title="Stats" meta={`${stats.count} samples`}>
+      <div className="tabular mb-3 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-[var(--text-muted)]">
+        <span>CPU mean <span className="text-[var(--text)]">{stats.cpu_percent.mean}%</span></span>
+        <span>min <span className="text-[var(--text)]">{stats.cpu_percent.min}%</span></span>
+        <span>max <span className="text-[var(--text)]">{stats.cpu_percent.max}%</span></span>
+      </div>
+      {networkEntries.length > 0 && (
+        <table className="w-full border-collapse">
+          <thead>
+            <tr>
+              <Th>Interface</Th>
+              <Th className="text-right">RX KB/s (mean / min / max)</Th>
+              <Th className="text-right">TX KB/s (mean / min / max)</Th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {networkEntries.map(([iface, n]) => (
+              <Tr key={iface}>
+                <Td className="font-medium">{iface}</Td>
+                <Td className="tabular text-right text-[var(--text-muted)]">
+                  {n.rx_kbps.mean} / {n.rx_kbps.min} / {n.rx_kbps.max}
+                </Td>
+                <Td className="tabular text-right text-[var(--text-muted)]">
+                  {n.tx_kbps.mean} / {n.tx_kbps.min} / {n.tx_kbps.max}
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Panel>
   );
 }

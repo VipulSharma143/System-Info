@@ -1,43 +1,68 @@
+import { TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import type { DirectionalTrend, TrendResponse } from '../types/analytics';
+import Panel from './common/Panel';
+import { Th, Td, Tr } from './common/Table';
 
-interface TrendSummaryProps {
-  trend: TrendResponse;
-}
+const ICONS: Record<string, typeof TrendingUp> = {
+  climbing: TrendingUp,
+  dropping: TrendingDown,
+  flat: Minus,
+};
 
-const ARROWS: Record<string, string> = { climbing: '↑', dropping: '↓', flat: '→' };
+const COLORS: Record<string, string> = {
+  climbing: 'var(--warn)',
+  dropping: 'var(--info)',
+  flat: 'var(--text-muted)',
+};
 
-function directionLabel(t: DirectionalTrend) {
+function DirectionTag({ t }: { t: DirectionalTrend }) {
+  const Icon = ICONS[t.direction] ?? Minus;
+  const color = COLORS[t.direction] ?? 'var(--text-muted)';
   const sign = t.per_minute > 0 ? '+' : '';
-  return `${ARROWS[t.direction] ?? '→'} ${t.direction} (${sign}${t.per_minute.toFixed(1)}/min)`;
+  return (
+    <span className="inline-flex items-center gap-1 text-[13px]" style={{ color }}>
+      <Icon className="h-3.5 w-3.5" />
+      {t.direction}
+      <span className="tabular text-[12px] text-[var(--text-faint)]">
+        ({sign}
+        {t.per_minute.toFixed(1)}/min)
+      </span>
+    </span>
+  );
 }
 
 function windowMinutes(from: string, to: string) {
   return Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000);
 }
 
-export default function TrendSummary({ trend }: TrendSummaryProps) {
+export default function TrendSummary({ trend }: { trend: TrendResponse }) {
+  const networkEntries = Object.entries(trend.network_trend_rx);
   return (
-    <div className="analytics-block">
-      <h3 className="analytics-block__title">
-        Trend <span className="analytics-block__meta">{trend.count} samples · last {windowMinutes(trend.from, trend.to)} min</span>
-      </h3>
-      <p className="analytics-block__lead">CPU {directionLabel(trend.cpu_trend)}</p>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Interface</th>
-            <th>Direction</th>
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(trend.network_trend_rx).map(([iface, t]) => (
-            <tr key={iface}>
-              <td>{iface}</td>
-              <td>{directionLabel(t)}</td>
+    <Panel title="Trend" meta={`${trend.count} samples · last ${windowMinutes(trend.from, trend.to)} min`}>
+      <div className="mb-3 flex items-center gap-2 text-[13px] text-[var(--text-muted)]">
+        CPU
+        <DirectionTag t={trend.cpu_trend} />
+      </div>
+      {networkEntries.length > 0 && (
+        <table className="w-full border-collapse">
+          <thead>
+            <tr>
+              <Th>Interface</Th>
+              <Th>Direction</Th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {networkEntries.map(([iface, t]) => (
+              <Tr key={iface}>
+                <Td className="font-medium">{iface}</Td>
+                <Td>
+                  <DirectionTag t={t} />
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Panel>
   );
 }

@@ -3,6 +3,8 @@ import type { ProcessSnapshot } from '../hooks/useProcessHistory';
 import TrendSummary from './TrendSummary';
 import StatsSummary from './StatsSummary';
 import BottleneckTimeline from './BottleneckTimeline';
+import Panel from './common/Panel';
+import { LoadingState } from './common/States';
 
 interface AnalyticsPanelProps {
   findNearest: (isoTime: string) => ProcessSnapshot | null;
@@ -11,27 +13,27 @@ interface AnalyticsPanelProps {
 export default function AnalyticsPanel({ findNearest }: AnalyticsPanelProps) {
   const { trend, bottlenecks, stats, unavailable, loading } = useAnalytics();
 
-  if (loading) return null; // avoid a flash of "unavailable" before the first fetch resolves
+  if (loading) return <LoadingState label="Loading analytics" />;
 
   if (unavailable) {
     return (
-      <div className="panel panel--analytics">
-        <h2 className="panel__title">Analytics</h2>
-        <p className="panel__empty">
-          Analytics service unavailable — live system data above is unaffected.
+      <Panel>
+        <p className="text-[13px] text-[var(--text-muted)]">
+          Analytics service unavailable — live system data is unaffected.
         </p>
-      </div>
+      </Panel>
     );
   }
 
   return (
-    <div className="panel panel--analytics">
-      <h2 className="panel__title">Analytics</h2>
-      <div className="analytics-grid">
-        {trend && <TrendSummary trend={trend} />}
-        {stats && <StatsSummary stats={stats} />}
-        {bottlenecks && <BottleneckTimeline bottlenecks={bottlenecks} findNearest={findNearest} />}
-      </div>
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      {trend && <TrendSummary trend={trend} />}
+      {stats && <StatsSummary stats={stats} />}
+      {bottlenecks && (
+        <div className="xl:col-span-2">
+          <BottleneckTimeline bottlenecks={bottlenecks} findNearest={findNearest} />
+        </div>
+      )}
     </div>
   );
 }

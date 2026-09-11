@@ -1,33 +1,42 @@
+import { Network as NetworkIcon } from 'lucide-react';
 import type { NetworkInfo } from '../types/system';
+import Panel from './common/Panel';
+import { Th, Td, Tr } from './common/Table';
+import { EmptyState } from './common/States';
 
 interface NetworkTableProps {
   network: NetworkInfo[];
 }
 
 export default function NetworkTable({ network }: NetworkTableProps) {
-  if (network.length === 0) return null;
-
   return (
-    <div className="panel">
-      <h2 className="panel__title">Network</h2>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Interface</th>
-            <th>Down (KB/s)</th>
-            <th>Up (KB/s)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {network.map((n) => (
-            <tr key={n.iface}>
-              <td>{n.iface}</td>
-              <td>{n.rxKBps}</td>
-              <td>{n.txKBps}</td>
+    <Panel title="Interfaces" meta={network.length ? `${network.length} active` : undefined} noPad>
+      {network.length === 0 ? (
+        <EmptyState icon={NetworkIcon} title="No network interfaces reported" />
+      ) : (
+        <table className="w-full border-collapse">
+          <thead>
+            <tr>
+              <Th>Interface</Th>
+              <Th className="text-right">Down</Th>
+              <Th className="text-right">Up</Th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {network.map((n) => (
+              <Tr key={n.iface}>
+                <Td className="font-medium">{n.iface}</Td>
+                <Td className="tabular text-right text-[var(--info)]">
+                  {n.rxKBps} <span className="text-[var(--text-faint)]">KB/s</span>
+                </Td>
+                <Td className="tabular text-right text-[var(--accent)]">
+                  {n.txKBps} <span className="text-[var(--text-faint)]">KB/s</span>
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Panel>
   );
 }
