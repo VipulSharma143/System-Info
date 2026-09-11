@@ -1,6 +1,6 @@
 <div align="center">
 
-# System Performance & Monitoring Platform
+# 📋 System Performance & Monitoring Platform
 ## Full Engineering Build Log
 
 **8 of 10 phases complete · 6 languages · 1 discipline: prove every layer before building the next one**
@@ -13,18 +13,18 @@ Last updated **2026-09-08**
 
 ---
 
-## Contents
+## 📑 Contents
 
-1. [Roadmap](#roadmap)
-2. [Build Discipline](#build-discipline)
-3. [Architecture, Then and Now](#architecture-then-and-now)
-4. [Phase Log — every phase, in full](#phase-log)
-5. [Performance Metrics](#performance-metrics)
-6. [What Should Not Change](#what-should-not-change)
+1. [🗺️ Roadmap](#roadmap)
+2. [🔄 Build Discipline](#build-discipline)
+3. [🏛️ Architecture, Then and Now](#architecture-then-and-now)
+4. [🔍 Phase Log — every phase, in full](#phase-log)
+5. [📊 Performance Metrics](#performance-metrics)
+6. [🧭 What Should Not Change](#what-should-not-change)
 
 ---
 
-## Roadmap
+## 🗺️ Roadmap
 
 | # | Phase | Layer | Status | One-line summary |
 |:-:|---|---|:-:|---|
@@ -48,7 +48,7 @@ Last updated **2026-09-08**
 
 ---
 
-## Build Discipline
+## 🔄 Build Discipline
 
 Every phase below followed the same loop — no layer was added until the one underneath it was proven with real data.
 
@@ -67,7 +67,7 @@ This is the loop that caught every real bug in this log: the disk-`Infinity` cra
 
 ---
 
-## Architecture, Then and Now
+## 🏛️ Architecture, Then and Now
 
 ```mermaid
 flowchart TB
@@ -93,11 +93,11 @@ The system grew one verified layer at a time — from a two-tier React/.NET app 
 
 ---
 
-## Phase Log
+## 🔍 Phase Log
 
 Every phase, in full — nothing summarized away.
 
-### ✅ Phase 1 — Environment Setup
+### ✅ 🧰 Phase 1 — Environment Setup
 **Layer:** Tooling
 **Goal:** prove every toolchain this project depends on actually works, before writing a single line of application code.
 
@@ -116,7 +116,7 @@ Every phase, in full — nothing summarized away.
 
 ---
 
-### ✅ Phase 2 — Basic Application
+### ✅ ⚛️ Phase 2 — Basic Application
 **Layer:** React + .NET
 **Goal:** prove the React ↔ .NET pipeline before any real system data enters it.
 
@@ -128,7 +128,7 @@ Every phase, in full — nothing summarized away.
 
 ---
 
-### ✅ Phase 3 — System Monitoring
+### ✅ 🐧 Phase 3 — System Monitoring
 **Layer:** C# / Linux kernel
 **Goal:** read real system metrics with zero wrapper libraries — no `psutil`, no shelling out to `top`.
 
@@ -140,11 +140,11 @@ Every phase, in full — nothing summarized away.
 | Network | `/proc/net/dev` |
 | Processes | `/proc/[pid]/status` |
 
-**🐛 Bug found & fixed:** an `Infinity`/JSON serialization crash on certain disk mounts — virtual filesystems were reporting nonsensical sizes. Resolved with a `TotalSize > 0` filter and a `DriveFormat` exclusion list.
+**🐞 Bug found & fixed:** an `Infinity`/JSON serialization crash on certain disk mounts — virtual filesystems were reporting nonsensical sizes. Resolved with a `TotalSize > 0` filter and a `DriveFormat` exclusion list.
 
 ---
 
-### ✅ Phase 4 — Native C++ Engine
+### ✅ ⚙️ Phase 4 — Native C++ Engine
 **Layer:** C++ / P/Invoke
 **Goal:** establish a real managed-to-native bridge, not just a proof-of-concept stub.
 
@@ -155,7 +155,7 @@ Every phase, in full — nothing summarized away.
 
 ---
 
-### ✅ Phase 5 — Hardware Monitoring
+### ✅ 🌡️ Phase 5 — Hardware Monitoring
 **Layer:** C++ / sysfs
 **Goal:** read real hardware sensors, and be honest when a sensor isn't there.
 
@@ -173,7 +173,7 @@ Every phase, in full — nothing summarized away.
 
 ---
 
-### ✅ Phase 6 — Assembly
+### ✅ 🧮 Phase 6 — Assembly
 **Layer:** NASM x86-64
 **Goal:** hand-write real, measurable low-level performance code — not a toy example.
 
@@ -192,7 +192,7 @@ A clean result within ~1.5% of the theoretical ceiling.
 
 ---
 
-### ✅ Cross-Platform Refactor
+### ✅ 🔀 Cross-Platform Refactor
 **Layer:** C# + C++
 **Goal:** decouple platform-specific system reads from the rest of the application.
 
@@ -204,7 +204,7 @@ Windows compiles cleanly on this toolchain; real-hardware verification is still 
 
 ---
 
-### ✅ Optimization Pass
+### ✅ ⚡ Optimization Pass
 **Layer:** C#
 **Goal:** remove latency that had already caused real debugging pain, before adding new features on top.
 
@@ -218,7 +218,7 @@ Windows compiles cleanly on this toolchain; real-hardware verification is still 
 
 ---
 
-### ✅ Phase 7 — Python Analytics
+### ✅ 📈 Phase 7 — Python Analytics
 **Layer:** Python / FastAPI
 **Goal:** turn raw metric samples into actual insight — trend direction and bottleneck detection, not just live numbers.
 
@@ -236,7 +236,7 @@ Five staged, individually-verified steps:
 
 ---
 
-### ✅ Phase 8 — Database
+### ✅ 🗄️ Phase 8 — Database
 **Layer:** MongoDB Atlas *(not PostgreSQL)*
 **Goal:** move from an unbounded flat file to a persistent, queryable store.
 
@@ -252,13 +252,13 @@ Five staged, individually-verified steps:
 | 4 | `analytics_service.py` → Mongo queries, `file` param removed from all endpoints |
 | 5 | All three endpoints re-verified against **727+ real documents** |
 
-**🐛 Bug found & fixed:** a leftover manual test document stored `timestamp` as an ISO string, while every real document (written via C#'s `DateTime.UtcNow`) stores a native Mongo datetime. The mixed types crashed the query loader (`AttributeError: 'str' object has no attribute 'tzinfo'`). Fixed by making the loader defensively handle both types, and deleting the stray test document. Same category of lesson as Phase 4's `nm -D` symbol-inspection bug: verify data-shape assumptions before trusting downstream code built on them.
+**🐞 Bug found & fixed:** a leftover manual test document stored `timestamp` as an ISO string, while every real document (written via C#'s `DateTime.UtcNow`) stores a native Mongo datetime. The mixed types crashed the query loader (`AttributeError: 'str' object has no attribute 'tzinfo'`). Fixed by making the loader defensively handle both types, and deleting the stray test document. Same category of lesson as Phase 4's `nm -D` symbol-inspection bug: verify data-shape assumptions before trusting downstream code built on them.
 
 **Resolves both Phase 7 deferred items:** no unbounded flat file, no full-file re-parse on every request — replaced with an indexed, queryable store.
 
 ---
 
-### ⬜ Phase 9 — Advanced Dashboard UI *(planned)*
+### ⬜ 📊 Phase 9 — Advanced Dashboard UI *(planned)*
 **Layer:** React
 **Goal:** surface Phase 7/8 analytics visually in the actual product, not just via `curl`.
 
@@ -270,7 +270,7 @@ Five staged, individually-verified steps:
 
 ---
 
-### ⬜ Phase 10 — Maintenance & Extensibility *(planned)*
+### ⬜ 🛠️ Phase 10 — Maintenance & Extensibility *(planned)*
 **Layer:** Cross-cutting
 **Goal:** harden what already exists, rather than add new features.
 
@@ -286,7 +286,7 @@ Five staged, individually-verified steps:
 
 ---
 
-## Performance Metrics
+## 📊 Performance Metrics
 
 | Metric | Value |
 |---|---|
@@ -301,7 +301,7 @@ Five staged, individually-verified steps:
 
 ---
 
-## What Should Not Change
+## 🧭 What Should Not Change
 
 - The staged, **"prove it before adding the next layer"** discipline — carried through every phase without exception
 - The **graceful-degradation pattern** — hardware reads, the analytics proxy, and database connection failures all report `"unavailable"`/`"degraded"` honestly instead of crashing or faking data
