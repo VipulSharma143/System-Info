@@ -1,47 +1,56 @@
 <div align="center">
 
-# 📋 Project Status & Build Log
+# System Performance & Monitoring Platform
+## Full Engineering Build Log
 
-### System Performance & Monitoring Platform — Full Engineering History
+**8 of 10 phases complete · 6 languages · 1 discipline: prove every layer before building the next one**
 
-![Phases Complete](https://img.shields.io/badge/Phases_Complete-8%2F10-success?style=for-the-badge)
-![Current Phase](https://img.shields.io/badge/Current_Phase-Dashboard_UI-blue?style=for-the-badge)
-![Languages](https://img.shields.io/badge/Languages-6-orange?style=for-the-badge)
-![Last Updated](https://img.shields.io/badge/Updated-2026--09--08-lightgrey?style=for-the-badge)
+`Linux Mint 22.3` · `.NET 10` · `React + TypeScript` · `C++20` · `x86-64 Assembly` · `Python / FastAPI` · `MongoDB Atlas`
 
-[Roadmap](#-roadmap) • [Build Lifecycle](#-build-lifecycle) • [Phase Log](#-phase-log) • [Architecture Evolution](#-architecture-evolution) • [Metrics](#-performance-metrics) • [Next Steps](#-what-should-not-change)
-
----
+Last updated **2026-09-08**
 
 </div>
 
-## 🗺️ Roadmap
+---
+
+## Contents
+
+1. [Roadmap](#roadmap)
+2. [Build Discipline](#build-discipline)
+3. [Architecture, Then and Now](#architecture-then-and-now)
+4. [Phase Log — every phase, in full](#phase-log)
+5. [Performance Metrics](#performance-metrics)
+6. [What Should Not Change](#what-should-not-change)
+
+---
+
+## Roadmap
+
+| # | Phase | Layer | Status | One-line summary |
+|:-:|---|---|:-:|---|
+| 1 | Environment Setup | Tooling | ✅ Done | Toolchains verified across all 6 languages |
+| 2 | Basic Application | React + .NET | ✅ Done | Full-stack pipeline proven end-to-end |
+| 3 | System Monitoring | C# / Linux kernel | ✅ Done | Live metrics read directly from `/proc` |
+| 4 | Native C++ Engine | C++ / P/Invoke | ✅ Done | Managed-to-native FFI bridge |
+| 5 | Hardware Monitoring | C++ / sysfs | ✅ Done | GPU/thermal/fan, graceful degradation |
+| 6 | Assembly | NASM x86-64 | ✅ Done | Hand-written scalar + SIMD benchmark |
+| — | Cross-Platform Refactor | C# + C++ | ✅ Done | Linux/Windows provider abstraction |
+| — | Optimization Pass | C# | ✅ Done | Caching, consolidation, parallelization |
+| 7 | Python Analytics | Python / FastAPI | ✅ Done | Trend + bottleneck detection engine |
+| 8 | Database | MongoDB Atlas | ✅ Done | Persistent snapshot storage |
+| 9 | Dashboard UI | React | ⬜ Planned | Visual analytics surfaced in-app |
+| 10 | Maintenance & Extensibility | Cross-cutting | ⬜ Planned | Hardening pass |
 
 ```
 ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ⬜ ─ ⬜
  1    2    3    4    5    6    7    8    9   10
 ```
 
-| # | Phase | Layer | Status | Summary |
-|:-:|---|---|:-:|---|
-| 1 | Environment Setup | Tooling | ✅ | Toolchains verified across all 6 languages |
-| 2 | Basic Application | React + .NET | ✅ | Full-stack pipeline proven end-to-end |
-| 3 | System Monitoring | C# / Linux kernel | ✅ | Live metrics read directly from `/proc` |
-| 4 | Native C++ Engine | C++ / P/Invoke | ✅ | Managed-to-native FFI bridge |
-| 5 | Hardware Monitoring | C++ / sysfs | ✅ | GPU/thermal/fan, graceful degradation |
-| 6 | Assembly | NASM x86-64 | ✅ | Hand-written scalar + SIMD benchmark |
-| — | Cross-Platform Refactor | C# + C++ | ✅ | Linux/Windows provider abstraction |
-| — | Optimization Pass | C# | ✅ | Caching, consolidation, parallelization |
-| 7 | Python Analytics | Python / FastAPI | ✅ | Trend + bottleneck detection engine |
-| 8 | Database | MongoDB Atlas | ✅ | Persistent snapshot storage |
-| 9 | Dashboard UI | React | ⬜ | Visual analytics surfaced in-app |
-| 10 | Maintenance & Extensibility | Cross-cutting | ⬜ | Hardening pass |
+---
 
-<br>
+## Build Discipline
 
-## 🔄 Build Lifecycle
-
-Each phase in this project follows the same disciplined loop — no layer is added until the one below it is proven:
+Every phase below followed the same loop — no layer was added until the one underneath it was proven with real data.
 
 ```mermaid
 flowchart LR
@@ -54,11 +63,11 @@ flowchart LR
     F --> A
 ```
 
-This loop is what caught every real bug documented below — the disk-`Infinity` crash, the duplicate GPU route, the CPU-startup-transient investigation, and the Phase 8 mixed-timestamp-type bug all surfaced because each new piece was checked against real output before the next was built on top of it.
+This is the loop that caught every real bug in this log: the disk-`Infinity` crash in Phase 3, the duplicate-GPU-card discovery in Phase 5, the CPU-startup-transient investigation in Phase 7, and the mixed-timestamp-type bug in Phase 8. Every one of them surfaced because the new piece was checked against real output before anything was stacked on top of it.
 
-<br>
+---
 
-## 🏛️ Architecture Evolution
+## Architecture, Then and Now
 
 ```mermaid
 flowchart TB
@@ -80,17 +89,17 @@ flowchart TB
     end
 ```
 
-The system grew one verified layer at a time — from a two-tier React/.NET app in Phase 2, to today's six-piece pipeline with a persistent analytics store.
+The system grew one verified layer at a time — from a two-tier React/.NET app in Phase 2 to today's six-piece pipeline with a persistent analytics store.
 
-<br>
+---
 
-## 🔍 Phase Log
+## Phase Log
 
-<details open>
-<summary><b>✅ Phase 1 — Environment Setup</b></summary>
-<br>
+Every phase, in full — nothing summarized away.
 
-**Goal:** prove every toolchain this project depends on actually works, before writing application code.
+### ✅ Phase 1 — Environment Setup
+**Layer:** Tooling
+**Goal:** prove every toolchain this project depends on actually works, before writing a single line of application code.
 
 | Tool | Version |
 |---|---|
@@ -103,27 +112,24 @@ The system grew one verified layer at a time — from a two-tier React/.NET app 
 | cmake | 3.28.3 |
 | nasm | 2.16.01 |
 
-**Verification method:** each tool run standalone (`--version`, a trivial compile/build) before scaffolding the repo.
+**Verification method:** each tool was run standalone (`--version`, a trivial compile/build) before the repo was even scaffolded.
 
-</details>
+---
 
-<details>
-<summary><b>✅ Phase 2 — Basic Application</b></summary>
-<br>
-
+### ✅ Phase 2 — Basic Application
+**Layer:** React + .NET
 **Goal:** prove the React ↔ .NET pipeline before any real system data enters it.
 
 - Vite + React + TypeScript frontend
 - ASP.NET Core Web API backend
 - CORS configured for local dev (`localhost:5173`)
-- **Verification:** a live weather-forecast fetch round-tripped frontend → backend → frontend (later fully removed once Phase 3 replaced it with real system data)
 
-</details>
+**Verification:** a live weather-forecast fetch round-tripped frontend → backend → frontend. It was later fully removed once Phase 3 replaced it with real system data.
 
-<details>
-<summary><b>✅ Phase 3 — System Monitoring</b></summary>
-<br>
+---
 
+### ✅ Phase 3 — System Monitoring
+**Layer:** C# / Linux kernel
 **Goal:** read real system metrics with zero wrapper libraries — no `psutil`, no shelling out to `top`.
 
 | Metric | Source |
@@ -134,25 +140,24 @@ The system grew one verified layer at a time — from a two-tier React/.NET app 
 | Network | `/proc/net/dev` |
 | Processes | `/proc/[pid]/status` |
 
-> 🐛 **Bug found & fixed:** an `Infinity`/JSON serialization crash on certain disk mounts (virtual filesystems reporting nonsensical sizes) — resolved with a `TotalSize > 0` filter and a `DriveFormat` exclusion list.
+**🐛 Bug found & fixed:** an `Infinity`/JSON serialization crash on certain disk mounts — virtual filesystems were reporting nonsensical sizes. Resolved with a `TotalSize > 0` filter and a `DriveFormat` exclusion list.
 
-</details>
+---
 
-<details>
-<summary><b>✅ Phase 4 — Native C++ Engine</b></summary>
-<br>
-
+### ✅ Phase 4 — Native C++ Engine
+**Layer:** C++ / P/Invoke
 **Goal:** establish a real managed-to-native bridge, not just a proof-of-concept stub.
 
 - CMake-built shared library (`libsystemmonitor_native.so`)
 - P/Invoke bridge from C# into C++
-- **Verification:** a real hardware read (CPU model string, core count) round-tripped through the bridge, plus a direct C# vs C++ CPU-usage comparison — **87.2% vs 69.2%**, difference attributed to sampling-timing differences between the two measurement points, not a bridge bug.
 
-</details>
+**Verification:** a real hardware read (CPU model string, core count) round-tripped through the bridge, plus a direct C# vs C++ CPU-usage comparison — **87.2% vs 69.2%**, with the difference attributed to sampling-timing differences between the two measurement points, not a bridge bug.
 
-<details>
-<summary><b>✅ Phase 5 — Hardware Monitoring</b></summary>
-<br>
+---
+
+### ✅ Phase 5 — Hardware Monitoring
+**Layer:** C++ / sysfs
+**Goal:** read real hardware sensors, and be honest when a sensor isn't there.
 
 *NVIDIA path implemented and tested · AMD path written but unverified on real hardware*
 
@@ -164,20 +169,18 @@ The system grew one verified layer at a time — from a two-tier React/.NET app 
 | Fan RPM | hwmon scan | Correctly reports unavailable — no fan sensor exposed on this laptop |
 | Storage health | Basic tier only | Full SMART via `smartctl` deferred — needs root |
 
-**Design principle established here and carried through the rest of the project:** missing sensors report `"unavailable"` honestly rather than returning fabricated data or crashing.
+**Design principle established here, carried through the rest of the project:** missing sensors report `"unavailable"` honestly rather than returning fabricated data or crashing.
 
-</details>
+---
 
-<details>
-<summary><b>✅ Phase 6 — Assembly</b></summary>
-<br>
-
+### ✅ Phase 6 — Assembly
+**Layer:** NASM x86-64
 **Goal:** hand-write real, measurable low-level performance code — not a toy example.
 
 - NASM toolchain integrated via CMake's `ASM_NASM` language support
 - Trivial constant-return function proved the toolchain end-to-end first
 - Real CPU benchmark: a tight arithmetic loop, timed via `std::chrono` — **~240–300M ops/sec** on this Celeron 1017U
-- SIMD (SSE2) implementation of the identical workload, compared directly against scalar:
+- SIMD (SSE2) implementation of the identical workload, compared directly against scalar
 
 | Implementation | Result |
 |---|---|
@@ -187,26 +190,22 @@ The system grew one verified layer at a time — from a two-tier React/.NET app 
 
 A clean result within ~1.5% of the theoretical ceiling.
 
-</details>
+---
 
-<details>
-<summary><b>✅ Cross-Platform Refactor</b></summary>
-<br>
-
+### ✅ Cross-Platform Refactor
+**Layer:** C# + C++
 **Goal:** decouple platform-specific system reads from the rest of the application.
 
-**C# layer:** `ISystemInfoProvider` interface with independent `LinuxSystemInfoProvider` and `WindowsSystemInfoProvider` implementations, auto-selected at startup via `OperatingSystem.IsWindows()/IsLinux()`. `Program.cs` shrank from ~330 lines to ~40 as a result.
+**C# layer:** an `ISystemInfoProvider` interface with independent `LinuxSystemInfoProvider` and `WindowsSystemInfoProvider` implementations, auto-selected at startup via `OperatingSystem.IsWindows()` / `OperatingSystem.IsLinux()`. `Program.cs` shrank from ~330 lines to ~40 as a result.
 
-**C++ layer:** shared header (`native_engine.h`) + `common.cpp` (platform-independent logic) + `linux_provider.cpp` + `windows_provider.cpp`, with `CMakeLists.txt` picking the correct file via `if(WIN32)`.
+**C++ layer:** a shared header (`native_engine.h`) plus `common.cpp` (platform-independent logic), `linux_provider.cpp`, and `windows_provider.cpp`, with `CMakeLists.txt` picking the correct file via `if(WIN32)`.
 
-Windows compiles cleanly on this toolchain; real-hardware verification is pending, since no Windows machine has been available to test on.
+Windows compiles cleanly on this toolchain; real-hardware verification is still pending, since no Windows machine has been available to test on.
 
-</details>
+---
 
-<details>
-<summary><b>✅ Optimization Pass</b></summary>
-<br>
-
+### ✅ Optimization Pass
+**Layer:** C#
 **Goal:** remove latency that had already caused real debugging pain, before adding new features on top.
 
 | Change | Before | After | Improvement |
@@ -217,12 +216,10 @@ Windows compiles cleanly on this toolchain; real-hardware verification is pendin
 | Frontend polling | 5 requests / 2s cycle | **1 request** (`/api/system/all`) | 80% fewer requests |
 | Process list (`Task.WhenAll`) | 947ms | **661ms** | ~30% faster |
 
-</details>
+---
 
-<details>
-<summary><b>✅ Phase 7 — Python Analytics</b></summary>
-<br>
-
+### ✅ Phase 7 — Python Analytics
+**Layer:** Python / FastAPI
 **Goal:** turn raw metric samples into actual insight — trend direction and bottleneck detection, not just live numbers.
 
 Five staged, individually-verified steps:
@@ -235,15 +232,15 @@ Five staged, individually-verified steps:
 | 4 | `bottleneck_detection.py` | Sustained-load episodes vs isolated spikes, classified `cpu_bound` / `combined_load` |
 | 5 | `analytics_service.py` + `AnalyticsEndpoints.cs` | FastAPI service, proxied from .NET with graceful 503 degradation |
 
-> 🐛 **Investigation, not a bug:** the first several CPU samples after startup consistently read 100%. Investigation traced this to genuine system load from .NET's own JIT compilation and Kestrel startup — the measurement code itself was correct. Fixed with a 3-second warm-up delay before sampling begins, rather than papering over it downstream.
+**🔍 Investigation, not a bug:** the first several CPU samples after startup consistently read 100%. Traced to genuine system load from .NET's own JIT compilation and Kestrel startup — the measurement code itself was correct. Fixed with a 3-second warm-up delay before sampling begins, rather than papering over it downstream.
 
-</details>
+---
 
-<details>
-<summary><b>✅ Phase 8 — Database <i>(MongoDB Atlas, not PostgreSQL)</i></b></summary>
-<br>
+### ✅ Phase 8 — Database
+**Layer:** MongoDB Atlas *(not PostgreSQL)*
+**Goal:** move from an unbounded flat file to a persistent, queryable store.
 
-> 🔄 **Decision:** switched from the originally-planned PostgreSQL to MongoDB Atlas mid-phase. An Atlas cluster was already available from an earlier project, and the existing JSONL snapshot shape maps onto Mongo documents with no relational schema design required. Trade-off knowingly accepted: gave up the relational/SQL learning value the original roadmap called out, in exchange for meaningfully less setup friction.
+**🔄 Decision:** switched from the originally-planned PostgreSQL to MongoDB Atlas mid-phase. An Atlas cluster was already available from an earlier project, and the existing JSONL snapshot shape maps onto Mongo documents with no relational schema design required. Trade-off knowingly accepted: gave up the relational/SQL learning value the original roadmap called out, in exchange for meaningfully less setup friction.
 
 **Verification stages:**
 
@@ -255,16 +252,14 @@ Five staged, individually-verified steps:
 | 4 | `analytics_service.py` → Mongo queries, `file` param removed from all endpoints |
 | 5 | All three endpoints re-verified against **727+ real documents** |
 
-> 🐛 **Bug found & fixed:** a leftover manual test document stored `timestamp` as an ISO string, while every real document (written via C#'s `DateTime.UtcNow`) stores a native Mongo datetime. The mixed types crashed the query loader (`AttributeError: 'str' object has no attribute 'tzinfo'`). Fixed by making the loader defensively handle both types, and deleting the stray test document. Same category of lesson as Phase 4's `nm -D` symbol-inspection bug: verify data-shape assumptions before trusting downstream code built on them.
+**🐛 Bug found & fixed:** a leftover manual test document stored `timestamp` as an ISO string, while every real document (written via C#'s `DateTime.UtcNow`) stores a native Mongo datetime. The mixed types crashed the query loader (`AttributeError: 'str' object has no attribute 'tzinfo'`). Fixed by making the loader defensively handle both types, and deleting the stray test document. Same category of lesson as Phase 4's `nm -D` symbol-inspection bug: verify data-shape assumptions before trusting downstream code built on them.
 
-✅ **Resolves both Phase 7 deferred items:** no unbounded flat file, no full-file re-parse on every request — replaced with an indexed, queryable store.
+**Resolves both Phase 7 deferred items:** no unbounded flat file, no full-file re-parse on every request — replaced with an indexed, queryable store.
 
-</details>
+---
 
-<details>
-<summary><b>⬜ Phase 9 — Advanced Dashboard UI <i>(planned)</i></b></summary>
-<br>
-
+### ⬜ Phase 9 — Advanced Dashboard UI *(planned)*
+**Layer:** React
 **Goal:** surface Phase 7/8 analytics visually in the actual product, not just via `curl`.
 
 - [ ] Dedicated analytics panel in the React dashboard
@@ -273,16 +268,14 @@ Five staged, individually-verified steps:
 - [ ] Graceful "analytics unavailable" UI state on a 503 — not a broken panel
 - [ ] Full data visibility: every field the API already returns should be reachable in the UI, not a partial summary
 
-</details>
+---
 
-<details>
-<summary><b>⬜ Phase 10 — Maintenance & Extensibility <i>(planned)</i></b></summary>
-<br>
-
+### ⬜ Phase 10 — Maintenance & Extensibility *(planned)*
+**Layer:** Cross-cutting
 **Goal:** harden what already exists, rather than add new features.
 
 - [x] **Setup wizard** (`setup.sh`) — checks all prerequisites, offers to install anything missing via apt, builds the native engine, installs frontend/analytics dependencies, and walks through setting `MONGO_URI` interactively. Safe to re-run any time.
-- [x] **One-command launcher** (`start-all.sh`) — starts backend, analytics service, and frontend together, logging to `./logs/` instead of requiring 3+ manual terminals. Waits for each service to actually respond (polls the real "listening" state, not a fixed delay) before starting the next, and fails loudly with the relevant log's last 20 lines if a service doesn't come up in time — verified end-to-end, including a real timing bug caught and fixed (an earlier fixed-delay version raced ahead of the .NET build and failed the first live test).
+- [x] **One-command launcher** (`start-all.sh`) — starts backend, analytics service, and frontend together, logging to `./logs/` instead of requiring 3+ manual terminals. Waits for each service to actually respond (polls the real "listening" state, not a fixed delay) before starting the next, and fails loudly with the relevant log's last 20 lines if a service doesn't come up in time. Verified end-to-end, including a real timing bug caught and fixed — an earlier fixed-delay version raced ahead of the .NET build and failed the first live test.
 - [ ] **Real installer** (`.exe` / `.dmg`, double-clickable icon) — packaging so a non-technical user can install and run this without a terminal at all. A genuinely separate, larger effort from the launcher script above (Electron, Inno Setup, or similar).
 - [ ] **MongoDB retention policy** — no TTL/expiry yet; collection will grow unbounded over time
 - [ ] **Windows verification** — compiles, never executed end-to-end (blocked on hardware access)
@@ -291,11 +284,9 @@ Five staged, individually-verified steps:
 - [ ] **Automated tests** — everything verified manually so far; worth a real suite once the feature set stabilizes
 - [ ] **Deployment hardening** — CORS currently hardcoded to `localhost:5173`, secrets via ad-hoc environment variables rather than a secrets manager, no CI/CD pipeline
 
-</details>
+---
 
-<br>
-
-## 📊 Performance Metrics
+## Performance Metrics
 
 | Metric | Value |
 |---|---|
@@ -308,16 +299,14 @@ Five staged, individually-verified steps:
 | Languages in the pipeline | 6 (TS, C#, C++, ASM, Python, JS/HTML via frontend) |
 | Analytics documents verified against | 727+ real MongoDB snapshots |
 
-<br>
+---
 
-## 🧭 What Should Not Change
+## What Should Not Change
 
 - The staged, **"prove it before adding the next layer"** discipline — carried through every phase without exception
 - The **graceful-degradation pattern** — hardware reads, the analytics proxy, and database connection failures all report `"unavailable"`/`"degraded"` honestly instead of crashing or faking data
 - `native/build.sh` as the only way to rebuild the native library
 - Git commit timing remains the user's call
-
-<br>
 
 ---
 
