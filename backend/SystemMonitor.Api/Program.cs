@@ -54,5 +54,6 @@ app.UseCors("AllowFrontend");
 app.MapSystemEndpoints();
 app.MapNativeEndpoints();
 app.MapAnalyticsEndpoints();
+app.MapSpeedTestEndpoints();
 
 app.Run();

@@ -6,6 +6,12 @@
 # starting the next, and fails loudly with a clear error (not a silent
 # hang or a false "success") if a service doesn't come up within its
 # timeout.
+#
+# Port conflicts are checked BEFORE anything starts, and the frontend is
+# pinned to its expected port with --strictPort so Vite fails loudly on
+# a conflict instead of silently moving to the next free port — a silent
+# port bump is exactly the kind of "false success" this script otherwise
+# guards against everywhere else.
 
 set -e
 
@@ -15,6 +21,7 @@ mkdir -p "$LOG_DIR"
 
 BACKEND_PORT=""
 ANALYTICS_PORT=8001
+FRONTEND_PORT=5173
 PIDS=()
 
 cleanup() {
@@ -41,6 +48,22 @@ fail_with_log() {
     cleanup
 }
 
+# Returns 0 (true) if something is already listening on the given port.
+port_in_use() {
+    lsof -i ":$1" -sTCP:LISTEN -t &>/dev/null
+}
+
+# Human-readable "PID 1234 (node ...)" description of whatever holds a port.
+port_owner() {
+    local pid
+    pid=$(lsof -i ":$1" -sTCP:LISTEN -t 2>/dev/null | head -n1)
+    if [ -n "$pid" ]; then
+        echo "PID $pid ($(ps -p "$pid" -o cmd= 2>/dev/null))"
+    else
+        echo "unknown process"
+    fi
+}
+
 echo "=================================================="
 echo " System Info — starting all services"
 echo "=================================================="
@@ -53,7 +76,25 @@ if [ -z "$MONGO_URI" ]; then
 fi
 echo "[OK] MONGO_URI is set."
 
-# --- 2. Start backend, wait for it to actually be listening ---
+# --- 2. Preflight: fail fast on port conflicts, before starting anything ---
+# (Backend port is skipped here — ASP.NET picks it dynamically and is
+# detected from its own log below, so there's nothing fixed to check.)
+echo "Checking required ports are free..."
+PORT_CONFLICT=false
+for port in "$FRONTEND_PORT" "$ANALYTICS_PORT"; do
+    if port_in_use "$port"; then
+        echo "[ERROR] Port $port is already in use by $(port_owner "$port")."
+        PORT_CONFLICT=true
+    fi
+done
+if [ "$PORT_CONFLICT" = true ]; then
+    echo ""
+    echo "Free the port(s) above (kill <PID>) and re-run ./start-all.sh."
+    exit 1
+fi
+echo "[OK] Ports $FRONTEND_PORT and $ANALYTICS_PORT are free."
+
+# --- 3. Start backend, wait for it to actually be listening ---
 echo "[1/3] Starting backend (.NET)..."
 (
     cd "$PROJECT_ROOT/backend/SystemMonitor.Api"
@@ -89,7 +130,7 @@ if ! curl -s -f "http://localhost:$BACKEND_PORT/api/system/all" > /dev/null 2>&1
 fi
 echo "[OK] Backend is up on port $BACKEND_PORT."
 
-# --- 3. Start analytics service, wait for /health ---
+# --- 4. Start analytics service, wait for /health ---
 echo "[2/3] Starting analytics service (Python)..."
 (
     cd "$PROJECT_ROOT/analytics"
@@ -118,11 +159,15 @@ if [ "$ANALYTICS_READY" != true ]; then
 fi
 echo "[OK] Analytics service is up on port $ANALYTICS_PORT."
 
-# --- 4. Start frontend ---
+# --- 5. Start frontend, pinned to FRONTEND_PORT ---
+# --strictPort makes Vite exit with a clear error instead of silently
+# moving to another port when $FRONTEND_PORT is taken — the preflight
+# check above should already prevent this, but this is the second line
+# of defense against a "success" message pointing at the wrong URL.
 echo "[3/3] Starting frontend (React)..."
 (
     cd "$PROJECT_ROOT/frontend"
-    npm run dev > "$LOG_DIR/frontend.log" 2>&1
+    npm run dev -- --port "$FRONTEND_PORT" --strictPort > "$LOG_DIR/frontend.log" 2>&1
 ) &
 PIDS+=($!)
 
@@ -145,13 +190,21 @@ done
 if [ "$FRONTEND_READY" != true ]; then
     fail_with_log "Frontend (timed out after ${FRONTEND_TIMEOUT}s)" "$LOG_DIR/frontend.log"
 fi
-echo "[OK] Frontend is up."
+
+# Belt-and-suspenders: confirm the port Vite actually reports matches
+# what we asked for. With --strictPort these should always agree, but
+# this keeps the final summary honest even if that ever changes.
+ACTUAL_FRONTEND_PORT=$(grep -m1 "Local:" "$LOG_DIR/frontend.log" | grep -oP 'localhost:\K[0-9]+' || true)
+if [ -n "$ACTUAL_FRONTEND_PORT" ]; then
+    FRONTEND_PORT="$ACTUAL_FRONTEND_PORT"
+fi
+echo "[OK] Frontend is up on port $FRONTEND_PORT."
 
 echo ""
 echo "=================================================="
 echo " Everything is running and verified."
 echo ""
-echo " Frontend:   http://localhost:5173"
+echo " Frontend:   http://localhost:$FRONTEND_PORT"
 echo " Backend:    http://localhost:$BACKEND_PORT"
 echo " Analytics:  http://localhost:$ANALYTICS_PORT"
 echo ""

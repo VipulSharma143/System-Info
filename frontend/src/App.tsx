@@ -1,164 +1,205 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-interface RamInfo {
-  totalMB: number;
-  usedMB: number;
-  availableMB: number;
-  usedPercent: number;
-}
+import { useSystemMetrics } from './hooks/useSystemMetrics';
+import { useTheme } from './hooks/useTheme';
+import { useProcessHistory } from './hooks/useProcessHistory';
 
-interface CpuInfo {
-  usedPercent: number;
-}
+import Sidebar from './components/Sidebar';
+import MetricHero from './components/MetricHero';
+import DiskTable from './components/DiskTable';
+import NetworkTable from './components/NetworkTable';
+import ProcessTable from './components/ProcessTable';
+import AnalyticsPanel from './components/AnalyticsPanel';
+import SpeedTestCard from './components/SpeedTestCard';
 
-interface ProcessInfo {
-  pid: number;
-  name: string;
-  memoryMB: number;
-}
+import './dashboard.css';
 
-interface DiskInfo {
-  name: string;
-  volumeLabel: string;
-  driveType: string;
-  totalGB: number;
-  freeGB: number;
-  usedGB: number;
-  usedPercent: number;
-}
+const SECTIONS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'analytics', label: 'Analytics' },
+  { id: 'processes', label: 'Processes' },
+] as const;
 
-interface NetworkInfo {
-  iface: string;
-  rxKBps: number;
-  txKBps: number;
-}
-
-const API_BASE = 'http://localhost:5132';
+type SectionId = (typeof SECTIONS)[number]['id'];
 
 function App() {
-  const [ram, setRam] = useState<RamInfo | null>(null);
-  const [cpu, setCpu] = useState<CpuInfo | null>(null);
-  const [processes, setProcesses] = useState<ProcessInfo[]>([]);
-  const [disks, setDisks] = useState<DiskInfo[]>([]);
-  const [network, setNetwork] = useState<NetworkInfo[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { data, error } = useSystemMetrics();
+  const { theme, toggle } = useTheme();
 
+  const { findNearest } = useProcessHistory(
+    data?.cpu.usedPercent,
+    data?.processes
+  );
+
+  const [activeSection, setActiveSection] =
+    useState<SectionId>('overview');
+
+  const isNavigating = useRef(false);
+
+  const sectionRefs = useRef<
+    Record<SectionId, HTMLElement | null>
+  >({
+    overview: null,
+    analytics: null,
+    processes: null,
+  });
+
+  /*
+   * Keep every section mounted.
+   *
+   * Navigation only changes scroll position. This prevents components
+   * and their hooks from being recreated when the user changes sections.
+   */
   useEffect(() => {
-    const fetchData = () => {
-      Promise.all([
-        fetch(`${API_BASE}/api/system/ram`).then((r) => r.json()),
-        fetch(`${API_BASE}/api/system/cpu`).then((r) => r.json()),
-        fetch(`${API_BASE}/api/system/processes`).then((r) => r.json()),
-        fetch(`${API_BASE}/api/system/disk`).then((r) => r.json()),
-        fetch(`${API_BASE}/api/system/network`).then((r) => r.json()),
-      ])
-        .then(([ramData, cpuData, processData, diskData, networkData]) => {
-          setRam(ramData);
-          setCpu(cpuData);
-          setProcesses(processData);
-          setDisks(diskData);
-          setNetwork(networkData);
-          setError(null);
-        })
-        .catch((err) => setError(err.message));
-    };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (isNavigating.current) {
+          return;
+        }
 
-    fetchData();
-    const interval = setInterval(fetchData, 2000);
-    return () => clearInterval(interval);
+        const visibleSections = entries.filter(
+          (entry) => entry.isIntersecting
+        );
+
+        if (visibleSections.length === 0) {
+          return;
+        }
+
+        const topMost = visibleSections.reduce((current, entry) =>
+          entry.boundingClientRect.top <
+          current.boundingClientRect.top
+            ? entry
+            : current
+        );
+
+        const sectionId = topMost.target.id as SectionId;
+
+        if (sectionId) {
+          setActiveSection(sectionId);
+        }
+      },
+      {
+        rootMargin: '-15% 0px -70% 0px',
+        threshold: 0,
+      }
+    );
+
+    Object.values(sectionRefs.current).forEach((section) => {
+      if (section) {
+        observer.observe(section);
+      }
+    });
+
+    return () => {
+      observer.disconnect();
+    };
   }, []);
 
+  /*
+   * Navigation data is derived from the current process count.
+   * Everything else is static.
+   */
+  const navItems = useMemo(
+    () =>
+      SECTIONS.map((section) =>
+        section.id === 'processes'
+          ? {
+              ...section,
+              count: data?.processes.length ?? 0,
+            }
+          : section
+      ),
+    [data?.processes.length]
+  );
+
+  const setSectionRef =
+    (id: SectionId) => (element: HTMLElement | null) => {
+      sectionRefs.current[id] = element;
+    };
+
+  const handleNavigate = (id: string) => {
+    if (!sectionRefs.current[id as SectionId]) {
+      return;
+    }
+
+    const sectionId = id as SectionId;
+
+    isNavigating.current = true;
+    setActiveSection(sectionId);
+
+    sectionRefs.current[sectionId]?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+
+    window.setTimeout(() => {
+      isNavigating.current = false;
+    }, 600);
+  };
+
+  const isLive = !error && data !== null;
+
   return (
-    <div style={{ padding: '2rem', fontFamily: 'sans-serif', maxWidth: '900px', margin: '0 auto' }}>
-      <h1>System Monitor</h1>
-      {error && <p style={{ color: 'red' }}>Error: {error}</p>}
+    <div className="app-layout">
+      <Sidebar
+        isLive={isLive}
+        theme={theme}
+        onToggleTheme={toggle}
+        items={navItems}
+        activeId={activeSection}
+        onNavigate={handleNavigate}
+      />
 
-      {cpu && <h2>CPU Usage: {cpu.usedPercent}%</h2>}
+      <main className="app-main">
+        {error && (
+          <div className="error-banner" role="alert">
+            Error: {error}
+          </div>
+        )}
 
-      {ram && (
-        <div style={{ marginBottom: '1.5rem' }}>
-          <h2>RAM Usage: {ram.usedPercent}%</h2>
-          <p>
-            {ram.usedMB} MB used / {ram.totalMB} MB total ({ram.availableMB} MB available)
-          </p>
-        </div>
-      )}
+        {/* Overview */}
+        <section
+          id="overview"
+          ref={setSectionRef('overview')}
+          className="view-section"
+        >
+          {data && (
+            <>
+              <MetricHero
+                cpu={data.cpu}
+                ram={data.ram}
+              />
 
-      {disks.length > 0 && (
-        <div style={{ marginBottom: '1.5rem' }}>
-          <h2>Disk Usage</h2>
-          <table border={1} cellPadding={6} style={{ borderCollapse: 'collapse', width: '100%' }}>
-            <thead>
-              <tr>
-                <th>Mount</th>
-                <th>Type</th>
-                <th>Used</th>
-                <th>Total</th>
-                <th>Used %</th>
-              </tr>
-            </thead>
-            <tbody>
-              {disks.map((d) => (
-                <tr key={d.name}>
-                  <td>{d.name}</td>
-                  <td>{d.driveType}</td>
-                  <td>{d.usedGB} GB</td>
-                  <td>{d.totalGB} GB</td>
-                  <td>{d.usedPercent}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              <div className="panel-row">
+                <DiskTable disks={data.disks} />
+                <NetworkTable network={data.network} />
+              </div>
 
-      {network.length > 0 && (
-        <div style={{ marginBottom: '1.5rem' }}>
-          <h2>Network Usage</h2>
-          <table border={1} cellPadding={6} style={{ borderCollapse: 'collapse', width: '100%' }}>
-            <thead>
-              <tr>
-                <th>Interface</th>
-                <th>Download (KB/s)</th>
-                <th>Upload (KB/s)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {network.map((n) => (
-                <tr key={n.iface}>
-                  <td>{n.iface}</td>
-                  <td>{n.rxKBps}</td>
-                  <td>{n.txKBps}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              <SpeedTestCard />
+            </>
+          )}
+        </section>
 
-      {processes.length > 0 && (
-        <div>
-          <h2>Top Processes (by memory)</h2>
-          <table border={1} cellPadding={6} style={{ borderCollapse: 'collapse', width: '100%' }}>
-            <thead>
-              <tr>
-                <th>PID</th>
-                <th>Name</th>
-                <th>Memory (MB)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {processes.map((p) => (
-                <tr key={p.pid}>
-                  <td>{p.pid}</td>
-                  <td>{p.name}</td>
-                  <td>{p.memoryMB}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+        {/* Analytics */}
+        <section
+          id="analytics"
+          ref={setSectionRef('analytics')}
+          className="view-section"
+        >
+          <AnalyticsPanel findNearest={findNearest} />
+        </section>
+
+        {/* Processes */}
+        <section
+          id="processes"
+          ref={setSectionRef('processes')}
+          className="view-section"
+        >
+          {data && (
+            <ProcessTable processes={data.processes} />
+          )}
+        </section>
+      </main>
     </div>
   );
 }

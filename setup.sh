@@ -5,8 +5,8 @@
 # Checks every prerequisite this project needs, offers to install
 # whatever's missing (Linux/apt-based systems), builds the native
 # engine, installs frontend/analytics dependencies, walks the user
-# through setting MONGO_URI, and finally offers to launch everything
-# via start-all.sh.
+# through setting MONGO_URI, checks the ports start-all.sh will need,
+# and finally offers to launch everything via start-all.sh.
 #
 # Designed to be safe to re-run: every step checks "is this already
 # done?" before doing it, so running this twice doesn't break anything.
@@ -55,15 +55,18 @@ check_cmd pip3     "python3-pip"
 check_cmd cmake    "cmake"
 check_cmd nasm     "nasm"
 check_cmd gcc      "build-essential"
+check_cmd g++      "build-essential"
 
 echo ""
 
 # --- 2. Offer to install missing packages ---
 if [ ${#MISSING[@]} -gt 0 ]; then
-    fail "Missing: ${MISSING[*]}"
+    # de-duplicate (gcc and g++ both map to build-essential)
+    UNIQUE_MISSING=($(printf "%s\n" "${MISSING[@]}" | sort -u))
+    fail "Missing: ${UNIQUE_MISSING[*]}"
     if ask_yes_no "Install missing packages now via apt?"; then
         sudo apt update
-        sudo apt install -y "${MISSING[@]}"
+        sudo apt install -y "${UNIQUE_MISSING[@]}"
         ok "Installed missing packages."
     else
         fail "Cannot continue without these. Install manually and re-run this script."
@@ -100,9 +103,13 @@ fi
 echo ""
 
 # --- 5. Analytics dependencies ---
-echo "Installing analytics dependencies..."
-pip3 install fastapi uvicorn pymongo --break-system-packages --quiet
-ok "Python analytics dependencies installed."
+echo "Checking analytics dependencies..."
+if python3 -c "import fastapi, uvicorn, pymongo" &> /dev/null; then
+    ok "fastapi, uvicorn, and pymongo already installed."
+else
+    pip3 install fastapi uvicorn pymongo --break-system-packages --quiet
+    ok "Python analytics dependencies installed."
+fi
 
 echo ""
 
@@ -124,13 +131,47 @@ else
 fi
 
 echo ""
+
+# --- 7. Port check ---
+# start-all.sh needs 5173 (frontend) and 8001 (analytics) free, and now
+# fails fast if they aren't. Catching that here, at setup time, is more
+# useful than only discovering it the moment you try to launch.
+echo "Checking ports start-all.sh will need..."
+port_in_use() {
+    lsof -i ":$1" -sTCP:LISTEN -t &>/dev/null
+}
+port_owner() {
+    local pid
+    pid=$(lsof -i ":$1" -sTCP:LISTEN -t 2>/dev/null | head -n1)
+    if [ -n "$pid" ]; then
+        echo "PID $pid ($(ps -p "$pid" -o cmd= 2>/dev/null))"
+    else
+        echo "unknown process"
+    fi
+}
+PORT_WARNING=false
+for port in 5173 8001; do
+    if port_in_use "$port"; then
+        warn "Port $port is currently in use by $(port_owner "$port")."
+        PORT_WARNING=true
+    fi
+done
+if [ "$PORT_WARNING" = true ]; then
+    echo "        start-all.sh will refuse to start until the port(s) above are freed."
+else
+    ok "Ports 5173 and 8001 are free."
+fi
+
+echo ""
 echo "=================================================="
 echo " Setup complete."
 echo "=================================================="
 echo ""
 
-# --- 7. Offer to launch everything ---
-if ask_yes_no "Start the application now (./start-all.sh)?"; then
+# --- 8. Offer to launch everything ---
+if [ "$PORT_WARNING" = true ]; then
+    echo "Resolve the port conflict above before launching."
+elif ask_yes_no "Start the application now (./start-all.sh)?"; then
     exec "$PROJECT_ROOT/start-all.sh"
 else
     echo "Run ./start-all.sh whenever you're ready."

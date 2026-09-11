@@ -1,0 +1,1233 @@
+/* ============================================================
+   Reset — neutralizes Vite's default template styles on
+   #root/body (centered flex layout, text-align:center).
+   ============================================================ */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+}
+body { display: block; place-items: unset; }
+#root { max-width: none; text-align: left; }
+* { box-sizing: border-box; }
+h1, h2, h3, h4 { margin: 0; font-weight: inherit; line-height: inherit; }
+button { font-family: inherit; }
+a { color: inherit; }
+
+/* ============================================================
+   Design tokens
+   ============================================================ */
+:root, :root[data-theme='dark'] {
+  --bg: #14171a;
+  --surface: #1b1f23;
+  --surface-raised: #21262b;
+  --border: #2a3036;
+  --border-strong: #394049;
+  --text-primary: #e8eaed;
+  --text-secondary: #9aa3ad;
+  --text-muted: #5e666f;
+  --accent-amber: #e8a33d;
+  --accent-teal: #5ec8c0;
+  --accent-green: #4caf6d;
+  --accent-amber-warn: #d99a3f;
+  --accent-red: #e0584a;
+}
+
+:root[data-theme='light'] {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-raised: #eef0f3;
+  --border: #dde1e6;
+  --border-strong: #c3c9d1;
+  --text-primary: #1b1f23;
+  --text-secondary: #55606b;
+  --text-muted: #88919b;
+  --accent-amber: #b6741f;
+  --accent-teal: #17817a;
+  --accent-green: #2f8f56;
+  --accent-amber-warn: #ad7a1f;
+  --accent-red: #c8422f;
+}
+
+:root {
+  --font-display: 'IBM Plex Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  --radius: 5px;
+  --gap: 1.25rem;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+/* ============================================================
+   Layout — persistent sidebar + single scrolling content pane.
+   Sections never unmount, so nav never triggers a refetch.
+   ============================================================ */
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 1rem;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+  padding: 0 0.5rem;
+}
+.sidebar__title { font-size: 0.9rem; font-weight: 600; }
+
+.sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+}
+
+.sidebar__nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.sidebar__nav-item:hover { color: var(--text-primary); background: var(--surface-raised); }
+.sidebar__nav-item.is-active { color: var(--text-primary); background: var(--surface-raised); }
+.sidebar__nav-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: -1rem;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent-amber);
+  border-radius: 0 2px 2px 0;
+}
+
+.sidebar__nav-count {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  background: var(--bg);
+  padding: 0.05rem 0.4rem;
+  border-radius: 10px;
+}
+
+.sidebar__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+.sidebar__status { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); }
+
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.status-dot--live { background: var(--accent-green); animation: pulse 2s infinite; }
+.status-dot--down { background: var(--accent-red); }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(76, 175, 109, 0.45); }
+  70% { box-shadow: 0 0 0 6px rgba(76, 175, 109, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(76, 175, 109, 0); }
+}
+
+.theme-toggle {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.theme-toggle:hover { color: var(--text-primary); border-color: var(--accent-teal); }
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  padding: 1.75rem 2rem 4rem;
+  scroll-behavior: smooth;
+}
+
+.view-section { scroll-margin-top: 1.5rem; margin-bottom: 2.5rem; }
+.view-section:last-child { margin-bottom: 0; min-height: 60vh; }
+
+.error-banner {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--accent-red);
+  background: rgba(224, 88, 74, 0.08);
+  border: 1px solid rgba(224, 88, 74, 0.35);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.9rem;
+  margin-bottom: var(--gap);
+}
+
+@media (max-width: 900px) {
+  .app-layout { flex-direction: column; }
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: relative;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .sidebar__brand { margin-bottom: 0; }
+  .sidebar__nav { flex-direction: row; }
+  .sidebar__footer { flex-direction: row; padding-top: 0; border-top: none; }
+}
+
+/* ---------- Hero readouts ---------- */
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.hero-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.hero-card--ok { border-left-color: var(--accent-green); }
+.hero-card--warn { border-left-color: var(--accent-amber-warn); }
+.hero-card--critical { border-left-color: var(--accent-red); }
+
+.hero-card__label { font-size: 0.72rem; color: var(--text-secondary); letter-spacing: 0.04em; }
+.hero-card__value { font-family: var(--font-mono); font-size: 2.4rem; font-weight: 600; line-height: 1.1; }
+.hero-card__unit { font-size: 1.1rem; color: var(--text-secondary); margin-left: 0.15rem; }
+.hero-card__detail { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); margin-top: 0.3rem; }
+
+/* ---------- Panels ---------- */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.3rem;
+  margin-bottom: var(--gap);
+}
+.panel__title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 0.8rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.panel__title--with-action { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.panel__scroll { max-height: 65vh; overflow-y: auto; }
+.panel__empty { color: var(--text-secondary); font-size: 0.85rem; margin: 0.5rem 0 0; }
+
+.panel-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+
+@media (max-width: 720px) {
+  .hero-grid, .panel-row { grid-template-columns: 1fr; }
+}
+
+/* ---------- Search input ---------- */
+.search-input {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  width: 200px;
+}
+.search-input:focus { outline: none; border-color: var(--accent-teal); }
+
+/* ---------- Data tables ---------- */
+.data-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.78rem; }
+.data-table th {
+  text-align: left;
+  color: var(--text-secondary);
+  font-weight: 500;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border-strong);
+}
+.data-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); color: var(--text-primary); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table--compact td, .data-table--compact th { padding: 0.3rem 0.5rem; }
+
+.data-table__row--clickable { cursor: pointer; }
+.data-table__row--clickable:hover td { background: var(--surface-raised); }
+.data-table__row--clickable.is-open td { background: var(--surface-raised); }
+.data-table__chevron { width: 1rem; color: var(--text-muted); font-size: 0.7rem; }
+.data-table__detail-row td { padding: 0; border-bottom: 1px solid var(--border); }
+
+/* ---------- Usage gauge ---------- */
+.usage-bar {
+  position: relative;
+  width: 100%;
+  min-width: 90px;
+  height: 16px;
+  background: var(--surface-raised);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.usage-bar__fill { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 3px; }
+.usage-bar__fill--ok { background: var(--accent-green); }
+.usage-bar__fill--warn { background: var(--accent-amber-warn); }
+.usage-bar__fill--critical { background: var(--accent-red); }
+.usage-bar__label {
+  position: relative;
+  z-index: 1;
+  display: block;
+  text-align: right;
+  font-size: 0.68rem;
+  line-height: 16px;
+  padding-right: 6px;
+  color: var(--text-primary);
+  mix-blend-mode: difference;
+}
+
+/* ---------- Analytics module ---------- */
+.panel--analytics { border-color: var(--border-strong); }
+.analytics-grid { display: grid; gap: var(--gap); }
+
+.analytics-block__title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  color: var(--accent-teal);
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.analytics-block__meta { font-family: var(--font-mono); font-weight: 400; font-size: 0.68rem; color: var(--text-muted); }
+.analytics-block__lead { font-family: var(--font-mono); font-size: 0.8rem; margin: 0 0 0.6rem; color: var(--text-secondary); }
+.analytics-block__empty { font-size: 0.8rem; color: var(--text-secondary); margin: 0; }
+.analytics-block + .analytics-block { padding-top: var(--gap); border-top: 1px solid var(--border); }
+
+/* ---------- Isolated spike chips ---------- */
+.spike-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+button.spike-chip {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+  transition: border-color 0.1s ease, color 0.1s ease;
+}
+button.spike-chip:hover { border-color: var(--accent-teal); }
+button.spike-chip:disabled { cursor: default; opacity: 0.5; }
+.spike-chip--critical { border-color: var(--accent-red); color: var(--accent-red); }
+.spike-chip--active { border-color: var(--accent-amber); color: var(--accent-amber); }
+
+/* ---------- Spike/episode detail — motion here answers a click ---------- */
+.spike-detail {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.8rem 1rem;
+  margin: 0.5rem 0;
+  animation: expand 0.15s ease;
+}
+@keyframes expand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.spike-detail--empty { color: var(--text-secondary); font-size: 0.78rem; }
+.spike-detail__note {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin: 0 0 0.6rem;
+  font-family: var(--font-mono);
+}
+
+/* ============================================================
+   SPEED TEST
+   ============================================================ */
+
+.speed-test-card {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+
+/* ============================================================
+   Header
+   ============================================================ */
+
+.speed-test-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+
+  padding: 1.1rem 1.3rem;
+
+  border-bottom: 1px solid var(--border);
+}
+
+.speed-test-eyebrow {
+  display: block;
+  margin-bottom: 0.2rem;
+
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.speed-test-header h2 {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.speed-test-header p {
+  margin: 0.25rem 0 0;
+
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+
+/* ============================================================
+   Button
+   ============================================================ */
+
+.speed-test-button {
+  flex-shrink: 0;
+
+  min-width: 132px;
+
+  padding: 0.5rem 0.8rem;
+
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+
+  background: var(--surface-raised);
+  color: var(--text-primary);
+
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+
+  cursor: pointer;
+
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.speed-test-button:hover:not(:disabled) {
+  color: var(--accent-teal);
+  border-color: var(--accent-teal);
+}
+
+.speed-test-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.speed-test-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+
+/* ============================================================
+   Running State
+   ============================================================ */
+
+.speed-test-status {
+  margin: 1rem 1.3rem 0;
+
+  padding: 0.8rem 0.9rem;
+
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+
+  background: var(--surface-raised);
+}
+
+.speed-test-status__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.speed-test-status__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.speed-test-status__title {
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.speed-test-status__description {
+  margin-top: 0.2rem;
+
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.speed-test-phase {
+  flex-shrink: 0;
+
+  padding: 0.2rem 0.45rem;
+
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+
+  color: var(--accent-teal);
+
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+}
+
+
+/* ============================================================
+   Spinner
+   ============================================================ */
+
+.speed-test-spinner {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+
+  border: 1.5px solid var(--border-strong);
+  border-top-color: var(--accent-teal);
+
+  border-radius: 50%;
+
+  animation: speed-test-spin 0.8s linear infinite;
+}
+
+@keyframes speed-test-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+/* ============================================================
+   Transfer Area
+   ============================================================ */
+
+.speed-test-transfer {
+  margin-top: 0.9rem;
+}
+
+.speed-test-transfer__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+
+  gap: 1rem;
+
+  margin-bottom: 0.45rem;
+}
+
+.speed-test-transfer__label {
+  color: var(--text-secondary);
+
+  font-family: var(--font-mono);
+  font-size: 0.67rem;
+  font-weight: 600;
+}
+
+.speed-test-transfer__percent {
+  color: var(--text-primary);
+
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+
+/* ============================================================
+   Live Progress
+   ============================================================ */
+
+.speed-test-progress {
+  position: relative;
+
+  width: 100%;
+  height: 7px;
+
+  overflow: hidden;
+
+  border: 1px solid var(--border);
+  border-radius: 999px;
+
+  background: var(--bg);
+}
+
+.speed-test-progress-fill {
+  position: relative;
+
+  width: 0;
+  height: 100%;
+
+  border-radius: inherit;
+
+  background: var(--accent-teal);
+
+  transition: width 0.12s linear;
+
+  overflow: hidden;
+}
+
+.speed-test-progress-fill::after {
+  content: '';
+
+  position: absolute;
+  inset: 0;
+
+  width: 40%;
+
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.28),
+    transparent
+  );
+
+  animation: speed-test-shimmer 1.1s linear infinite;
+}
+
+@keyframes speed-test-shimmer {
+  from {
+    transform: translateX(-140%);
+  }
+
+  to {
+    transform: translateX(300%);
+  }
+}
+
+
+/* ============================================================
+   Live Transfer Statistics
+   ============================================================ */
+
+.speed-test-transfer-stats {
+  display: grid;
+
+  grid-template-columns: repeat(3, 1fr);
+
+  gap: 0.65rem;
+
+  margin-top: 0.75rem;
+}
+
+.speed-test-transfer-stat {
+  min-width: 0;
+}
+
+.speed-test-transfer-stat__label {
+  display: block;
+
+  margin-bottom: 0.15rem;
+
+  color: var(--text-muted);
+  font-size: 0.62rem;
+}
+
+.speed-test-transfer-stat__value {
+  display: block;
+
+  color: var(--text-primary);
+
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+
+  line-height: 1.35;
+}
+
+.speed-test-transfer-stat__detail {
+  display: block;
+
+  margin-top: 0.08rem;
+
+  color: var(--text-muted);
+  font-size: 0.61rem;
+}
+
+
+/* ============================================================
+   Large Live Speed
+   ============================================================ */
+
+.speed-test-live-speed {
+  display: flex;
+  align-items: baseline;
+
+  gap: 0.45rem;
+
+  margin-top: 0.8rem;
+  padding-top: 0.75rem;
+
+  border-top: 1px solid var(--border);
+}
+
+.speed-test-live-speed__value {
+  color: var(--accent-teal);
+
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.speed-test-live-speed__unit {
+  color: var(--text-secondary);
+  font-size: 0.67rem;
+}
+
+
+/* ============================================================
+   Ping While Running
+   ============================================================ */
+
+.speed-test-ping {
+  display: flex;
+  align-items: center;
+
+  gap: 0.6rem;
+
+  margin-top: 0.85rem;
+  padding: 0.7rem 0.8rem;
+
+  border: 1px solid var(--border);
+  border-radius: 4px;
+
+  background: var(--bg);
+
+  color: var(--text-secondary);
+
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+}
+
+.speed-test-ping::before {
+  content: '';
+
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+
+  border-radius: 50%;
+
+  background: var(--accent-teal);
+
+  box-shadow:
+    0 0 0 3px
+    rgba(94, 200, 192, 0.08);
+
+  animation: speed-test-ping-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes speed-test-ping-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+
+/* ============================================================
+   Error
+   ============================================================ */
+
+.speed-test-error {
+  margin: 1rem 1.3rem 0;
+
+  padding: 0.7rem 0.8rem;
+
+  border:
+    1px solid
+    rgba(224, 88, 74, 0.35);
+
+  border-radius: var(--radius);
+
+  background:
+    rgba(224, 88, 74, 0.07);
+
+  color: var(--accent-red);
+
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+
+  line-height: 1.5;
+}
+
+
+/* ============================================================
+   Final Results
+   ============================================================ */
+
+.speed-test-results {
+  display: grid;
+
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr));
+
+  gap: 0.8rem;
+
+  padding:
+    1rem
+    1.3rem
+    1.3rem;
+}
+
+.speed-test-result {
+  position: relative;
+
+  min-width: 0;
+
+  padding: 1rem;
+
+  border:
+    1px solid
+    var(--border);
+
+  border-radius:
+    var(--radius);
+
+  background:
+    var(--surface-raised);
+
+  overflow: hidden;
+
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.speed-test-result:hover {
+  border-color: var(--border-strong);
+
+  transform:
+    translateY(-1px);
+}
+
+.speed-test-result::before {
+  content: '';
+
+  position: absolute;
+
+  top: 0;
+  left: 0;
+  right: 0;
+
+  height: 2px;
+}
+
+.speed-test-result:nth-child(1)::before {
+  background: var(--accent-teal);
+}
+
+.speed-test-result:nth-child(2)::before {
+  background: var(--accent-green);
+}
+
+.speed-test-result:nth-child(3)::before {
+  background: var(--accent-amber);
+}
+
+
+/* ============================================================
+   Result Heading
+   ============================================================ */
+
+.speed-test-result-label {
+  display: block;
+
+  margin-bottom: 0.75rem;
+
+  color: var(--text-secondary);
+
+  font-size: 0.68rem;
+  font-weight: 600;
+
+  letter-spacing: 0.06em;
+
+  text-transform: uppercase;
+}
+
+
+/* ============================================================
+   Main Mbps Result
+   ============================================================ */
+
+.speed-test-primary {
+  padding-bottom: 0.85rem;
+
+  border-bottom:
+    1px solid
+    var(--border);
+}
+
+.speed-test-primary__label {
+  display: block;
+
+  margin-bottom: 0.2rem;
+
+  color: var(--text-muted);
+
+  font-size: 0.62rem;
+  font-weight: 500;
+}
+
+.speed-test-primary__value {
+  display: flex;
+
+  align-items: baseline;
+
+  flex-wrap: wrap;
+
+  gap: 0.4rem;
+}
+
+.speed-test-primary__number {
+  color: var(--text-primary);
+
+  font-family: var(--font-mono);
+
+  font-size: 1.55rem;
+  font-weight: 600;
+
+  line-height: 1.15;
+}
+
+.speed-test-primary__unit {
+  color: var(--accent-teal);
+
+  font-size: 0.68rem;
+  font-weight: 600;
+
+  white-space: nowrap;
+}
+
+
+/* ============================================================
+   MB/s Result
+   ============================================================ */
+
+.speed-test-secondary-block {
+  margin-top: 0.8rem;
+
+  padding:
+    0.7rem
+    0.75rem;
+
+  border:
+    1px solid
+    var(--border);
+
+  border-radius: 4px;
+
+  background:
+    var(--bg);
+}
+
+.speed-test-secondary-block__label {
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 0.5rem;
+
+  margin-bottom: 0.25rem;
+
+  color: var(--text-muted);
+
+  font-size: 0.61rem;
+}
+
+.speed-test-secondary-block__label strong {
+  color: var(--text-secondary);
+
+  font-size: 0.61rem;
+  font-weight: 600;
+}
+
+.speed-test-secondary-block__value {
+  display: flex;
+
+  align-items: baseline;
+
+  flex-wrap: wrap;
+
+  gap: 0.35rem;
+}
+
+.speed-test-secondary-block__number {
+  color: var(--text-primary);
+
+  font-family: var(--font-mono);
+
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.speed-test-secondary-block__unit {
+  color: var(--accent-green);
+
+  font-size: 0.65rem;
+  font-weight: 600;
+
+  white-space: nowrap;
+}
+
+
+/* ============================================================
+   Result Meter
+   ============================================================ */
+
+.speed-test-meter {
+  width: 100%;
+
+  height: 4px;
+
+  margin-top: 0.8rem;
+
+  overflow: hidden;
+
+  border-radius: 999px;
+
+  background:
+    var(--bg);
+}
+
+.speed-test-meter-fill {
+  height: 100%;
+
+  width: 0;
+
+  border-radius: inherit;
+
+  background:
+    var(--accent-teal);
+
+  transition:
+    width 0.6s ease;
+}
+
+.speed-test-result:nth-child(2)
+.speed-test-meter-fill {
+  background:
+    var(--accent-green);
+}
+
+.speed-test-result:nth-child(3)
+.speed-test-meter-fill {
+  background:
+    var(--accent-amber);
+}
+
+
+/* ============================================================
+   Ping Result
+   ============================================================ */
+
+.speed-test-ping-result {
+  display: flex;
+
+  flex-direction: column;
+
+  justify-content: space-between;
+
+  min-height: 185px;
+}
+
+.speed-test-ping-value {
+  margin-top: auto;
+}
+
+.speed-test-ping-value__number {
+  color: var(--text-primary);
+
+  font-family: var(--font-mono);
+
+  font-size: 1.55rem;
+  font-weight: 600;
+}
+
+.speed-test-ping-value__unit {
+  display: block;
+
+  margin-top: 0.2rem;
+
+  color: var(--accent-amber);
+
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.speed-test-ping-description {
+  margin-top: 0.7rem;
+
+  color: var(--text-muted);
+
+  font-size: 0.62rem;
+}
+
+
+/* ============================================================
+   Empty State
+   ============================================================ */
+
+.speed-test-empty {
+  margin:
+    1rem
+    1.3rem
+    1.3rem;
+
+  padding: 1rem;
+
+  border:
+    1px dashed
+    var(--border-strong);
+
+  border-radius:
+    var(--radius);
+
+  background:
+    var(--surface-raised);
+
+  color:
+    var(--text-secondary);
+
+  font-family:
+    var(--font-mono);
+
+  font-size: 0.68rem;
+
+  text-align: center;
+}
+
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+
+@media (max-width: 720px) {
+
+  .speed-test-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .speed-test-button {
+    width: 100%;
+  }
+
+  .speed-test-results {
+    grid-template-columns: 1fr;
+  }
+
+  .speed-test-transfer-stats {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .speed-test-ping-result {
+    min-height: auto;
+  }
+}
+
+@media (max-width: 480px) {
+
+  .speed-test-header {
+    padding: 0.95rem;
+  }
+
+  .speed-test-status,
+  .speed-test-error {
+    margin-left: 0.95rem;
+    margin-right: 0.95rem;
+  }
+
+  .speed-test-results {
+    padding-left: 0.95rem;
+    padding-right: 0.95rem;
+  }
+
+  .speed-test-empty {
+    margin-left: 0.95rem;
+    margin-right: 0.95rem;
+  }
+
+  .speed-test-status__top {
+    align-items: flex-start;
+  }
+
+  .speed-test-primary__number {
+    font-size: 1.35rem;
+  }
+
+  .speed-test-primary__unit {
+    font-size: 0.63rem;
+  }
+
+  .speed-test-secondary-block__unit {
+    font-size: 0.6rem;
+  }
+}
