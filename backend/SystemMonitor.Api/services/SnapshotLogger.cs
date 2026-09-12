@@ -19,38 +19,40 @@ namespace SystemMonitor.Api.Services;
 
 public static class SnapshotLogger
 {
-    private static readonly IMongoCollection<BsonDocument>? Collection = InitCollection();
+private static readonly IMongoCollection<BsonDocument>? Collection = InitCollection();
 
-    private static IMongoCollection<BsonDocument>? InitCollection()
+private static IMongoCollection<BsonDocument>? InitCollection()
     {
-        var uri = Environment.GetEnvironmentVariable("MONGO_URI");
-        if (string.IsNullOrWhiteSpace(uri))
+var uri = Environment.GetEnvironmentVariable("MONGO_URI");
+if (string.IsNullOrWhiteSpace(uri))
         {
-            Console.Error.WriteLine("[SnapshotLogger] MONGO_URI not set — snapshot logging disabled.");
-            return null;
+Console.Error.WriteLine("[SnapshotLogger] MONGO_URI not set — snapshot logging disabled.");
+return null;
         }
 
-        try
+try
         {
-            var client = new MongoClient(uri);
-            var db = client.GetDatabase("SystemMonitorDB");
-            return db.GetCollection<BsonDocument>("snapshots");
+var client = new MongoClient(uri);
+var db = client.GetDatabase("SystemMonitorDB");
+return db.GetCollection<BsonDocument>("snapshots");
         }
-        catch (Exception ex)
+catch (Exception ex)
         {
-            Console.Error.WriteLine($"[SnapshotLogger] failed to connect to Mongo: {ex.Message}");
-            return null;
+Console.Error.WriteLine($"[SnapshotLogger] failed to connect to Mongo: {ex.Message}");
+return null;
         }
     }
 
-    public static void Append(CpuInfo? cpu, List<NetworkInfo>? network)
+    // battery is optional so any existing caller passing just (cpu, network)
+    // still compiles — but the background service now always supplies it.
+public static void Append(CpuInfo? cpu, List<NetworkInfo>? network, BatteryInfo? battery = null)
     {
-        if (Collection is null)
-            return;
+if (Collection is null)
+return;
 
-        try
+try
         {
-            var networkArray = new BsonArray(
+var networkArray = new BsonArray(
                 (network ?? new List<NetworkInfo>()).Select(n => new BsonDocument
                 {
                     { "iface", n.Iface },
@@ -59,18 +61,32 @@ public static class SnapshotLogger
                 })
             );
 
-            var doc = new BsonDocument
+var doc = new BsonDocument
             {
                 { "timestamp", DateTime.UtcNow },
                 { "cpuUsedPercent", cpu?.UsedPercent ?? 0 },
                 { "network", networkArray }
             };
 
-            Collection.InsertOne(doc);
+            // Only written when a battery is actually present — desktops (or
+            // Windows until that provider is implemented) simply omit the
+            // field rather than storing fabricated/null placeholder values.
+            if (battery is { Available: true })
+            {
+                doc["battery"] = new BsonDocument
+                {
+                    { "status", battery.Status ?? "unknown" },
+                    { "capacityPercent", battery.CapacityPercent ?? -1 },
+                    { "healthPercent", battery.HealthPercent ?? -1 },
+                    { "powerWatts", battery.PowerWatts ?? -1 }
+                };
+            }
+
+Collection.InsertOne(doc);
         }
-        catch (Exception ex)
+catch (Exception ex)
         {
-            Console.Error.WriteLine($"[SnapshotLogger] failed to write snapshot: {ex.Message}");
+Console.Error.WriteLine($"[SnapshotLogger] failed to write snapshot: {ex.Message}");
         }
     }
 }

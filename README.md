@@ -71,6 +71,9 @@ A background service logs CPU/network snapshots to MongoDB. A FastAPI service co
 ### 🗄️ Persistent Historical Storage
 MongoDB Atlas stores every snapshot, queried directly by the analytics service — no flat files, no unbounded growth, indexed time-range queries.
 
+### 🔋 Battery Health
+Real charge/discharge status, capacity-fade (design capacity vs current full-charge capacity), and cycle count read directly from `/sys/class/power_supply/BAT*`, dynamically discovered (not hardcoded to `BAT0`) the same way GPU vendor detection scans `/sys/class/drm`. Live on the Overview dashboard as charge and health cards, plus a dedicated Battery tab with full capacity/voltage/device detail. Same honest "unavailable" fallback as every other sensor on a desktop with no battery, or on Windows where the provider is currently a stub. Drain-trend analysis exists in `trend_analysis.py`, reusing the Phase 7 rolling-mean/slope functions — not yet reachable from the dashboard itself pending a Mongo port (tracked in Phase 11).
+
 ### 🛡️ Graceful Degradation Throughout
 Missing sensors, an unreachable analytics service, or a dropped database connection all report `"unavailable"`/`"degraded"` honestly rather than faking data or crashing.
 
@@ -240,8 +243,9 @@ system-info/
 | — | Optimization Pass | C# | ✅ Done |
 | 7 | Python Analytics (trend + bottleneck detection) | Python / FastAPI | ✅ Done |
 | 8 | Database (MongoDB Atlas) | MongoDB Atlas | ✅ Done |
-| 9 | Advanced Dashboard UI | React | ⬜ Planned |
-| 10 | Maintenance & Extensibility | Cross-cutting | ⬜ Planned |
+| 9 | Battery Health (charge/discharge, health %, cycle count) | C++ / sysfs / React | ✅ Done |
+| 10 | Advanced Dashboard UI | React | 🔶 In Progress — layout & UI being remade |
+| 11 | Maintenance & Extensibility | Cross-cutting | ⬜ Planned |
 
 > Full phase-by-phase engineering log, verification steps, bugs found & fixed, and performance metrics live in [`PROJECT_STATUS.md`](./PROJECT_STATUS.md).
 

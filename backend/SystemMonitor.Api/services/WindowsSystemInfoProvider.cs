@@ -140,4 +140,20 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
 
         return result;
     }
+
+    // Battery — deferred, same honesty convention as get_amd_gpu_usage_percent()
+    // and get_fan_rpm() on the Windows native side: report unavailable rather
+    // than guess. Real implementation would call the native get_battery_info_json()
+    // once its Windows body is written (GetSystemPowerStatus() or WMI Win32_Battery),
+    // or query WMI directly from here the same way GetRamAsync() already does.
+    public BatteryInfo GetBattery()
+    {
+        return new BatteryInfo(
+            Available: false, Status: null, CapacityPercent: null, CycleCount: null,
+            CycleCountNote: null, DesignCapacityMah: null, FullCapacityMah: null,
+            NowCapacityMah: null, HealthPercent: null, VoltageNow: null, PowerWatts: null,
+            Model: null, Manufacturer: null,
+            Note: "Battery reporting not yet implemented on Windows"
+        );
+    }
 }

@@ -11,6 +11,14 @@ Second milestone for Phase 7. Adds two things analyze_snapshots.py doesn't do:
 2. Linear trend (least-squares slope) — is CPU/network climbing, dropping,
    or flat over the analyzed window? Reported as "% change per minute".
 
+Phase 9 addition: battery drain trend, reusing the exact same rolling-mean/
+linear-trend functions already proven on CPU and network above — no new
+math needed. Two series tracked: charge percentage (is it draining faster
+than usual?) and power draw in watts (is something pulling more current
+than normal?). Battery is optional per-snapshot (desktops, or machines
+where GetBattery() reported Available: false, simply won't have the field)
+so it's skipped gracefully rather than crashing the whole analysis.
+
 No external dependencies (no numpy/pandas) — pure Python standard library,
 since analyze_snapshots.py proved the data pipeline without needing them.
 If you already have pandas installed and want to switch later, this can be
@@ -167,6 +175,77 @@ def main():
 
         slope = linear_trend_slope(timestamps, rx_values)
         print(f"  {iface}: {describe_trend(slope, 'KB/s')}")
+
+    # --- Battery trend (Phase 9) ---
+    # Optional per snapshot: skipped entirely if no snapshot in the window
+    # has a "battery" field at all (desktop, or GetBattery() reported
+    # Available: false at the time — SnapshotLogger only writes the field
+    # when Available is true, so its absence here is itself meaningful,
+    # not a bug).
+    battery_present_anywhere = any(rec.get("battery") for _, rec in snapshots)
+
+    if not battery_present_anywhere:
+        print("\nBattery trend: no battery data in this window "
+              "(desktop, or no battery detected during sampling)")
+    else:
+        capacity_values = [
+            (rec.get("battery") or {}).get("capacityPercent")
+            for _, rec in snapshots
+        ]
+        power_values = [
+            (rec.get("battery") or {}).get("powerWatts")
+            for _, rec in snapshots
+        ]
+
+        # -1 is the "unavailable" sentinel used on the C++/C# side
+        # (see get_battery_info_json / BatteryInfo) — treat it as missing,
+        # same as None, so it doesn't skew the slope.
+        capacity_values = [v if v is not None and v >= 0 else None for v in capacity_values]
+        power_values = [v if v is not None and v >= 0 else None for v in power_values]
+
+        print("\nBattery trend:")
+
+        capacity_slope = linear_trend_slope(timestamps, capacity_values)
+        print(f"  Charge level: {describe_trend(capacity_slope, '%')}")
+        if capacity_slope is not None and capacity_slope < 0:
+            # Slope is %/sec and negative while discharging — convert to a
+            # plain-language "time to empty at current rate" estimate.
+            latest_capacity = next((v for v in reversed(capacity_values) if v is not None), None)
+            if latest_capacity is not None:
+                seconds_to_empty = latest_capacity / (-capacity_slope)
+                hours_to_empty = seconds_to_empty / 3600
+                print(f"  Estimated time to empty at current drain rate: "
+                      f"{hours_to_empty:.1f} hours")
+
+        capacity_rolling = rolling_mean(capacity_values, args.window)
+        valid_capacity_rolling = [v for v in capacity_rolling if v is not None]
+        if valid_capacity_rolling:
+            print(f"  Rolling mean charge (window={args.window} samples): "
+                  f"starts at {valid_capacity_rolling[0]:.1f}%, "
+                  f"ends at {valid_capacity_rolling[-1]:.1f}%")
+
+        power_slope = linear_trend_slope(timestamps, power_values)
+        print(f"  Power draw: {describe_trend(power_slope, 'W')}")
+
+        valid_power = [v for v in power_values if v is not None]
+        if valid_power:
+            avg_power = sum(valid_power) / len(valid_power)
+            print(f"  Average power draw over window: {avg_power:.1f} W")
+
+        # Health % doesn't have a meaningful short-window "trend" — it's a
+        # slow, monthly-scale decline, not something that moves visibly
+        # across a 10-15 second sampling window. Report the latest known
+        # value instead of computing a misleading slope on noise.
+        latest_health = next(
+            (rec.get("battery", {}).get("healthPercent")
+             for _, rec in reversed(snapshots)
+             if rec.get("battery") and rec["battery"].get("healthPercent") is not None
+             and rec["battery"].get("healthPercent", -1) >= 0),
+            None
+        )
+        if latest_health is not None:
+            print(f"  Battery health (design vs current full-charge capacity): "
+                  f"{latest_health:.1f}%")
 
 
 if __name__ == "__main__":

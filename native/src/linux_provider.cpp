@@ -147,4 +147,108 @@ int get_fan_rpm() {
     return -1;
 }
 
+int get_battery_info_json(char* bufferOut, int bufferSize) {
+    const std::string psPath = "/sys/class/power_supply";
+    std::string batteryDir;
+
+    // Dynamic discovery — same lesson as get_gpu_vendor(): don't assume BAT0.
+    // This machine reports BAT1; another might report BAT0 or CMB1.
+    if (fs::exists(psPath)) {
+        for (const auto& entry : fs::directory_iterator(psPath)) {
+            std::ifstream typeFile(entry.path().string() + "/type");
+            if (!typeFile.is_open()) continue;
+            std::string type;
+            typeFile >> type;
+            if (type == "Battery") {
+                batteryDir = entry.path().string();
+                break; // first battery only — multi-battery laptops deferred
+            }
+        }
+    }
+
+    if (batteryDir.empty()) {
+        // Desktop, or no battery exposed at all — honest, not a crash.
+        std::strncpy(bufferOut, "{\"present\":false}", bufferSize - 1);
+        bufferOut[bufferSize - 1] = '\0';
+        return 0;
+    }
+
+    auto readStr = [&](const std::string& file) -> std::string {
+        std::ifstream f(batteryDir + "/" + file);
+        std::string val;
+        std::getline(f, val);
+        return val;
+    };
+    auto readLong = [&](const std::string& file) -> long long {
+        std::ifstream f(batteryDir + "/" + file);
+        long long val = -1;
+        f >> val;
+        return val;
+    };
+
+    std::string status = readStr("status");
+    if (status.empty()) status = "Unknown";
+
+    long long capacityPercent   = readLong("capacity");            // kernel-computed 0-100
+    long long cycleCount        = readLong("cycle_count");         // present but unreliable on some firmware
+    long long chargeFullDesign  = readLong("charge_full_design");  // µAh
+    long long chargeFull        = readLong("charge_full");         // µAh
+    long long chargeNow         = readLong("charge_now");          // µAh
+    long long voltageNowUv      = readLong("voltage_now");         // µV
+    long long currentNowUa      = readLong("current_now");         // µA
+
+    // Some hardware reports energy_* (µWh) instead of charge_* (µAh) — never both.
+    // Yours uses charge_*, but fall back for other machines this code runs on.
+    bool usingEnergyUnits = false;
+    if (chargeFullDesign <= 0 || chargeFull <= 0) {
+        long long energyFullDesign = readLong("energy_full_design");
+        long long energyFull       = readLong("energy_full");
+        long long energyNow        = readLong("energy_now");
+        if (energyFullDesign > 0 && energyFull > 0) {
+            chargeFullDesign = energyFullDesign;
+            chargeFull       = energyFull;
+            chargeNow        = energyNow;
+            usingEnergyUnits = true;
+        }
+    }
+
+    double designMah = chargeFullDesign > 0 ? chargeFullDesign / 1000.0 : -1.0;
+    double fullMah    = chargeFull > 0 ? chargeFull / 1000.0 : -1.0;
+    double nowMah     = chargeNow >= 0 ? chargeNow / 1000.0 : -1.0;
+
+    double healthPercent = (designMah > 0 && fullMah > 0)
+        ? (fullMah / designMah) * 100.0
+        : -1.0;
+
+    double voltageV = voltageNowUv > 0 ? voltageNowUv / 1000000.0 : -1.0;
+    double currentA  = currentNowUa >= 0 ? currentNowUa / 1000000.0 : -1.0;
+    double powerW    = (voltageV > 0 && currentA >= 0) ? voltageV * currentA : -1.0;
+
+    std::string model        = readStr("model_name");
+    std::string manufacturer = readStr("manufacturer");
+
+    std::ostringstream json;
+    json << "{"
+         << "\"present\":true,"
+         << "\"status\":\"" << status << "\","
+         << "\"capacityPercent\":" << capacityPercent << ","
+         << "\"cycleCount\":" << cycleCount << ","
+         << "\"designCapacityMah\":" << designMah << ","
+         << "\"fullCapacityMah\":" << fullMah << ","
+         << "\"nowCapacityMah\":" << nowMah << ","
+         << "\"healthPercent\":" << healthPercent << ","
+         << "\"voltageNow\":" << voltageV << ","
+         << "\"currentNow\":" << currentA << ","
+         << "\"powerWatts\":" << powerW << ","
+         << "\"usingEnergyUnits\":" << (usingEnergyUnits ? "true" : "false") << ","
+         << "\"model\":\"" << model << "\","
+         << "\"manufacturer\":\"" << manufacturer << "\""
+         << "}";
+
+    std::string result = json.str();
+    std::strncpy(bufferOut, result.c_str(), bufferSize - 1);
+    bufferOut[bufferSize - 1] = '\0';
+    return 1;
+}
+
 } // extern "C"

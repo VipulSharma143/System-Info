@@ -6,53 +6,58 @@ namespace SystemMonitor.Api.Services;
 // instead of sampling on every request.
 public class SystemMonitorBackgroundService : BackgroundService
 {
-    private readonly ISystemInfoProvider _provider;
+private readonly ISystemInfoProvider _provider;
 
-    public CpuInfo? LatestCpu { get; private set; }
-    public List<NetworkInfo>? LatestNetwork { get; private set; }
+public CpuInfo? LatestCpu { get; private set; }
+public List<NetworkInfo>? LatestNetwork { get; private set; }
 
-    private readonly object _lock = new();
+private readonly object _lock = new();
 
-    public SystemMonitorBackgroundService(ISystemInfoProvider provider)
+public SystemMonitorBackgroundService(ISystemInfoProvider provider)
     {
-        _provider = provider;
+_provider = provider;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Let .NET startup (JIT, Kestrel init) settle before sampling,
-        // so it isn't logged as system load.
-        await Task.Delay(3000, stoppingToken);
+// Let .NET startup (JIT, Kestrel init) settle before sampling,
+// so it isn't logged as system load.
+await Task.Delay(3000, stoppingToken);
 
-        while (!stoppingToken.IsCancellationRequested)
+while (!stoppingToken.IsCancellationRequested)
         {
-            try
+try
             {
-                var cpu = await _provider.GetCpuAsync();
-                var network = await _provider.GetNetworkAsync();
+var cpu = await _provider.GetCpuAsync();
+var network = await _provider.GetNetworkAsync();
 
-                lock (_lock)
+// Battery is a single-pass sync read (no delta sampling needed,
+// same reasoning as GetDisks()) — not cached separately, just
+// pulled fresh each loop so the Mongo snapshot includes it.
+var battery = _provider.GetBattery();
+
+lock (_lock)
                 {
-                    LatestCpu = cpu;
-                    LatestNetwork = network;
+LatestCpu = cpu;
+LatestNetwork = network;
                 }
 
-                SnapshotLogger.Append(cpu, network);
+SnapshotLogger.Append(cpu, network, battery);
             }
-            catch
+catch
             {
-                // Don't let a transient read failure kill the loop.
+// Don't let a transient read failure kill the loop.
             }
         }
     }
 
-    public CpuInfo? GetCachedCpu()
+public CpuInfo? GetCachedCpu()
     {
-        lock (_lock) return LatestCpu;
+lock (_lock) return LatestCpu;
     }
 
-    public List<NetworkInfo>? GetCachedNetwork()
+public List<NetworkInfo>? GetCachedNetwork()
     {
-        lock (_lock) return LatestNetwork;
+lock (_lock) return LatestNetwork;
     }
 }

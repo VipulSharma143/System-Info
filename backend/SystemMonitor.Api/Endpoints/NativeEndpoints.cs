@@ -1,3 +1,4 @@
+using System.Text.Json;
 using SystemMonitor.Api.Native;
 
 namespace SystemMonitor.Api.Endpoints;
@@ -121,6 +122,54 @@ public static class NativeEndpoints
         })
         .WithName("RunCpuBenchmark");
 
+             // Battery — present/not-present conditional, same honesty pattern as
+        // GPU/fan: a desktop with no battery reports available=false, never
+        // fabricated numbers. Cycle count is reported as-is; some firmware
+        // (like this dev machine's) never increments it past 0, so it's
+        // surfaced with a note rather than trusted blindly.
+        app.MapGet("/api/native/battery", () =>
+        {
+            var buffer = new System.Text.StringBuilder(512);
+            NativeInterop.GetBatteryInfoJson(buffer, buffer.Capacity);
+
+            using var doc = JsonDocument.Parse(buffer.ToString());
+            var root = doc.RootElement;
+
+            bool present = root.GetProperty("present").GetBoolean();
+            if (!present)
+            {
+                return Results.Ok(new
+                {
+                    available = false,
+                    note = "No battery detected on this system"
+                });
+            }
+
+            double healthPercent = root.GetProperty("healthPercent").GetDouble();
+            long cycleCount = root.GetProperty("cycleCount").GetInt64();
+
+            return Results.Ok(new
+            {
+                available = true,
+                status = root.GetProperty("status").GetString(),
+                capacityPercent = root.GetProperty("capacityPercent").GetInt64(),
+                cycleCount,
+                cycleCountNote = cycleCount == 0
+                    ? "Firmware reports 0 — not all hardware tracks cycle count reliably"
+                    : (string?)null,
+                designCapacityMah = Math.Round(root.GetProperty("designCapacityMah").GetDouble(), 0),
+                fullCapacityMah = Math.Round(root.GetProperty("fullCapacityMah").GetDouble(), 0),
+                nowCapacityMah = Math.Round(root.GetProperty("nowCapacityMah").GetDouble(), 0),
+                healthPercent = healthPercent >= 0 ? Math.Round(healthPercent, 1) : (double?)null,
+                voltageNow = root.GetProperty("voltageNow").GetDouble(),
+                powerWatts = Math.Round(root.GetProperty("powerWatts").GetDouble(), 1),
+                model = root.GetProperty("model").GetString(),
+                manufacturer = root.GetProperty("manufacturer").GetString()
+            });
+        })
+        .WithName("GetBatteryInfo");
+
+
         app.MapGet("/api/native/simd-benchmark", () =>
         {
             long iterations = 200_000_000;
@@ -139,4 +188,7 @@ public static class NativeEndpoints
         })
         .WithName("RunSimdComparison");
     }
+
+    
+
 }

@@ -3,7 +3,7 @@
 # 📋 System Performance & Monitoring Platform
 ## Full Engineering Build Log
 
-**8 of 10 phases complete · 6 languages · 1 discipline: prove every layer before building the next one**
+**9 of 11 phases complete · 1 in progress · 6 languages · 1 discipline: prove every layer before building the next one**
 
 `Linux Mint 22.3` · `.NET 10` · `React + TypeScript` · `C++20` · `x86-64 Assembly` · `Python / FastAPI` · `MongoDB Atlas`
 
@@ -38,12 +38,13 @@ Last updated **2026-09-08**
 | — | Optimization Pass | C# | ✅ Done | Caching, consolidation, parallelization |
 | 7 | Python Analytics | Python / FastAPI | ✅ Done | Trend + bottleneck detection engine |
 | 8 | Database | MongoDB Atlas | ✅ Done | Persistent snapshot storage |
-| 9 | Dashboard UI | React | ⬜ Planned | Visual analytics surfaced in-app |
-| 10 | Maintenance & Extensibility | Cross-cutting | ⬜ Planned | Hardening pass |
+| 9 | Battery Health | C++ / sysfs / Python | ✅ Done | Charge/discharge status, health %, cycle count, live UI |
+| 10 | Dashboard UI | React | 🔶 In Progress | Visual analytics surfaced in-app — layout & UI being reworked |
+| 11 | Maintenance & Extensibility | Cross-cutting | ⬜ Planned | Hardening pass |
 
 ```
-✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ⬜ ─ ⬜
- 1    2    3    4    5    6    7    8    9   10
+✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ ✅ ─ 🔶 ─ ⬜
+ 1    2    3    4    5    6    7    8    9   10   11
 ```
 
 ---
@@ -258,19 +259,46 @@ Five staged, individually-verified steps:
 
 ---
 
-### ⬜ 📊 Phase 9 — Advanced Dashboard UI *(planned)*
+### ✅ 🔋 Phase 9 — Battery Health
+**Layer:** C++ / sysfs · C# · Python (partial) · React
+**Goal:** extend the hardware-monitoring discipline from Phase 5 to the battery — real charge/discharge behavior and long-term health, not just a live percentage.
+
+*Linux path implemented and verified end-to-end · Windows path deferred, same convention as the Cross-Platform Refactor's untested Windows branch*
+
+| Piece | Status |
+|---|---|
+| Native discovery | `/sys/class/power_supply/*/type` scanned dynamically for the entry reporting `Battery` — same lesson as Phase 5's GPU discovery: this machine reports `BAT1`, not the commonly-assumed `BAT0`, and the code doesn't hardcode either |
+| Unit handling | Detects `CHARGE_*` (µAh) vs `ENERGY_*` (µWh) sysfs fields at read time — this hardware reports `CHARGE_*`; a machine using the other convention is handled without a code change |
+| Native → C# bridge | `get_battery_info_json()` in `linux_provider.cpp`, one consolidated JSON string per read (not 6 separate P/Invoke crossings), parsed into a typed `BatteryInfo` record in `LinuxSystemInfoProvider.cs` |
+| Windows | `WindowsSystemInfoProvider.GetBattery()` stub returns `Available: false` with an explicit "not yet implemented" note — consistent with the AMD-usage/fan-RPM honesty convention already established on the Windows native side |
+| Endpoints | Standalone `GET /api/system/battery`, folded into the existing consolidated `GET /api/system/all` alongside ram/cpu/disks/network |
+| Persistence | `SnapshotLogger.Append` now takes an optional `BatteryInfo`; written into the Mongo snapshot document only when a battery is actually present — no fabricated field on desktops |
+| Analytics (partial) | `trend_analysis.py` extended with charge-level trend, rolling mean, power-draw trend, and a time-to-empty estimate while discharging — reuses the exact same `linear_trend_slope`/`rolling_mean` functions proven on CPU/network, no new math. **Known gap, not battery-specific:** this script still reads a `--file snapshots.jsonl` path that hasn't existed since Phase 8's move to Mongo — CPU/network trend have the same gap. Porting this logic into `analytics_service.py` against Mongo is deferred to a future cleanup pass, tracked in Phase 11 |
+| Frontend | Two Overview cards (Battery charge w/ inverted-severity coloring + sparkline, Battery health w/ cycle count) plus a dedicated **Battery** tab with capacity, device, and voltage detail panels |
+
+**🔍 Design decision, not a bug:** cycle count reads `0` on this hardware's firmware — rather than trusting it as a real lifetime count, the UI surfaces an explicit note ("not all hardware tracks cycle count reliably") instead of presenting a suspicious zero as fact. Same honesty principle as every other sensor in this project.
+
+**Verification:** confirmed live via `curl http://localhost:5132/api/system/all` returning a populated `battery` object, and visually in both the Overview cards and the new Battery tab against real hardware (52% charge, discharging, 13.9W draw, 77% health).
+
+---
+
+### 🔶 📊 Phase 10 — Advanced Dashboard UI *(in progress — layout & UI being remade)*
 **Layer:** React
-**Goal:** surface Phase 7/8 analytics visually in the actual product, not just via `curl`.
+**Goal:** surface Phase 7/8/9 analytics visually in the actual product, not just via `curl`.
+
+**Status update:** work has started on this phase, but the original layout/UI approach isn't being kept as-is — the dashboard is being remade with a reworked layout before the checklist below is fully checked off.
 
 - [ ] Dedicated analytics panel in the React dashboard
 - [ ] Live trend charts for CPU/network (from `/api/analytics/trend`)
 - [ ] Bottleneck episode timeline, visually distinguishing `cpu_bound` vs `combined_load`
 - [ ] Graceful "analytics unavailable" UI state on a 503 — not a broken panel
 - [ ] Full data visibility: every field the API already returns should be reachable in the UI, not a partial summary
+- [x] Battery health panel — Overview cards (charge, health) and a dedicated Battery detail tab, both live against real data
+- [ ] Overall layout/UI remake — current version is being reworked, not final
 
 ---
 
-### ⬜ 🛠️ Phase 10 — Maintenance & Extensibility *(planned)*
+### ⬜ 🛠️ Phase 11 — Maintenance & Extensibility *(planned)*
 **Layer:** Cross-cutting
 **Goal:** harden what already exists, rather than add new features.
 
@@ -278,8 +306,9 @@ Five staged, individually-verified steps:
 - [x] **One-command launcher** (`start-all.sh`) — starts backend, analytics service, and frontend together, logging to `./logs/` instead of requiring 3+ manual terminals. Waits for each service to actually respond (polls the real "listening" state, not a fixed delay) before starting the next, and fails loudly with the relevant log's last 20 lines if a service doesn't come up in time. Verified end-to-end, including a real timing bug caught and fixed — an earlier fixed-delay version raced ahead of the .NET build and failed the first live test.
 - [ ] **Real installer** (`.exe` / `.dmg`, double-clickable icon) — packaging so a non-technical user can install and run this without a terminal at all. A genuinely separate, larger effort from the launcher script above (Electron, Inno Setup, or similar).
 - [ ] **MongoDB retention policy** — no TTL/expiry yet; collection will grow unbounded over time
-- [ ] **Windows verification** — compiles, never executed end-to-end (blocked on hardware access)
+- [ ] **Windows verification** — compiles, never executed end-to-end (blocked on hardware access); includes the Windows battery provider, currently a stub
 - [ ] **AMD GPU verification** — blocked on hardware access
+- [ ] **`trend_analysis.py` → Mongo port** — script still reads a `--file snapshots.jsonl` path that hasn't existed since Phase 8; CPU, network, and now battery trend logic all need porting into `analytics_service.py`'s Mongo-backed queries to actually be reachable from the dashboard
 - [ ] **Full SMART storage health** — needs root, deferred
 - [ ] **Automated tests** — everything verified manually so far; worth a real suite once the feature set stabilizes
 - [ ] **Deployment hardening** — CORS currently hardcoded to `localhost:5173`, secrets via ad-hoc environment variables rather than a secrets manager, no CI/CD pipeline

@@ -1,4 +1,7 @@
+using System.Text;
+using System.Text.Json;
 using SystemMonitor.Api.Interface;
+using SystemMonitor.Api.Native;
 
 namespace SystemMonitor.Api.Services;
 
@@ -165,5 +168,51 @@ public async Task<List<ProcessInfo>> GetProcessesAsync()
         }).ToList();
 
         return interfaces;
+    }
+
+    // Battery — routed through the native C++ engine (matches CPU temp/GPU/fan,
+    // not the direct-C# pattern used for RAM/disk). No delta sampling needed;
+    // it's a single-pass sysfs read, same shape as GetDisks().
+    public BatteryInfo GetBattery()
+    {
+        var buffer = new StringBuilder(512);
+        NativeInterop.GetBatteryInfoJson(buffer, buffer.Capacity);
+
+        using var doc = JsonDocument.Parse(buffer.ToString());
+        var root = doc.RootElement;
+
+        bool present = root.GetProperty("present").GetBoolean();
+        if (!present)
+        {
+            return new BatteryInfo(
+                Available: false, Status: null, CapacityPercent: null, CycleCount: null,
+                CycleCountNote: null, DesignCapacityMah: null, FullCapacityMah: null,
+                NowCapacityMah: null, HealthPercent: null, VoltageNow: null, PowerWatts: null,
+                Model: null, Manufacturer: null,
+                Note: "No battery detected on this system"
+            );
+        }
+
+        long cycleCount = root.GetProperty("cycleCount").GetInt64();
+        double healthPercent = root.GetProperty("healthPercent").GetDouble();
+
+        return new BatteryInfo(
+            Available: true,
+            Status: root.GetProperty("status").GetString(),
+            CapacityPercent: (int)root.GetProperty("capacityPercent").GetInt64(),
+            CycleCount: cycleCount,
+            CycleCountNote: cycleCount == 0
+                ? "Firmware reports 0 — not all hardware tracks cycle count reliably"
+                : null,
+            DesignCapacityMah: Math.Round(root.GetProperty("designCapacityMah").GetDouble(), 0),
+            FullCapacityMah: Math.Round(root.GetProperty("fullCapacityMah").GetDouble(), 0),
+            NowCapacityMah: Math.Round(root.GetProperty("nowCapacityMah").GetDouble(), 0),
+            HealthPercent: healthPercent >= 0 ? Math.Round(healthPercent, 1) : null,
+            VoltageNow: root.GetProperty("voltageNow").GetDouble(),
+            PowerWatts: Math.Round(root.GetProperty("powerWatts").GetDouble(), 1),
+            Model: root.GetProperty("model").GetString(),
+            Manufacturer: root.GetProperty("manufacturer").GetString(),
+            Note: null
+        );
     }
 }

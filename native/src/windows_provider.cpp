@@ -114,5 +114,13 @@ double get_amd_gpu_usage_percent() {
 int get_fan_rpm() {
     return -1;
 }
+// Real implementation would use GetSystemPowerStatus() or WMI Win32_Battery.
+// Deferred — reporting honestly unavailable for now, same as fan RPM on Windows.
+int get_battery_info_json(char* bufferOut, int bufferSize) {
+    const char* fallback = "{\"present\":false}";
+    std::strncpy(bufferOut, fallback, bufferSize - 1);
+    bufferOut[bufferSize - 1] = '\0';
+    return 0;
+}
 
 } // extern "C"

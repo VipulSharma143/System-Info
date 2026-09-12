@@ -15,5 +15,5 @@ double get_cpu_temperature();
 int get_gpu_vendor();
 double get_amd_gpu_usage_percent();
 int get_fan_rpm();
-
+int get_battery_info_json(char* bufferOut, int bufferSize);
 }

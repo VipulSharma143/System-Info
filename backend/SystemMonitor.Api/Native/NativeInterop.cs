@@ -34,4 +34,9 @@ public static class NativeInterop
 
     [DllImport("systemmonitor_native", EntryPoint = "run_simd_comparison")]
     public static extern void RunSimdComparison(long iterations, out double scalarOpsPerSec, out double simdOpsPerSec);
+    
+        [DllImport("systemmonitor_native", EntryPoint = "get_battery_info_json")]
+public static extern int GetBatteryInfoJson(StringBuilder bufferOut, int bufferSize);
+
+
 }
