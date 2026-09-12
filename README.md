@@ -130,13 +130,34 @@ flowchart TB
 
 ### ⚡ Quick Start (recommended)
 
+**First time on a fresh machine** — install everything:
+
 ```bash
 ./setup.sh
 ```
 
 Checks every prerequisite, installs anything missing, builds the native engine, installs frontend/analytics dependencies, and walks you through setting `MONGO_URI` — then offers to launch everything immediately. Safe to re-run any time.
 
-Already set up? Just run:
+**Before every real run** (first time, or after pulling new changes) — validate the whole project builds cleanly, then launch:
+
+```bash
+./build.sh
+```
+
+An 8-stage, fail-fast pipeline — nothing starts until every stage passes:
+
+1. **Project structure** — confirms `backend/`, `frontend/`, `native/`, `analytics/`, and the key files inside each (`.csproj`, `Program.cs`, `package.json`, `vite.config.ts`, `analytics_service.py`, `native/build.sh`, `setup.sh`, `start-all.sh`) actually exist
+2. **Build commands** — checks `dotnet`, `node`, `npm`, `python3`, `cmake`, `gcc`, `g++`, `make` are all on `PATH` (unlike `setup.sh`, it does **not** install anything missing — it just fails immediately with a clear "not installed" error, so run `setup.sh` first on a truly fresh machine)
+3. **Environment** — logs installed versions of Node/npm/.NET/Python; warns (doesn't fail) if `MONGO_URI` isn't set, since that's needed at runtime, not at build time
+4. **Native C++ engine** — runs `native/build.sh`, then confirms `libsystemmonitor_native.so` actually landed in `backend/SystemMonitor.Api/`
+5. **.NET backend** — `dotnet restore` + `dotnet build --configuration Release`, then greps `Program.cs` to confirm both `MapSystemEndpoints` and `MapSpeedTestEndpoints` are registered
+6. **Frontend** — `npm install` if `node_modules` is missing, then a real production build (`npm run build`), confirms `frontend/dist` was generated, and checks a set of speed-test frontend files exist (`types/speedtest.ts`, `hooks/useSpeedTest.ts`, `components/SpeedTestCard.tsx`)
+7. **Python analytics** — `py_compile`s `analytics_service.py`, confirms `fastapi`/`uvicorn`/`pymongo` are importable (prints installed versions), and confirms the FastAPI `app` object itself imports without error
+8. **Final validation** — makes `setup.sh`/`start-all.sh` executable if they aren't, then runs `bash -n` syntax checks on `setup.sh`, `start-all.sh`, and `build.sh` itself
+
+Every step's full output goes to `logs/build.log` (overwritten each run) as well as the console, so a failure points you straight at the real error instead of a vague "something broke." **If every stage passes, `build.sh` automatically execs `./start-all.sh` for you** — one command from a clean clone (or a fresh pull) all the way to a running app.
+
+**Already built and just want to start the three services?**
 
 ```bash
 ./start-all.sh
@@ -223,6 +244,10 @@ system-info/
 │
 ├── analytics/                    # Python analytics: stats, trend, bottleneck
 │   │                              detection, and the FastAPI service exposing them
+│
+├── setup.sh                      # First-time prerequisite install + MONGO_URI setup
+├── build.sh                      # Fail-fast full build/validation, then launches start-all.sh
+├── start-all.sh                  # Starts backend + analytics + frontend together
 │
 └── PROJECT_STATUS.md             # Full engineering build log
 ```
