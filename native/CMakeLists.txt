@@ -6,12 +6,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 enable_language(ASM_NASM)
-set(CMAKE_ASM_NASM_OBJECT_FORMAT elf64)
 
-# Pick the correct platform-specific source file at configure time
 if(WIN32)
+    set(CMAKE_ASM_NASM_OBJECT_FORMAT win64)
     set(PLATFORM_SOURCE src/windows_provider.cpp)
 else()
+    set(CMAKE_ASM_NASM_OBJECT_FORMAT elf64)
     set(PLATFORM_SOURCE src/linux_provider.cpp)
 endif()
 

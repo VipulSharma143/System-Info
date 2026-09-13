@@ -13,6 +13,13 @@
     <PackageReference Include="System.Management" Version="10.0.11" />
   </ItemGroup>
 
+<ItemGroup Condition="'$(OS)' != 'Windows_NT'">
+    <None Include="libsystemmonitor_native.so" CopyToOutputDirectory="PreserveNewest" Condition="Exists('libsystemmonitor_native.so')" />
+</ItemGroup>
+<ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <None Include="systemmonitor_native.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('systemmonitor_native.dll')" />
+</ItemGroup>
+
 <ItemGroup>
   <None Include="libsystemmonitor_native.so" CopyToOutputDirectory="PreserveNewest" />
 </ItemGroup>

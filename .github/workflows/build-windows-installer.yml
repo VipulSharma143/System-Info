@@ -1,0 +1,85 @@
+name: build-windows-installer
+
+# Runs on a real, free, Microsoft-hosted Windows machine — this is how you
+# get an actual compiled setup.exe without owning a Windows PC yourself.
+# Trigger it manually from the GitHub Actions tab ("Run workflow"), or it
+# runs automatically on every push to main.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install NASM
+        run: choco install nasm -y
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      # MSVC/CMake are already preinstalled on windows-latest runners.
+
+      - name: Build native C++ engine
+        run: |
+          cmake -B native/build -G "Visual Studio 17 2022" -A x64 native
+          cmake --build native/build --config Release
+          $dll = Get-ChildItem -Recurse -Filter "systemmonitor_native.dll" -Path "native/build" | Select-Object -First 1
+          Copy-Item $dll.FullName -Destination "backend/SystemMonitor.Api/"
+        shell: pwsh
+
+      - name: Restore and build .NET backend
+        run: |
+          dotnet restore backend/SystemMonitor.Api
+          dotnet build backend/SystemMonitor.Api --configuration Release --no-restore
+        shell: pwsh
+
+      - name: Install frontend dependencies and build
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+        shell: pwsh
+
+      - name: Install Python analytics dependencies
+        working-directory: analytics
+        run: pip install fastapi uvicorn pymongo
+        shell: pwsh
+
+      - name: Build SystemInfo.exe from start-all.ps1
+        run: |
+          Install-Module ps2exe -Scope CurrentUser -Force
+          Invoke-ps2exe .\start-all.ps1 .\SystemInfo.exe -iconFile .\SystemInfo.ico -noConsole -title "SystemInfo"
+        shell: pwsh
+
+      - name: Compile installer with Inno Setup
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" SystemInfo.iss
+        shell: pwsh
+
+      - name: Upload setup.exe as a downloadable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SystemInfo-Setup
+          path: Output/SystemInfo-Setup.exe

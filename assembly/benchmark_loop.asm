@@ -6,21 +6,31 @@
 section .text
     global run_benchmark_loop
 
+%ifidn __OUTPUT_FORMAT__, win64
+    %define ARG1 rcx
+%else
+    %define ARG1 rdi
+%endif
+
 ; run_benchmark_loop(long iterations)
-; System V x86-64 calling convention: first integer arg arrives in RDI
-; Return value goes in RAX
+; NASM sets __OUTPUT_FORMAT__ automatically from the -f flag CMake passes,
+; so this one file assembles correctly for both System V (elf64) and
+; Windows x64 (win64) without needing a separate source per platform.
 run_benchmark_loop:
-    xor rax, rax          ; accumulator = 0 (this is our "result", proves the loop isn't optimized away)
-    xor rcx, rcx          ; counter = 0
+    mov r9, ARG1           ; stash iterations somewhere neither convention uses
+    xor rax, rax           ; accumulator
+    xor rcx, rcx           ; counter (safe now — arg already copied out of rcx)
 
 .loop:
-    add rax, rcx           ; accumulator += counter  (real arithmetic work)
-    imul rax, rax, 3        ; accumulator *= 3        (more work — avoids trivial pattern)
-    xor rax, rcx            ; accumulator ^= counter  (more work)
-    inc rcx                 ; counter++
-    cmp rcx, rdi             ; compare counter to iterations (the arg passed in RDI)
-    jl .loop                 ; jump back to .loop if counter < iterations
+    add rax, rcx
+    imul rax, rax, 3
+    xor rax, rcx
+    inc rcx
+    cmp rcx, r9
+    jl .loop
 
-    ret                       ; RAX still holds the accumulated result
+    ret
 
+%ifidn __OUTPUT_FORMAT__, elf64
 section .note.GNU-stack noalloc noexec nowrite
+%endif

@@ -4,58 +4,61 @@
 ; so throughput can be compared fairly.
 ; ============================================================
 
-default rel             ; use RIP-relative addressing (required for shared libraries)
+default rel
+
+%ifidn __OUTPUT_FORMAT__, win64
+    %define ARG1 rcx
+%else
+    %define ARG1 rdi
+%endif
 
 section .data
     align 16
-    counter_init:  dd 0, 1, 2, 3      ; four 32-bit lanes: initial counter values
-    increment_vec: dd 4, 4, 4, 4      ; added to counter each loop (4 elements processed per pass)
+    counter_init:  dd 0, 1, 2, 3
+    increment_vec: dd 4, 4, 4, 4
 
 section .text
     global run_benchmark_loop_scalar_compare
     global run_benchmark_loop_simd
 
-; ------------------------------------------------------------
-; Scalar baseline: one element per iteration, add + xor
-; ------------------------------------------------------------
 run_benchmark_loop_scalar_compare:
-    xor rax, rax           ; accumulator = 0
-    xor rcx, rcx           ; counter = 0
+    mov r9, ARG1
+    xor rax, rax
+    xor rcx, rcx
 
 .loop:
     add rax, rcx
     xor rax, rcx
     inc rcx
-    cmp rcx, rdi            ; rdi = iterations (passed in from C++)
+    cmp rcx, r9
     jl .loop
 
     ret
 
-; ------------------------------------------------------------
-; SIMD (SSE2): four elements per iteration, same add + xor work
-; ------------------------------------------------------------
 run_benchmark_loop_simd:
-    pxor xmm0, xmm0                 ; accumulator vector = [0,0,0,0]
-    movdqu xmm1, [counter_init]     ; counter vector = [0,1,2,3]
-    movdqu xmm2, [increment_vec]    ; increment vector = [4,4,4,4]
+    mov r9, ARG1
+    pxor xmm0, xmm0
+    movdqu xmm1, [counter_init]
+    movdqu xmm2, [increment_vec]
 
-    mov rcx, rdi
-    shr rcx, 2                      ; rcx = iterations / 4 (SIMD processes 4 at once)
+    mov rcx, r9
+    shr rcx, 2
 
 .loop:
-    paddd xmm0, xmm1                ; accumulator += counter (4 lanes at once)
-    pxor xmm0, xmm1                 ; accumulator ^= counter (4 lanes at once)
-    paddd xmm1, xmm2                ; counter += 4 (advance all lanes)
+    paddd xmm0, xmm1
+    pxor xmm0, xmm1
+    paddd xmm1, xmm2
     dec rcx
     jnz .loop
 
-    ; horizontally sum the 4 lanes into a single value (proves real work happened)
     pshufd xmm3, xmm0, 0x4E
     paddd xmm0, xmm3
     pshufd xmm3, xmm0, 0xB1
     paddd xmm0, xmm3
-    movd eax, xmm0                  ; result in eax (upper 32 bits of rax auto-zeroed)
+    movd eax, xmm0
 
     ret
 
+%ifidn __OUTPUT_FORMAT__, elf64
 section .note.GNU-stack noalloc noexec nowrite
+%endif

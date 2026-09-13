@@ -4,11 +4,12 @@
 ; ============================================================
 
 section .text
-    global get_constant   ; makes this function visible to the linker (like extern "C" in C++)
+    global get_constant
 
 get_constant:
-    ; x86-64 System V calling convention: return value goes in the RAX register
-    mov eax, 42           ; move the number 42 into EAX (lower 32 bits of RAX)
-    ret                   ; return — whatever's in EAX is the "return value"
+    mov eax, 42
+    ret
 
+%ifidn __OUTPUT_FORMAT__, elf64
 section .note.GNU-stack noalloc noexec nowrite
+%endif
