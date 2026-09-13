@@ -1,45 +1,91 @@
-name: build-windows-installer
+name: Build Windows Installer
 
 on:
+  # Normal development builds.
   push:
     branches:
       - main
+
+    # Version tags create a GitHub Release.
+    # Examples:
+    # v1.0.0
+    # v1.0.1
+    # v1.2.0
     tags:
       - "v*.*.*"
 
+  # Allows you to run the build manually from:
+  # GitHub -> Actions -> Build Windows Installer -> Run workflow
   workflow_dispatch:
 
+# Required for creating GitHub Releases.
 permissions:
   contents: write
 
+# Prevent duplicate builds for the same branch.
+# A newer push to main cancels an older unfinished main build.
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: Build Windows Installer
     runs-on: windows-latest
 
     steps:
-      # ------------------------------------------------------------
+
+      # ============================================================
       # CHECKOUT
-      # ------------------------------------------------------------
-      - name: Check out the repo
+      # ============================================================
+
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      # ------------------------------------------------------------
-      # SETUP TOOLS
-      # ------------------------------------------------------------
+
+      # ============================================================
+      # .NET
+      # ============================================================
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: |
+            **/packages.lock.json
+            **/packages.config
+            **/*.csproj
+            **/*.fsproj
+
+
+      # ============================================================
+      # NODE.JS
+      # ============================================================
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+
+      # ============================================================
+      # PYTHON
+      # ============================================================
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: analytics/requirements.txt
+
+
+      # ============================================================
+      # BUILD TOOLS
+      # ============================================================
 
       - name: Install NASM
         run: choco install nasm -y
@@ -47,66 +93,155 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup -y
 
-      # ------------------------------------------------------------
-      # BUILD NATIVE C++ ENGINE
-      # ------------------------------------------------------------
+
+      # ============================================================
+      # NATIVE C++ ENGINE
+      # ============================================================
+
       - name: Build native C++ engine
+        shell: pwsh
         run: |
-          cmake -B native/build -A x64 native
-          cmake --build native/build --config Release
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "Configuring CMake..."
+
+          cmake -B native/build `
+            -A x64 `
+            native
+
+          Write-Host "Building native engine..."
+
+          cmake --build native/build `
+            --config Release `
+            --parallel
+
+          Write-Host "Searching for systemmonitor_native.dll..."
 
           $dll = Get-ChildItem `
+            -Path "native/build" `
             -Recurse `
-            -Filter "systemmonitor_native.dll" `
-            -Path "native/build" |
+            -Filter "systemmonitor_native.dll" |
             Select-Object -First 1
 
           if (-not $dll) {
-            Write-Error "systemmonitor_native.dll was not produced by the build."
+            Write-Error "systemmonitor_native.dll was not produced by the native build."
             exit 1
           }
 
-          Copy-Item `
-            $dll.FullName `
-            -Destination "backend/SystemMonitor.Api/"
-        shell: pwsh
+          Write-Host "Found DLL:"
+          Write-Host $dll.FullName
 
-      # ------------------------------------------------------------
-      # BUILD .NET BACKEND
-      # ------------------------------------------------------------
-      - name: Restore and build .NET backend
+          $destination = "backend/SystemMonitor.Api/systemmonitor_native.dll"
+
+          Copy-Item `
+            -Path $dll.FullName `
+            -Destination $destination `
+            -Force
+
+          Write-Host "Copied native DLL to:"
+          Write-Host $destination
+
+
+      # ============================================================
+      # .NET BACKEND
+      # ============================================================
+
+      - name: Restore .NET backend
+        shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+
           dotnet restore backend/SystemMonitor.Api
+
+
+      - name: Build .NET backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
           dotnet build backend/SystemMonitor.Api `
             --configuration Release `
-            --no-restore
-        shell: pwsh
+            --no-restore `
+            --verbosity minimal
 
-      # ------------------------------------------------------------
-      # BUILD FRONTEND
-      # ------------------------------------------------------------
-      - name: Install frontend dependencies and build
+
+      # ============================================================
+      # FRONTEND
+      # ============================================================
+
+      - name: Install frontend dependencies
         working-directory: frontend
-        run: |
-          npm install
-          npm run build
         shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      # ------------------------------------------------------------
+          if (Test-Path "package-lock.json") {
+            npm ci
+          }
+          else {
+            Write-Host "package-lock.json not found. Using npm install."
+            npm install
+          }
+
+
+      - name: Build frontend
+        working-directory: frontend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          npm run build
+
+
+      # ============================================================
       # PYTHON ANALYTICS
-      # ------------------------------------------------------------
+      # ============================================================
+
       - name: Install Python analytics dependencies
         working-directory: analytics
-        run: |
-          pip install fastapi uvicorn pymongo
         shell: pwsh
-
-      # ------------------------------------------------------------
-      # BUILD SYSTEMINFO.EXE
-      # ------------------------------------------------------------
-      - name: Build SystemInfo.exe from start-all.ps1
         run: |
-          Install-Module ps2exe -Scope CurrentUser -Force
+          $ErrorActionPreference = "Stop"
+
+          if (Test-Path "requirements.txt") {
+            pip install -r requirements.txt
+          }
+          else {
+            Write-Host "requirements.txt not found."
+            Write-Host "Installing required analytics packages..."
+
+            pip install fastapi uvicorn pymongo
+          }
+
+
+      # ============================================================
+      # BUILD SystemInfo.exe
+      # ============================================================
+
+      - name: Build SystemInfo.exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (-not (Test-Path ".\start-all.ps1")) {
+            Write-Error "start-all.ps1 was not found."
+            exit 1
+          }
+
+          if (-not (Test-Path ".\SystemInfo.ico")) {
+            Write-Error "SystemInfo.ico was not found."
+            exit 1
+          }
+
+          Write-Host "Installing ps2exe..."
+
+          Install-Module `
+            ps2exe `
+            -Scope CurrentUser `
+            -Force `
+            -AllowClobber
+
+          Write-Host "Building SystemInfo.exe..."
 
           Invoke-ps2exe `
             .\start-all.ps1 `
@@ -114,81 +249,220 @@ jobs:
             -iconFile .\SystemInfo.ico `
             -noConsole `
             -title "SystemInfo"
-        shell: pwsh
 
-      # ------------------------------------------------------------
-      # BUILD INSTALLER
-      # ------------------------------------------------------------
-      - name: Compile installer with Inno Setup
+          if (-not (Test-Path ".\SystemInfo.exe")) {
+            Write-Error "SystemInfo.exe was not created."
+            exit 1
+          }
+
+          Write-Host "SystemInfo.exe created successfully."
+
+
+      # ============================================================
+      # INNO SETUP INSTALLER
+      # ============================================================
+
+      - name: Compile Windows installer
+        shell: pwsh
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" SystemInfo.iss
-        shell: pwsh
+          $ErrorActionPreference = "Stop"
 
-      # ------------------------------------------------------------
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+
+          if (-not (Test-Path $iscc)) {
+            Write-Error "Inno Setup compiler was not found at:"
+            Write-Error $iscc
+            exit 1
+          }
+
+          if (-not (Test-Path ".\SystemInfo.iss")) {
+            Write-Error "SystemInfo.iss was not found."
+            exit 1
+          }
+
+          Write-Host "Compiling installer..."
+
+          & $iscc ".\SystemInfo.iss"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Inno Setup failed with exit code $LASTEXITCODE."
+            exit $LASTEXITCODE
+          }
+
+
+      # ============================================================
       # VERIFY INSTALLER
-      # ------------------------------------------------------------
-      - name: Verify installer exists
+      # ============================================================
+
+      - name: Verify installer
+        shell: pwsh
         run: |
-          if (-not (Test-Path "Output/SystemInfo-Setup.exe")) {
-            Write-Error "Output/SystemInfo-Setup.exe was not created."
+          $ErrorActionPreference = "Stop"
+
+          $installer = "Output/SystemInfo-Setup.exe"
+
+          if (-not (Test-Path $installer)) {
+            Write-Error "Installer was not created:"
+            Write-Error $installer
 
             Write-Host ""
-            Write-Host "EXE files found:"
+            Write-Host "All EXE files found:"
+
             Get-ChildItem `
               -Path . `
               -Recurse `
-              -Filter *.exe |
+              -Filter "*.exe" |
               Select-Object FullName, Length
 
             exit 1
           }
 
-          $file = Get-Item "Output/SystemInfo-Setup.exe"
+          $file = Get-Item $installer
 
           Write-Host ""
-          Write-Host "========================================"
-          Write-Host "Installer created successfully!"
-          Write-Host "========================================"
-          Write-Host "Path: $($file.FullName)"
+          Write-Host "============================================"
+          Write-Host " WINDOWS INSTALLER CREATED SUCCESSFULLY"
+          Write-Host "============================================"
+          Write-Host "File: $($file.FullName)"
           Write-Host "Size: $($file.Length) bytes"
-          Write-Host "========================================"
-        shell: pwsh
+          Write-Host "============================================"
 
-      # ------------------------------------------------------------
-      # ALWAYS UPLOAD ARTIFACT
+
+      # ============================================================
+      # UPLOAD ACTIONS ARTIFACT
       #
-      # This means normal main builds also give you a downloadable
-      # installer under Actions -> Artifacts.
-      # ------------------------------------------------------------
+      # This is available for every successful build.
+      #
+      # Normal push:
+      #   Actions -> Artifacts
+      #
+      # Release tag:
+      #   Actions -> Artifacts
+      #   AND GitHub Release
+      # ============================================================
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: SystemInfo-Setup
           path: Output/SystemInfo-Setup.exe
           if-no-files-found: error
+          retention-days: 30
 
-      # ------------------------------------------------------------
+
+      # ============================================================
+      # PREPARE RELEASE NOTES
+      #
+      # ONLY runs for tags such as:
+      #
+      # v1.0.1
+      # v1.0.2
+      # v1.1.0
+      #
+      # It extracts ONLY that version's section from CHANGELOG.md.
+      # ============================================================
+
+      - name: Prepare release notes from CHANGELOG
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $version = "${{ github.ref_name }}"
+
+          Write-Host "Preparing release notes for $version"
+
+          if (-not (Test-Path "CHANGELOG.md")) {
+            Write-Error "CHANGELOG.md was not found."
+            exit 1
+          }
+
+          $changelog = Get-Content `
+            "CHANGELOG.md" `
+            -Raw
+
+          $escapedVersion = [regex]::Escape($version)
+
+          # Find:
+          #
+          # ## [1.0.2]
+          #
+          # and capture everything until:
+          #
+          # ## [1.0.1]
+          #
+          # or the end of the file.
+
+          $pattern = "(?ms)^## \[$escapedVersion\].*?(?=^## \[|\z)"
+
+          $match = [regex]::Match(
+            $changelog,
+            $pattern
+          )
+
+          if (-not $match.Success) {
+            Write-Error "Could not find [$version] in CHANGELOG.md."
+            Write-Error "Make sure CHANGELOG.md contains:"
+            Write-Error "## [$version]"
+            exit 1
+          }
+
+          $notes = $match.Value.Trim()
+
+          # Remove the version heading because the GitHub Release
+          # already displays the version as its title.
+
+          $notes = $notes -replace `
+            "(?m)^## \[$escapedVersion\].*\r?\n", ""
+
+          $notes = $notes.Trim()
+
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            Write-Error "The CHANGELOG section for $version is empty."
+            exit 1
+          }
+
+          Set-Content `
+            -Path "release-notes.md" `
+            -Value $notes `
+            -Encoding utf8
+
+          Write-Host ""
+          Write-Host "============================================"
+          Write-Host " RELEASE NOTES"
+          Write-Host "============================================"
+          Write-Host $notes
+          Write-Host "============================================"
+
+
+      # ============================================================
       # CREATE GITHUB RELEASE
       #
-      # This ONLY runs when the workflow was triggered by a version
-      # tag such as:
+      # ONLY runs for version tags.
       #
-      # v1.0.0
-      # v1.0.1
-      # v2.0.0
+      # Example:
       #
-      # Normal pushes to main will NOT create a Release.
-      # ------------------------------------------------------------
+      # git tag v1.0.2
+      # git push origin v1.0.2
+      #
+      # Creates:
+      #
+      # SystemInfo v1.0.2
+      #
+      # With:
+      # - CHANGELOG notes for 1.0.2 only
+      # - SystemInfo-Setup.exe
+      # ============================================================
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: "SystemInfo ${{ github.ref_name }}"
-          generate_release_notes: true
+          body_path: release-notes.md
           files: Output/SystemInfo-Setup.exe
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
-
