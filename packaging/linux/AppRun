@@ -1,0 +1,14 @@
+#!/bin/bash
+# AppRun — entry point invoked automatically when SystemInfo.AppImage is run.
+#
+# AppImages mount themselves as a read-only squashfs at runtime, so logs/
+# can't live inside the bundle. This redirects logging to a normal writable
+# location under the user's home directory instead, via the same
+# SYSTEMINFO_LOG_DIR override that start-all.sh was patched to respect.
+
+HERE="$(dirname "$(readlink -f "${0}")")"
+
+export SYSTEMINFO_LOG_DIR="$HOME/.local/share/systeminfo/logs"
+mkdir -p "$SYSTEMINFO_LOG_DIR"
+
+exec "$HERE/usr/share/systeminfo/start-all.sh" "$@"

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SystemInfo
+Comment=Multi-language system performance monitor
+Exec=start-all.sh
+Icon=systeminfo
+Terminal=true
+Categories=System;Monitoring;

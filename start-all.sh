@@ -16,7 +16,7 @@
 set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="$PROJECT_ROOT/logs"
+LOG_DIR="${SYSTEMINFO_LOG_DIR:-$PROJECT_ROOT/logs}"
 mkdir -p "$LOG_DIR"
 
 BACKEND_PORT=""
