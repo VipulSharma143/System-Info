@@ -104,9 +104,25 @@ jobs:
       #
       # This is a `dotnet publish`, not `dotnet build` — it produces a
       # self-contained win-x64 output that runs with no .NET runtime/SDK
-      # installed on the target machine. SystemMonitor.Api.csproj's
-      # CopyFrontendDist target pulls frontend/dist into wwwroot as part of
-      # this step, since frontend/dist now exists (built above).
+      # installed on the target machine. The "Copy frontend build into
+      # wwwroot" step below runs first, placing frontend/dist's files into
+      # wwwroot BEFORE this publish — the .NET SDK decides which wwwroot
+      # files are publishable at project-evaluation time, so they need to
+      # already be on disk before `dotnet publish` starts.
+
+      - name: Copy frontend build into wwwroot
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $wwwroot = "backend/SystemMonitor.Api/wwwroot"
+          New-Item -ItemType Directory -Force -Path $wwwroot | Out-Null
+          Copy-Item -Path "frontend/dist/*" -Destination $wwwroot -Recurse -Force
+
+          if (-not (Test-Path "$wwwroot/index.html")) {
+            Write-Error "$wwwroot/index.html missing after copying frontend/dist — frontend build did not produce the expected output."
+            exit 1
+          }
 
       - name: Publish .NET backend (self-contained win-x64)
         shell: pwsh

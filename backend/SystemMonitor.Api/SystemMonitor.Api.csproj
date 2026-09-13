@@ -29,18 +29,15 @@
 <None Include="systemmonitor_native.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('systemmonitor_native.dll')" />
 </ItemGroup>
 
-<!-- Pulls the already-built React production bundle (frontend/dist, built by
-     CI via `npm run build` BEFORE this project is published) into wwwroot so
-     Program.cs's UseStaticFiles()/MapFallbackToFile() can serve it. This is
-     the opposite of the old model where SystemInfo.iss excluded `dist`
-     entirely — here it becomes part of the actual publish output. Skipped
-     silently if frontend/dist doesn't exist (plain `dotnet build`/`dotnet run`
-     in local dev, where the frontend runs on its own via Vite). -->
-<Target Name="CopyFrontendDist" BeforeTargets="Publish" Condition="Exists('..\..\frontend\dist')">
-<ItemGroup>
-<FrontendDistFiles Include="..\..\frontend\dist\**\*" />
-</ItemGroup>
-<Copy SourceFiles="@(FrontendDistFiles)" DestinationFolder="wwwroot\%(RecursiveDir)" SkipUnchangedFiles="true" />
-</Target>
+<!-- wwwroot is populated by the CI workflow (a plain file copy of frontend/dist
+     into wwwroot, run BEFORE `dotnet publish`) — see
+     .github/workflows/build-windows-installer.yml. It is NOT done via an
+     MSBuild Target here: BeforeTargets="Publish" runs too late — the SDK
+     decides which files under wwwroot count as publishable content when the
+     project is first EVALUATED, before any target (including a Publish-time
+     copy) executes. A target-based copy silently produces an empty
+     wwwroot in the publish output. Files just need to already be on disk in
+     wwwroot before `dotnet publish` is invoked; the SDK then publishes them
+     automatically like any other ASP.NET Core static content. -->
 
 </Project>
