@@ -14,26 +14,13 @@ concurrency:
   group: windows-installer-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  STAGING_DIR: packaging/app
-
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-
-      # ============================================================
-      # CHECK OUT REPOSITORY
-      # ============================================================
-
       - name: Check out the repo
         uses: actions/checkout@v5
-
-
-      # ============================================================
-      # TOOLCHAIN (build-time only — none of this ships to the user)
-      # ============================================================
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
@@ -51,37 +38,76 @@ jobs:
           python-version: "3.12"
 
       - name: Install NASM
-        run: choco install nasm -y
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          choco install nasm -y
 
       - name: Install Inno Setup
-        run: choco install innosetup -y
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-
-      # ============================================================
-      # BUILD NATIVE C++ ENGINE
-      # ============================================================
+          choco install innosetup -y
 
       - name: Build native C++ engine
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          cmake -B native/build -A x64 native
-          cmake --build native/build --config Release --parallel
+          Write-Host "Configuring CMake..."
 
-          $dll = Get-ChildItem -Path "native/build" -Recurse -Filter "systemmonitor_native.dll" | Select-Object -First 1
+          cmake -B native/build `
+            -A x64 `
+            native
+
+          Write-Host "Building native C++ engine..."
+
+          cmake --build native/build `
+            --config Release `
+            --parallel
+
+          Write-Host "Searching for systemmonitor_native.dll..."
+
+          $dll = Get-ChildItem `
+            -Path "native/build" `
+            -Recurse `
+            -Filter "systemmonitor_native.dll" |
+            Select-Object -First 1
+
           if (-not $dll) {
             Write-Error "systemmonitor_native.dll was not produced by the build."
             exit 1
           }
 
-          Copy-Item -Path $dll.FullName -Destination "backend/SystemMonitor.Api/systemmonitor_native.dll" -Force
-          Write-Host "Copied native DLL from $($dll.FullName)"
+          Write-Host "Found native DLL:"
+          Write-Host $dll.FullName
 
+          $destination = "backend/SystemMonitor.Api/systemmonitor_native.dll"
 
-      # ============================================================
-      # BUILD FRONTEND (production React bundle)
-      # ============================================================
+          Copy-Item `
+            -Path $dll.FullName `
+            -Destination $destination `
+            -Force
+
+          Write-Host "Copied native DLL to:"
+          Write-Host $destination
+
+      - name: Restore and build .NET backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "Restoring .NET backend..."
+
+          dotnet restore backend/SystemMonitor.Api
+
+          Write-Host "Building .NET backend..."
+
+          dotnet build backend/SystemMonitor.Api `
+            --configuration Release `
+            --no-restore
 
       - name: Install frontend dependencies and build
         working-directory: frontend
@@ -89,213 +115,155 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          if (Test-Path "package-lock.json") { npm ci } else { npm install }
+          if (Test-Path "package-lock.json") {
+            Write-Host "package-lock.json found. Using npm ci..."
+            npm ci
+          }
+          else {
+            Write-Host "package-lock.json not found. Using npm install..."
+            npm install
+          }
+
+          Write-Host "Building frontend..."
+
           npm run build
 
-          if (-not (Test-Path "dist/index.html")) {
-            Write-Error "frontend/dist/index.html was not produced by npm run build."
-            exit 1
-          }
-
-
-      # ============================================================
-      # PUBLISH .NET BACKEND (self-contained, embeds the frontend build)
-      # ============================================================
-      #
-      # This is a `dotnet publish`, not `dotnet build` — it produces a
-      # self-contained win-x64 output that runs with no .NET runtime/SDK
-      # installed on the target machine. The "Copy frontend build into
-      # wwwroot" step below runs first, placing frontend/dist's files into
-      # wwwroot BEFORE this publish — the .NET SDK decides which wwwroot
-      # files are publishable at project-evaluation time, so they need to
-      # already be on disk before `dotnet publish` starts.
-
-      - name: Copy frontend build into wwwroot
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $wwwroot = "backend/SystemMonitor.Api/wwwroot"
-          New-Item -ItemType Directory -Force -Path $wwwroot | Out-Null
-          Copy-Item -Path "frontend/dist/*" -Destination $wwwroot -Recurse -Force
-
-          if (-not (Test-Path "$wwwroot/index.html")) {
-            Write-Error "$wwwroot/index.html missing after copying frontend/dist — frontend build did not produce the expected output."
-            exit 1
-          }
-
-      - name: Publish .NET backend (self-contained win-x64)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          dotnet publish backend/SystemMonitor.Api `
-            --configuration Release `
-            --runtime win-x64 `
-            --self-contained true `
-            --output "$env:STAGING_DIR/backend"
-
-          if (-not (Test-Path "$env:STAGING_DIR/backend/SystemMonitor.Api.exe")) {
-            Write-Error "SystemMonitor.Api.exe was not produced by dotnet publish."
-            exit 1
-          }
-          if (-not (Test-Path "$env:STAGING_DIR/backend/wwwroot/index.html")) {
-            Write-Error "wwwroot/index.html missing from publish output — frontend was not embedded."
-            exit 1
-          }
-          if (-not (Test-Path "$env:STAGING_DIR/backend/systemmonitor_native.dll")) {
-            Write-Error "systemmonitor_native.dll missing from publish output."
-            exit 1
-          }
-
-
-      # ============================================================
-      # PACKAGE PYTHON ANALYTICS AS A STANDALONE EXE (PyInstaller)
-      # ============================================================
-      #
-      # End users get analytics.exe — a frozen executable with the Python
-      # interpreter and all dependencies bundled in. No python/pip on their
-      # machine. requirements-build.txt is build-time only.
-
-      - name: Install analytics build dependencies
+      - name: Install Python analytics dependencies
         working-directory: analytics
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-build.txt
 
-      - name: Package analytics.exe with PyInstaller
-        working-directory: analytics
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
+          if (Test-Path "requirements.txt") {
+            Write-Host "Installing dependencies from analytics/requirements.txt..."
 
-          pyinstaller --onefile --name analytics run_analytics.py
+            python -m pip install -r requirements.txt
+          }
+          else {
+            Write-Host "analytics/requirements.txt not found."
 
-          if (-not (Test-Path "dist/analytics.exe")) {
-            Write-Error "analytics.exe was not produced by PyInstaller."
-            exit 1
+            python -m pip install `
+              fastapi `
+              uvicorn `
+              pymongo
           }
 
-          New-Item -ItemType Directory -Force -Path "../$env:STAGING_DIR/analytics" | Out-Null
-          Copy-Item "dist/analytics.exe" "../$env:STAGING_DIR/analytics/analytics.exe" -Force
-
-
-      # ============================================================
-      # PUBLISH THE PRODUCTION LAUNCHER (SystemInfo.exe)
-      # ============================================================
-      #
-      # Replaces the old ps2exe-compiled start-all.ps1. This is a real
-      # self-contained .NET publish, not a PowerShell-to-exe wrapper.
-
-      - name: Publish launcher (SystemInfo.exe)
+      - name: Verify required build files
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          dotnet publish launcher/SystemInfo.Launcher.csproj `
-            --configuration Release `
-            --runtime win-x64 `
-            --self-contained true `
-            --output "$env:STAGING_DIR/_launcher_out"
-
-          Copy-Item "$env:STAGING_DIR/_launcher_out/SystemInfo.exe" "$env:STAGING_DIR/SystemInfo.exe" -Force
-          Copy-Item "SystemInfo.ico" "$env:STAGING_DIR/SystemInfo.ico" -Force
-          Remove-Item "$env:STAGING_DIR/_launcher_out" -Recurse -Force
-
-          if (-not (Test-Path "$env:STAGING_DIR/SystemInfo.exe")) {
-            Write-Error "SystemInfo.exe (launcher) was not produced."
-            exit 1
-          }
-
-
-      # ============================================================
-      # VALIDATE STAGING DIRECTORY (Phase 11 — production validation)
-      # ============================================================
-      #
-      # Fails fast, with a clear reason, if anything dev-only ended up in the
-      # staging directory, or anything required is missing — instead of
-      # discovering it after a user installs.
-
-      - name: Validate production staging directory
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $staging = $env:STAGING_DIR
-
-          $required = @(
-            "SystemInfo.exe",
-            "SystemInfo.ico",
-            "backend/SystemMonitor.Api.exe",
-            "backend/systemmonitor_native.dll",
-            "backend/wwwroot/index.html",
-            "analytics/analytics.exe"
+          $requiredFiles = @(
+            ".\start-all.ps1",
+            ".\setup.ps1",
+            ".\SystemInfo.iss",
+            ".\SystemInfo.ico"
           )
-          $missing = $required | Where-Object { -not (Test-Path (Join-Path $staging $_)) }
-          if ($missing) {
-            Write-Error "Missing required staged files:`n$($missing -join "`n")"
-            exit 1
-          }
 
-          $forbiddenNames = @("*.csproj", "*.ts", "*.tsx", "package.json", "requirements.txt", "*.py", "*.asm", ".git")
-          foreach ($pattern in $forbiddenNames) {
-            $hits = Get-ChildItem -Path $staging -Recurse -Filter $pattern -ErrorAction SilentlyContinue
-            if ($hits) {
-              Write-Error "Development/source files found in staging directory (should never ship to users):`n$($hits.FullName -join "`n")"
+          foreach ($file in $requiredFiles) {
+            if (-not (Test-Path $file)) {
+              Write-Error "Required file was not found: $file"
               exit 1
             }
+
+            Write-Host "Found: $file"
           }
 
-          Write-Host "Staging directory validated: production-only, all required files present."
+      - name: Build SystemInfo.exe from start-all.ps1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
+          Write-Host "Installing ps2exe..."
 
-      # ============================================================
-      # COMPILE INSTALLER WITH INNO SETUP
-      # ============================================================
+          Install-Module `
+            ps2exe `
+            -Scope CurrentUser `
+            -Force `
+            -AllowClobber
+
+          Write-Host "Building SystemInfo.exe..."
+
+          Invoke-ps2exe `
+            .\start-all.ps1 `
+            .\SystemInfo.exe `
+            -iconFile .\SystemInfo.ico `
+            -noConsole `
+            -title "SystemInfo"
+
+          if (-not (Test-Path ".\SystemInfo.exe")) {
+            Write-Error "SystemInfo.exe was not created."
+            exit 1
+          }
+
+          Write-Host "SystemInfo.exe created successfully."
+
+          $exe = Get-Item ".\SystemInfo.exe"
+
+          Write-Host "EXE size: $($exe.Length) bytes"
 
       - name: Compile installer with Inno Setup
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 
           if (-not (Test-Path $iscc)) {
-            Write-Error "Inno Setup compiler was not found: $iscc"
+            Write-Error "Inno Setup compiler was not found:"
+            Write-Error $iscc
             exit 1
           }
 
+          if (-not (Test-Path ".\SystemInfo.iss")) {
+            Write-Error "SystemInfo.iss was not found."
+            exit 1
+          }
+
+          Write-Host "Compiling installer..."
+
           & $iscc ".\SystemInfo.iss"
+
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Inno Setup failed with exit code $LASTEXITCODE."
             exit $LASTEXITCODE
           }
 
-
-      # ============================================================
-      # VERIFY INSTALLER
-      # ============================================================
+          Write-Host "Inno Setup completed successfully."
 
       - name: Verify installer exists
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+
           $installer = "Output/SystemInfo-Setup.exe"
 
           if (-not (Test-Path $installer)) {
             Write-Error "Output/SystemInfo-Setup.exe was not created."
+
+            Write-Host ""
+            Write-Host "Searching for generated EXE files..."
+
+            Get-ChildItem `
+              -Path . `
+              -Recurse `
+              -Filter "*.exe" |
+              Select-Object FullName, Length
+
             exit 1
           }
 
           $file = Get-Item $installer
-          Write-Host "WINDOWS INSTALLER CREATED SUCCESSFULLY"
+
+          Write-Host ""
+          Write-Host "============================================"
+          Write-Host " WINDOWS INSTALLER CREATED SUCCESSFULLY"
+          Write-Host "============================================"
           Write-Host "Path: $($file.FullName)"
           Write-Host "Size: $($file.Length) bytes"
-
-
-      # ============================================================
-      # UPLOAD INSTALLER ARTIFACT
-      # ============================================================
+          Write-Host "============================================"
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4

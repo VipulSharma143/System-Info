@@ -1,4 +1,3 @@
-```yaml
 name: Create Release
 
 on:
@@ -15,99 +14,71 @@ permissions:
   actions: read
 
 concurrency:
-  group: create-release
+  group: create-release-main
   cancel-in-progress: false
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-
     if: >
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
 
+    runs-on: ubuntu-latest
+
     steps:
-      - name: Check out main
+      - name: Check out repository
         uses: actions/checkout@v5
         with:
-          ref: main
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
 
-      - name: Find release version
+      - name: Determine release version
         id: version
         shell: bash
         run: |
           set -e
 
-          if [ ! -f CHANGELOG.md ]; then
-            echo "::error::CHANGELOG.md was not found."
-            exit 1
-          fi
-
-          VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md)
+          VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md || true)
 
           if [ -z "$VERSION" ]; then
-            echo "::error::Could not find a release version in CHANGELOG.md."
-            echo "Expected format:"
-            echo "## [1.0.3] - 2026-09-13"
+            echo "::error::Unable to determine release version from CHANGELOG.md."
             exit 1
           fi
 
-          echo "Release version: $VERSION"
+          TAG="$VERSION"
+
+          echo "Version: $VERSION"
+          echo "Tag: $TAG"
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Verify release tag exists
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
+      - name: Verify release tag
+        id: tag
         shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -e
 
-          TAG="$VERSION"
+          git fetch --tags origin
 
-          echo "Checking release tag: $TAG"
+          TAG_SHA=$(git ls-remote origin "refs/tags/$TAG^{}" | awk '{print $1}')
 
-          if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "::error::Release tag $TAG does not exist on origin."
+          if [ -z "$TAG_SHA" ]; then
+            echo "::error::Release tag $TAG does not exist."
             exit 1
           fi
 
-          echo "Verified: tag $TAG exists."
+          echo "Release tag: $TAG"
+          echo "Release commit: $TAG_SHA"
 
-      - name: Determine release commit
-        id: commit
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
+          echo "sha=$TAG_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag points to current main
         shell: bash
-        run: |
-          set -e
-
-          TAG="$VERSION"
-
-          # IMPORTANT:
-          # refs/tags/$TAG returns the SHA of the tag object when the tag
-          # is annotated.
-          #
-          # refs/tags/$TAG^{} dereferences the tag and returns the SHA
-          # of the actual commit the tag points to.
-
-          SHA=$(git ls-remote origin "refs/tags/$TAG^{}" | awk '{print $1}')
-
-          if [ -z "$SHA" ]; then
-            echo "::error::Could not determine commit for tag $TAG."
-            exit 1
-          fi
-
-          echo "Release tag:    $TAG"
-          echo "Release commit: $SHA"
-
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-
-      - name: Verify release tag points to current main
         env:
-          SHA: ${{ steps.commit.outputs.sha }}
-        shell: bash
+          TAG_SHA: ${{ steps.tag.outputs.sha }}
         run: |
           set -e
 
@@ -115,180 +86,221 @@ jobs:
 
           MAIN_SHA=$(git rev-parse origin/main)
 
-          echo "Release commit: $SHA"
-          echo "Current main:   $MAIN_SHA"
-          echo ""
+          echo "Tag commit: $TAG_SHA"
+          echo "Main commit: $MAIN_SHA"
 
-          if [ "$SHA" != "$MAIN_SHA" ]; then
-            echo "::error::Release tag does not point to the current main commit."
-            echo "Tag target: $SHA"
-            echo "Main:       $MAIN_SHA"
+          if [ "$TAG_SHA" != "$MAIN_SHA" ]; then
+            echo "::error::Release tag does not point to current main."
             exit 1
           fi
 
-          echo "Verified: release tag points to the current main commit."
-
-      - name: Check successful Windows and Linux builds
+      - name: Find successful installer builds
         id: builds
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHA: ${{ steps.commit.outputs.sha }}
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.tag.outputs.sha }}
         run: |
           set -e
 
-          echo "Looking for successful builds for:"
-          echo "$SHA"
-          echo ""
+          WINDOWS_JSON=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${GITHUB_REPOSITORY}/actions/workflows/build-windows-installer.yml/runs?branch=main&per_page=50")
 
-          get_successful_run() {
-            local workflow_name="$1"
+          LINUX_JSON=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${GITHUB_REPOSITORY}/actions/workflows/build-linux-installer.yml/runs?branch=main&per_page=50")
 
-            gh api \
-              "repos/${{ github.repository }}/actions/runs" \
-              --paginate \
-              -q ".workflow_runs[] | select(
-                    .name == \"$workflow_name\" and
-                    .head_sha == \"$SHA\" and
-                    .conclusion == \"success\"
-                  ) | .id" \
-              | head -n 1
-          }
+          WINDOWS_RUN_ID=$(echo "$WINDOWS_JSON" | jq -r \
+            --arg sha "$TARGET_SHA" \
+            '.workflow_runs[] |
+             select(.head_sha == $sha and .conclusion == "success") |
+             .id' |
+            head -n 1)
 
-          WINDOWS_RUN_ID=$(get_successful_run "Build Windows Installer")
-          LINUX_RUN_ID=$(get_successful_run "Build Linux Installer")
-
-          echo "Windows run: ${WINDOWS_RUN_ID:-not found}"
-          echo "Linux run:   ${LINUX_RUN_ID:-not found}"
-          echo ""
+          LINUX_RUN_ID=$(echo "$LINUX_JSON" | jq -r \
+            --arg sha "$TARGET_SHA" \
+            '.workflow_runs[] |
+             select(.head_sha == $sha and .conclusion == "success") |
+             .id' |
+            head -n 1)
 
           if [ -z "$WINDOWS_RUN_ID" ]; then
-            echo "::error::No successful Windows build found for $SHA."
+            echo "::error::Successful Windows build not found for $TARGET_SHA."
             exit 1
           fi
 
           if [ -z "$LINUX_RUN_ID" ]; then
-            echo "::error::No successful Linux build found for $SHA."
+            echo "::error::Successful Linux build not found for $TARGET_SHA."
             exit 1
           fi
 
-          echo "Both builds verified."
+          echo "Windows build: $WINDOWS_RUN_ID"
+          echo "Linux build: $LINUX_RUN_ID"
 
           echo "windows_run_id=$WINDOWS_RUN_ID" >> "$GITHUB_OUTPUT"
           echo "linux_run_id=$LINUX_RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Check whether release already exists
+      - name: Check existing GitHub release
         id: existing
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -e
 
-          TAG="$VERSION"
-
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists."
-            echo "Nothing else needs to be created."
+            echo "GitHub release $TAG already exists."
+
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Release $TAG does not exist."
-            echo "A new release will be created."
+            echo "GitHub release $TAG does not exist."
+
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Download Windows installer
-        if: steps.existing.outputs.exists == 'false'
+      - name: Download Windows installer artifact
+        if: steps.existing.outputs.exists != 'true'
         uses: actions/download-artifact@v4
         with:
           name: SystemInfo-Setup
+          path: release-assets
+          github-token: ${{ github.token }}
           run-id: ${{ steps.builds.outputs.windows_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: release-assets/windows
 
-      - name: Download Linux AppImage
-        if: steps.existing.outputs.exists == 'false'
+      - name: Download Linux AppImage artifact
+        if: steps.existing.outputs.exists != 'true'
         uses: actions/download-artifact@v4
         with:
           name: SystemInfo-AppImage
+          path: release-assets
+          github-token: ${{ github.token }}
           run-id: ${{ steps.builds.outputs.linux_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: release-assets/linux
 
-      - name: Download Linux deb
-        if: steps.existing.outputs.exists == 'false'
+      - name: Download Linux deb artifact
+        if: steps.existing.outputs.exists != 'true'
         uses: actions/download-artifact@v4
         with:
           name: SystemInfo-deb
+          path: release-assets
+          github-token: ${{ github.token }}
           run-id: ${{ steps.builds.outputs.linux_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: release-assets/linux
 
-      - name: Verify release assets
-        if: steps.existing.outputs.exists == 'false'
+      - name: Prepare release assets
+        if: steps.existing.outputs.exists != 'true'
         shell: bash
         run: |
           set -e
 
-          echo "Release assets:"
-          find release-assets -type f -print
+          mkdir -p release-assets-final
 
-          if ! find release-assets -type f | grep -q .; then
-            echo "::error::No release assets were downloaded."
+          find release-assets \
+            -type f \
+            -maxdepth 3 \
+            -print
+
+          WINDOWS_EXE=$(find release-assets \
+            -type f \
+            -name "SystemInfo-Setup.exe" |
+            head -n 1)
+
+          APPIMAGE=$(find release-assets \
+            -type f \
+            -name "*.AppImage" |
+            head -n 1)
+
+          DEB=$(find release-assets \
+            -type f \
+            -name "*.deb" |
+            head -n 1)
+
+          if [ -z "$WINDOWS_EXE" ]; then
+            echo "::error::Windows installer was not found."
             exit 1
           fi
+
+          if [ -z "$APPIMAGE" ]; then
+            echo "::error::Linux AppImage was not found."
+            exit 1
+          fi
+
+          if [ -z "$DEB" ]; then
+            echo "::error::Linux .deb package was not found."
+            exit 1
+          fi
+
+          cp "$WINDOWS_EXE" release-assets-final/
+          cp "$APPIMAGE" release-assets-final/
+          cp "$DEB" release-assets-final/
+
+          echo ""
+          echo "Release assets:"
+          ls -lah release-assets-final/
 
       - name: Prepare release notes
-        if: steps.existing.outputs.exists == 'false'
+        if: steps.existing.outputs.exists != 'true'
+        shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        shell: bash
         run: |
           set -e
 
-          ESCAPED_VERSION=$(printf '%s\n' "$VERSION" | sed 's/[.[\*^$]/\\&/g')
+          awk -v version="$VERSION" '
+            $0 ~ "^## \\[" version "\\]" {
+              found=1
+              print
+              next
+            }
 
-          NOTES=$(awk \
-            "/^## \[${ESCAPED_VERSION}\]/{flag=1; next} /^## \[/{flag=0} flag" \
-            CHANGELOG.md)
+            found && /^## \[/ {
+              exit
+            }
 
-          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
-            echo "::error::Could not find release notes for [$VERSION]."
-            exit 1
+            found {
+              print
+            }
+          ' CHANGELOG.md > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "SystemInfo $VERSION" > release-notes.md
+            echo "" >> release-notes.md
+            echo "Release $VERSION." >> release-notes.md
           fi
 
-          printf '%s\n' "$NOTES" > release-notes.md
+          echo ""
+          echo "Release notes:"
+          cat release-notes.md
 
-          echo "Release notes prepared for $VERSION."
-
-      - name: Create GitHub Release
-        if: steps.existing.outputs.exists == 'false'
+      - name: Create GitHub release
+        if: steps.existing.outputs.exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: "SystemInfo ${{ steps.version.outputs.version }}"
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: SystemInfo ${{ steps.version.outputs.version }}
           body_path: release-notes.md
-          files: release-assets/**
+          files: |
+            release-assets-final/SystemInfo-Setup.exe
+            release-assets-final/*.AppImage
+            release-assets-final/*.deb
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Verify GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
+      - name: Verify GitHub release
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -e
 
-          gh release view "$VERSION"
+          gh release view "$TAG"
 
           echo ""
           echo "============================================"
-          echo " GITHUB RELEASE VERIFIED SUCCESSFULLY"
+          echo " GITHUB RELEASE CREATED / VERIFIED"
           echo "============================================"
-          echo "Version: $VERSION"
+          echo "Release: $TAG"
           echo "============================================"
-```

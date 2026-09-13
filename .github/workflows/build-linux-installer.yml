@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: linux-installer-${{ github.ref }}
@@ -21,200 +21,204 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
-      # ============================================================
-      # CHECK OUT REPOSITORY
-      # ============================================================
-
       - name: Check out the repo
         uses: actions/checkout@v5
-
-
-      # ============================================================
-      # .NET
-      # ============================================================
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
 
-
-      # ============================================================
-      # NODE.JS
-      # ============================================================
-
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
           node-version: "20"
-
-
-      # ============================================================
-      # PYTHON
-      # ============================================================
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-
-      # ============================================================
-      # BUILD TOOLS
-      #
-      # nasm/cmake/build-essential mirror what setup.sh checks for on a
-      # fresh dev machine. imagemagick converts the Windows .ico into a
-      # Linux-style .png icon at package time (kept as a single source
-      # icon in the repo instead of maintaining two).
-      # ============================================================
-
       - name: Install build tools
         run: |
+          set -e
+
           sudo apt-get update
-          sudo apt-get install -y nasm cmake build-essential imagemagick file libfuse2
+
+          sudo apt-get install -y \
+            nasm \
+            cmake \
+            build-essential \
+            imagemagick \
+            file \
+            libfuse2
 
       - name: Determine version
         id: version
+        shell: bash
         run: |
           set -e
+
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
             VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md || echo "0.0.0")
             VERSION="${VERSION}-dev.${GITHUB_RUN_NUMBER}"
           fi
+
           echo "Version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-
-      # ============================================================
-      # BUILD NATIVE C++ ENGINE
-      # ============================================================
-
       - name: Build native C++ engine
+        shell: bash
         run: |
           set -e
+
           mkdir -p native/build
+
           bash native/build.sh
 
-
-      # ============================================================
-      # BUILD .NET BACKEND
-      # ============================================================
-
       - name: Restore and build .NET backend
+        shell: bash
         run: |
           set -e
+
           dotnet restore backend/SystemMonitor.Api
-          dotnet build backend/SystemMonitor.Api --configuration Release --no-restore
 
-
-      # ============================================================
-      # BUILD FRONTEND
-      # ============================================================
+          dotnet build backend/SystemMonitor.Api \
+            --configuration Release \
+            --no-restore
 
       - name: Install frontend dependencies and build
         working-directory: frontend
+        shell: bash
         run: |
           set -e
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
           npm run build
-
-
-      # ============================================================
-      # PYTHON ANALYTICS
-      # ============================================================
 
       - name: Install Python analytics dependencies
         working-directory: analytics
+        shell: bash
         run: |
           set -e
+
           python -m pip install --upgrade pip
+
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           else
             python -m pip install fastapi uvicorn pymongo
           fi
 
-
-      # ============================================================
-      # STAGE SHARED PAYLOAD
-      #
-      # Both the AppImage and the .deb ship the same set of files —
-      # built once here, reused by both packaging steps below.
-      # ============================================================
-
-      - name: Stage payload directory
+      - name: Stage shared payload
+        shell: bash
         run: |
           set -e
+
           mkdir -p stage
+
           cp -r backend frontend native analytics assembly stage/
+
           cp start-all.sh setup.sh build.sh stage/
-          chmod +x stage/start-all.sh stage/setup.sh stage/build.sh
-          # Patched at packaging time in case the repo copy hasn't been
-          # patched yet — safe to run even if it already has been.
-          sed -i 's|LOG_DIR="\$PROJECT_ROOT/logs"|LOG_DIR="${SYSTEMINFO_LOG_DIR:-$PROJECT_ROOT/logs}"|' stage/start-all.sh
-          grep -q "SYSTEMINFO_LOG_DIR" stage/start-all.sh || (echo "::error::start-all.sh LOG_DIR patch did not apply" && exit 1)
+
+          chmod +x \
+            stage/start-all.sh \
+            stage/setup.sh \
+            stage/build.sh
+
+          sed -i \
+            's|LOG_DIR="\$PROJECT_ROOT/logs"|LOG_DIR="${SYSTEMINFO_LOG_DIR:-$PROJECT_ROOT/logs}"|' \
+            stage/start-all.sh
+
+          grep -q "SYSTEMINFO_LOG_DIR" stage/start-all.sh || {
+            echo "::error::start-all.sh LOG_DIR patch did not apply"
+            exit 1
+          }
 
       - name: Convert icon to PNG
+        shell: bash
         run: |
           set -e
+
           mkdir -p Output
+
           if [ -f packaging/linux/systeminfo.png ]; then
             cp packaging/linux/systeminfo.png systeminfo.png
           elif [ -f SystemInfo.ico ]; then
-            convert "SystemInfo.ico[0]" -resize 256x256 systeminfo.png
+            convert "SystemInfo.ico[0]" \
+              -resize 256x256 \
+              systeminfo.png
           else
-            echo "::error::No icon source found (packaging/linux/systeminfo.png or SystemInfo.ico)"
+            echo "::error::No icon source found."
             exit 1
           fi
 
-
-      # ============================================================
-      # BUILD APPIMAGE
-      # ============================================================
-
       - name: Build AppImage
+        shell: bash
         run: |
           set -e
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+
+          wget -q \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
+            -O appimagetool
+
           chmod +x appimagetool
 
           APPDIR="AppDir"
-          mkdir -p "$APPDIR/usr/share/systeminfo"
-          cp -r stage/* "$APPDIR/usr/share/systeminfo/"
 
-          cp packaging/linux/AppRun "$APPDIR/AppRun"
+          mkdir -p "$APPDIR/usr/share/systeminfo"
+
+          cp -r stage/* \
+            "$APPDIR/usr/share/systeminfo/"
+
+          cp packaging/linux/AppRun \
+            "$APPDIR/AppRun"
+
           chmod +x "$APPDIR/AppRun"
 
-          mkdir -p "$APPDIR/usr/share/applications"
-          cp packaging/linux/systeminfo.desktop "$APPDIR/usr/share/applications/"
-          cp packaging/linux/systeminfo.desktop "$APPDIR/systeminfo.desktop"
+          mkdir -p \
+            "$APPDIR/usr/share/applications"
 
-          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-          cp systeminfo.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/systeminfo.png"
-          cp systeminfo.png "$APPDIR/systeminfo.png"
+          cp packaging/linux/systeminfo.desktop \
+            "$APPDIR/usr/share/applications/"
 
-          # --appimage-extract-and-run avoids needing a working FUSE mount,
-          # which GitHub's Ubuntu runners frequently lack inside their
-          # container environment — this bypasses that entirely.
-          ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$APPDIR" "Output/SystemInfo-${{ steps.version.outputs.version }}-x86_64.AppImage"
+          cp packaging/linux/systeminfo.desktop \
+            "$APPDIR/systeminfo.desktop"
+
+          mkdir -p \
+            "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+
+          cp systeminfo.png \
+            "$APPDIR/usr/share/icons/hicolor/256x256/apps/systeminfo.png"
+
+          cp systeminfo.png \
+            "$APPDIR/systeminfo.png"
+
+          ARCH=x86_64 \
+            ./appimagetool \
+            --appimage-extract-and-run \
+            "$APPDIR" \
+            "Output/SystemInfo-${{ steps.version.outputs.version }}-x86_64.AppImage"
 
           if [ ! -f "Output/SystemInfo-${{ steps.version.outputs.version }}-x86_64.AppImage" ]; then
-            echo "::error::AppImage was not created"
+            echo "::error::AppImage was not created."
             exit 1
           fi
 
-
-      # ============================================================
-      # BUILD .DEB PACKAGE
-      # ============================================================
-
       - name: Build .deb package
+        shell: bash
         run: |
           set -e
+
           VERSION="${{ steps.version.outputs.version }}"
+
           PKG_DIR="deb/systeminfo_${VERSION}_amd64"
 
           mkdir -p "$PKG_DIR/DEBIAN"
@@ -223,17 +227,22 @@ jobs:
           mkdir -p "$PKG_DIR/usr/share/applications"
           mkdir -p "$PKG_DIR/usr/share/icons/hicolor/256x256/apps"
 
-          cp -r stage/* "$PKG_DIR/opt/systeminfo/"
-          cp systeminfo.png "$PKG_DIR/usr/share/icons/hicolor/256x256/apps/systeminfo.png"
+          cp -r stage/* \
+            "$PKG_DIR/opt/systeminfo/"
 
-          sed 's|Exec=start-all.sh|Exec=/opt/systeminfo/start-all.sh|' \
-            packaging/linux/systeminfo.desktop > "$PKG_DIR/usr/share/applications/systeminfo.desktop"
+          cp systeminfo.png \
+            "$PKG_DIR/usr/share/icons/hicolor/256x256/apps/systeminfo.png"
 
-          # /usr/bin/systeminfo lets a terminal user just type "systeminfo"
+          sed \
+            's|Exec=start-all.sh|Exec=/opt/systeminfo/start-all.sh|' \
+            packaging/linux/systeminfo.desktop \
+            > "$PKG_DIR/usr/share/applications/systeminfo.desktop"
+
           cat > "$PKG_DIR/usr/bin/systeminfo" << 'WRAPPER'
           #!/bin/bash
           exec /opt/systeminfo/start-all.sh "$@"
           WRAPPER
+
           chmod +x "$PKG_DIR/usr/bin/systeminfo"
 
           cat > "$PKG_DIR/DEBIAN/control" << CONTROL
@@ -249,31 +258,29 @@ jobs:
            Assembly engine, Python analytics, and a React dashboard.
           CONTROL
 
-          dpkg-deb --build --root-owner-group "$PKG_DIR" "Output/systeminfo_${VERSION}_amd64.deb"
+          dpkg-deb \
+            --build \
+            --root-owner-group \
+            "$PKG_DIR" \
+            "Output/systeminfo_${VERSION}_amd64.deb"
 
           if [ ! -f "Output/systeminfo_${VERSION}_amd64.deb" ]; then
-            echo "::error::.deb package was not created"
+            echo "::error::.deb package was not created."
             exit 1
           fi
 
-
-      # ============================================================
-      # VERIFY BOTH PACKAGES
-      # ============================================================
-
       - name: Verify installers exist
+        shell: bash
         run: |
           set -e
+
           echo "============================================"
           echo " LINUX INSTALLERS CREATED"
           echo "============================================"
-          ls -la Output/
+
+          ls -lah Output/
+
           echo "============================================"
-
-
-      # ============================================================
-      # UPLOAD ARTIFACTS
-      # ============================================================
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
@@ -290,12 +297,3 @@ jobs:
           path: Output/*.deb
           if-no-files-found: error
           retention-days: 30
-
-      # ============================================================
-      # Release creation itself now lives entirely in the separate
-      # "Create Release" workflow (.github/workflows/create-release.yml),
-      # which only fires once BOTH this workflow AND the Windows one
-      # have succeeded for the same commit. This workflow's only job
-      # is to build and upload its artifacts — never to publish a
-      # release on its own, even on a tag push.
-      # ============================================================
