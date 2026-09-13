@@ -1,29 +1,25 @@
 name: Build Windows Installer
 
 on:
-  # Normal development builds.
+  # Normal development builds
   push:
     branches:
       - main
 
-    # Version tags create a GitHub Release.
-    # Examples:
-    # v1.0.0
-    # v1.0.1
-    # v1.2.0
+    # Version tags create official GitHub Releases
+    # Examples: v1.0.0, v1.0.1, v1.0.2
     tags:
       - "v*.*.*"
 
-  # Allows you to run the build manually from:
-  # GitHub -> Actions -> Build Windows Installer -> Run workflow
+  # Manual build from GitHub Actions
   workflow_dispatch:
 
-# Required for creating GitHub Releases.
+# Required to create GitHub Releases
 permissions:
   contents: write
 
-# Prevent duplicate builds for the same branch.
-# A newer push to main cancels an older unfinished main build.
+# If several commits are pushed quickly, cancel the older
+# unfinished build for the same branch/tag.
 concurrency:
   group: windows-installer-${{ github.ref }}
   cancel-in-progress: true
@@ -39,8 +35,8 @@ jobs:
       # CHECKOUT
       # ============================================================
 
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - name: Check out the repo
+        uses: actions/checkout@v5
 
 
       # ============================================================
@@ -48,15 +44,9 @@ jobs:
       # ============================================================
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
-          cache: true
-          cache-dependency-path: |
-            **/packages.lock.json
-            **/packages.config
-            **/*.csproj
-            **/*.fsproj
 
 
       # ============================================================
@@ -64,23 +54,22 @@ jobs:
       # ============================================================
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
 
       # ============================================================
       # PYTHON
+      #
+      # No cache-dependency-path here because your repository does
+      # not currently contain analytics/requirements.txt.
       # ============================================================
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: analytics/requirements.txt
 
 
       # ============================================================
@@ -95,7 +84,7 @@ jobs:
 
 
       # ============================================================
-      # NATIVE C++ ENGINE
+      # BUILD NATIVE C++ ENGINE
       # ============================================================
 
       - name: Build native C++ engine
@@ -103,13 +92,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "Configuring CMake..."
+          Write-Host "Configuring native C++ engine..."
 
-          cmake -B native/build `
-            -A x64 `
-            native
+          cmake -B native/build -A x64 native
 
-          Write-Host "Building native engine..."
+          Write-Host "Building native C++ engine..."
 
           cmake --build native/build `
             --config Release `
@@ -124,11 +111,11 @@ jobs:
             Select-Object -First 1
 
           if (-not $dll) {
-            Write-Error "systemmonitor_native.dll was not produced by the native build."
+            Write-Error "systemmonitor_native.dll was not produced by the build."
             exit 1
           }
 
-          Write-Host "Found DLL:"
+          Write-Host "Found:"
           Write-Host $dll.FullName
 
           $destination = "backend/SystemMonitor.Api/systemmonitor_native.dll"
@@ -138,12 +125,12 @@ jobs:
             -Destination $destination `
             -Force
 
-          Write-Host "Copied native DLL to:"
+          Write-Host "Native DLL copied to:"
           Write-Host $destination
 
 
       # ============================================================
-      # .NET BACKEND
+      # BUILD .NET BACKEND
       # ============================================================
 
       - name: Restore .NET backend
@@ -161,12 +148,11 @@ jobs:
 
           dotnet build backend/SystemMonitor.Api `
             --configuration Release `
-            --no-restore `
-            --verbosity minimal
+            --no-restore
 
 
       # ============================================================
-      # FRONTEND
+      # BUILD FRONTEND
       # ============================================================
 
       - name: Install frontend dependencies
@@ -176,10 +162,11 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           if (Test-Path "package-lock.json") {
+            Write-Host "package-lock.json found. Running npm ci..."
             npm ci
           }
           else {
-            Write-Host "package-lock.json not found. Using npm install."
+            Write-Host "package-lock.json not found. Running npm install..."
             npm install
           }
 
@@ -195,6 +182,9 @@ jobs:
 
       # ============================================================
       # PYTHON ANALYTICS
+      #
+      # If analytics/requirements.txt exists, use it.
+      # Otherwise install the dependencies you previously specified.
       # ============================================================
 
       - name: Install Python analytics dependencies
@@ -204,13 +194,18 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           if (Test-Path "requirements.txt") {
-            pip install -r requirements.txt
+            Write-Host "analytics/requirements.txt found."
+            Write-Host "Installing Python dependencies from requirements.txt..."
+
+            python -m pip install --upgrade pip
+            python -m pip install -r requirements.txt
           }
           else {
-            Write-Host "requirements.txt not found."
-            Write-Host "Installing required analytics packages..."
+            Write-Host "analytics/requirements.txt not found."
+            Write-Host "Installing required Python dependencies..."
 
-            pip install fastapi uvicorn pymongo
+            python -m pip install --upgrade pip
+            python -m pip install fastapi uvicorn pymongo
           }
 
 
@@ -218,7 +213,7 @@ jobs:
       # BUILD SystemInfo.exe
       # ============================================================
 
-      - name: Build SystemInfo.exe
+      - name: Build SystemInfo.exe from start-all.ps1
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -259,10 +254,10 @@ jobs:
 
 
       # ============================================================
-      # INNO SETUP INSTALLER
+      # COMPILE INSTALLER
       # ============================================================
 
-      - name: Compile Windows installer
+      - name: Compile installer with Inno Setup
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -270,7 +265,7 @@ jobs:
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 
           if (-not (Test-Path $iscc)) {
-            Write-Error "Inno Setup compiler was not found at:"
+            Write-Error "Inno Setup compiler was not found:"
             Write-Error $iscc
             exit 1
           }
@@ -280,7 +275,7 @@ jobs:
             exit 1
           }
 
-          Write-Host "Compiling installer..."
+          Write-Host "Compiling Windows installer..."
 
           & $iscc ".\SystemInfo.iss"
 
@@ -294,7 +289,7 @@ jobs:
       # VERIFY INSTALLER
       # ============================================================
 
-      - name: Verify installer
+      - name: Verify installer exists
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -306,7 +301,7 @@ jobs:
             Write-Error $installer
 
             Write-Host ""
-            Write-Host "All EXE files found:"
+            Write-Host "Searching for all EXE files..."
 
             Get-ChildItem `
               -Path . `
@@ -321,9 +316,9 @@ jobs:
 
           Write-Host ""
           Write-Host "============================================"
-          Write-Host " WINDOWS INSTALLER CREATED SUCCESSFULLY"
+          Write-Host " WINDOWS INSTALLER CREATED"
           Write-Host "============================================"
-          Write-Host "File: $($file.FullName)"
+          Write-Host "Path: $($file.FullName)"
           Write-Host "Size: $($file.Length) bytes"
           Write-Host "============================================"
 
@@ -331,12 +326,12 @@ jobs:
       # ============================================================
       # UPLOAD ACTIONS ARTIFACT
       #
-      # This is available for every successful build.
+      # Every successful build gets an artifact.
       #
-      # Normal push:
+      # Normal main push:
       #   Actions -> Artifacts
       #
-      # Release tag:
+      # Version tag:
       #   Actions -> Artifacts
       #   AND GitHub Release
       # ============================================================
@@ -351,15 +346,19 @@ jobs:
 
 
       # ============================================================
-      # PREPARE RELEASE NOTES
+      # PREPARE RELEASE NOTES FROM CHANGELOG
       #
-      # ONLY runs for tags such as:
+      # Only runs for version tags.
       #
-      # v1.0.1
+      # Example:
+      #
       # v1.0.2
-      # v1.1.0
       #
-      # It extracts ONLY that version's section from CHANGELOG.md.
+      # It finds:
+      #
+      # ## [1.0.2]
+      #
+      # and takes ONLY that section.
       # ============================================================
 
       - name: Prepare release notes from CHANGELOG
@@ -370,7 +369,7 @@ jobs:
 
           $version = "${{ github.ref_name }}"
 
-          Write-Host "Preparing release notes for $version"
+          Write-Host "Preparing release notes for $version..."
 
           if (-not (Test-Path "CHANGELOG.md")) {
             Write-Error "CHANGELOG.md was not found."
@@ -383,16 +382,16 @@ jobs:
 
           $escapedVersion = [regex]::Escape($version)
 
-          # Find:
+          # Find the section belonging to this version.
           #
-          # ## [1.0.2]
+          # Example:
           #
-          # and capture everything until:
+          # ## [1.0.2] - 2026-09-20
+          #
+          # and stop before:
           #
           # ## [1.0.1]
           #
-          # or the end of the file.
-
           $pattern = "(?ms)^## \[$escapedVersion\].*?(?=^## \[|\z)"
 
           $match = [regex]::Match(
@@ -402,16 +401,16 @@ jobs:
 
           if (-not $match.Success) {
             Write-Error "Could not find [$version] in CHANGELOG.md."
-            Write-Error "Make sure CHANGELOG.md contains:"
-            Write-Error "## [$version]"
+            Write-Error ""
+            Write-Error "Expected something like:"
+            Write-Error "## [$version] - YYYY-MM-DD"
             exit 1
           }
 
           $notes = $match.Value.Trim()
 
-          # Remove the version heading because the GitHub Release
-          # already displays the version as its title.
-
+          # Remove the ## [version] heading.
+          # GitHub will use the release title instead.
           $notes = $notes -replace `
             "(?m)^## \[$escapedVersion\].*\r?\n", ""
 
@@ -429,7 +428,7 @@ jobs:
 
           Write-Host ""
           Write-Host "============================================"
-          Write-Host " RELEASE NOTES"
+          Write-Host " RELEASE NOTES FOR $version"
           Write-Host "============================================"
           Write-Host $notes
           Write-Host "============================================"
@@ -438,7 +437,7 @@ jobs:
       # ============================================================
       # CREATE GITHUB RELEASE
       #
-      # ONLY runs for version tags.
+      # ONLY runs for v*.*.* tags.
       #
       # Example:
       #
@@ -449,8 +448,8 @@ jobs:
       #
       # SystemInfo v1.0.2
       #
-      # With:
-      # - CHANGELOG notes for 1.0.2 only
+      # with:
+      # - Only the 1.0.2 CHANGELOG section
       # - SystemInfo-Setup.exe
       # ============================================================
 
