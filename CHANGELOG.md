@@ -6,6 +6,17 @@ All notable changes to SystemInfo are documented here.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Known Issues
+
+
+## [1.0.3] - 2026-09-13
+
+### Added
+
 - Linux packaging: AppImage and .deb builds via a new "Build Linux Installer" GitHub Actions workflow, producing installers alongside the existing Windows one.
 - `start-all.sh` now supports a `SYSTEMINFO_LOG_DIR` environment override (defaults to the old behavior when unset) — required so logging works inside an AppImage's read-only runtime filesystem.
 
@@ -14,6 +25,8 @@ All notable changes to SystemInfo are documented here.
 ### Fixed
 
 - Fixed a PowerShell variable/colon parsing error in `start-all.ps1` (`Fail-WithLog`: `"$logfile:"` was being misread as a scope qualifier) that caused the packaged Windows application to crash immediately after a successful install.
+- Fixed the AppImage build failing under GitHub Actions due to no working FUSE mount (`appimagetool` now runs with `--appimage-extract-and-run`).
+- Fixed the AppImage build failing desktop-file validation (`Categories=System;Monitoring;` used an unregistered value — changed to the registered `System;Monitor;`).
 
 ### Known Issues
 
