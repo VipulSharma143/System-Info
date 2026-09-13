@@ -1,9 +1,13 @@
 name: build-windows-installer
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,9 +17,15 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # ------------------------------------------------------------
+      # CHECKOUT
+      # ------------------------------------------------------------
       - name: Check out the repo
         uses: actions/checkout@v4
 
+      # ------------------------------------------------------------
+      # SETUP TOOLS
+      # ------------------------------------------------------------
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -37,12 +47,18 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup -y
 
+      # ------------------------------------------------------------
+      # BUILD NATIVE C++ ENGINE
+      # ------------------------------------------------------------
       - name: Build native C++ engine
         run: |
           cmake -B native/build -A x64 native
           cmake --build native/build --config Release
 
-          $dll = Get-ChildItem -Recurse -Filter "systemmonitor_native.dll" -Path "native/build" |
+          $dll = Get-ChildItem `
+            -Recurse `
+            -Filter "systemmonitor_native.dll" `
+            -Path "native/build" |
             Select-Object -First 1
 
           if (-not $dll) {
@@ -50,15 +66,25 @@ jobs:
             exit 1
           }
 
-          Copy-Item $dll.FullName -Destination "backend/SystemMonitor.Api/"
+          Copy-Item `
+            $dll.FullName `
+            -Destination "backend/SystemMonitor.Api/"
         shell: pwsh
 
+      # ------------------------------------------------------------
+      # BUILD .NET BACKEND
+      # ------------------------------------------------------------
       - name: Restore and build .NET backend
         run: |
           dotnet restore backend/SystemMonitor.Api
-          dotnet build backend/SystemMonitor.Api --configuration Release --no-restore
+          dotnet build backend/SystemMonitor.Api `
+            --configuration Release `
+            --no-restore
         shell: pwsh
 
+      # ------------------------------------------------------------
+      # BUILD FRONTEND
+      # ------------------------------------------------------------
       - name: Install frontend dependencies and build
         working-directory: frontend
         run: |
@@ -66,47 +92,103 @@ jobs:
           npm run build
         shell: pwsh
 
+      # ------------------------------------------------------------
+      # PYTHON ANALYTICS
+      # ------------------------------------------------------------
       - name: Install Python analytics dependencies
         working-directory: analytics
-        run: pip install fastapi uvicorn pymongo
+        run: |
+          pip install fastapi uvicorn pymongo
         shell: pwsh
 
+      # ------------------------------------------------------------
+      # BUILD SYSTEMINFO.EXE
+      # ------------------------------------------------------------
       - name: Build SystemInfo.exe from start-all.ps1
         run: |
           Install-Module ps2exe -Scope CurrentUser -Force
-          Invoke-ps2exe .\start-all.ps1 .\SystemInfo.exe `
+
+          Invoke-ps2exe `
+            .\start-all.ps1 `
+            .\SystemInfo.exe `
             -iconFile .\SystemInfo.ico `
             -noConsole `
             -title "SystemInfo"
         shell: pwsh
 
+      # ------------------------------------------------------------
+      # BUILD INSTALLER
+      # ------------------------------------------------------------
       - name: Compile installer with Inno Setup
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" SystemInfo.iss
         shell: pwsh
 
+      # ------------------------------------------------------------
+      # VERIFY INSTALLER
+      # ------------------------------------------------------------
       - name: Verify installer exists
         run: |
           if (-not (Test-Path "Output/SystemInfo-Setup.exe")) {
             Write-Error "Output/SystemInfo-Setup.exe was not created."
+
+            Write-Host ""
             Write-Host "EXE files found:"
-            Get-ChildItem -Path . -Recurse -Filter *.exe |
+            Get-ChildItem `
+              -Path . `
+              -Recurse `
+              -Filter *.exe |
               Select-Object FullName, Length
+
             exit 1
           }
 
           $file = Get-Item "Output/SystemInfo-Setup.exe"
-          Write-Host "Installer created successfully:"
-          Write-Host $file.FullName
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "Installer created successfully!"
+          Write-Host "========================================"
+          Write-Host "Path: $($file.FullName)"
           Write-Host "Size: $($file.Length) bytes"
+          Write-Host "========================================"
         shell: pwsh
 
+      # ------------------------------------------------------------
+      # ALWAYS UPLOAD ARTIFACT
+      #
+      # This means normal main builds also give you a downloadable
+      # installer under Actions -> Artifacts.
+      # ------------------------------------------------------------
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SystemInfo-Setup
+          path: Output/SystemInfo-Setup.exe
+          if-no-files-found: error
+
+      # ------------------------------------------------------------
+      # CREATE GITHUB RELEASE
+      #
+      # This ONLY runs when the workflow was triggered by a version
+      # tag such as:
+      #
+      # v1.0.0
+      # v1.0.1
+      # v2.0.0
+      #
+      # Normal pushes to main will NOT create a Release.
+      # ------------------------------------------------------------
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "build-${{ github.run_number }}"
-          name: "SystemInfo Build ${{ github.run_number }}"
+          tag_name: ${{ github.ref_name }}
+          name: "SystemInfo ${{ github.ref_name }}"
           generate_release_notes: true
           files: Output/SystemInfo-Setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+
