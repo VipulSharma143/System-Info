@@ -1,0 +1,4 @@
+# Build-time only — never installed on an end-user PC.
+# Used exclusively by CI to freeze analytics_service.py into analytics.exe.
+-r requirements.txt
+pyinstaller==6.11.1

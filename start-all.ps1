@@ -1,8 +1,13 @@
-# start-all.ps1 — System Info Windows launcher
+# start-all.ps1 — System Info DEVELOPER launcher
 #
-# Supports:
-#   1. Running directly as start-all.ps1
-#   2. Running as the compiled SystemInfo.exe created with PS2EXE
+# DEV-ONLY. Starts the three services via their dev commands (dotnet run,
+# npm run dev, python -m uvicorn) for local development.
+#
+# This is NO LONGER what ships as SystemInfo.exe — the production launcher
+# is launcher/Program.cs, a self-contained .NET executable that starts the
+# already-built backend/SystemMonitor.Api.exe and analytics/analytics.exe
+# directly, with no dev toolchain required. See
+# .github/workflows/build-windows-installer.yml for the production build.
 #
 # Responsibilities:
 #   - Resolve the application directory safely

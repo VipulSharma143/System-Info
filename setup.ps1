@@ -1,4 +1,12 @@
-# setup.ps1 — System Info setup wizard (Windows)
+# setup.ps1 — System Info DEVELOPER setup wizard (Windows)
+#
+# DEV-ONLY. This is for setting up a development machine (installing
+# Node/Python/build tools, building native deps, running the dev servers).
+# It is NOT run by the installer anymore and is NOT required to use the
+# packaged application — SystemInfo-Setup.exe installs a fully self-contained
+# build (see .github/workflows/build-windows-installer.yml and
+# launcher/Program.cs) that needs none of this on the end user's PC.
+#
 # Run from an elevated PowerShell: powershell -ExecutionPolicy Bypass -File setup.ps1
 #
 # Windows equivalent of setup.sh. Checks prerequisites, offers to install

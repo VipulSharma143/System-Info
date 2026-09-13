@@ -1,28 +1,38 @@
 ; SystemInfo.iss — Inno Setup script
 ;
-; Compiles into "SystemInfo-Setup.exe" (rename the OutputBaseFilename below to
-; just "setup" if you want the literal filename "setup.exe").
+; Compiles into "SystemInfo-Setup.exe".
+;
+; IMPORTANT — this no longer packages the repository. It packages ONLY the
+; production staging directory built by CI at packaging\app\ (see
+; .github/workflows/build-windows-installer.yml). That directory contains:
+;
+;     packaging\app\SystemInfo.exe          (self-contained launcher)
+;     packaging\app\SystemInfo.ico
+;     packaging\app\backend\...             (self-contained .NET publish
+;                                             output + systemmonitor_native.dll)
+;     packaging\app\analytics\...           (PyInstaller-built analytics.exe)
+;     packaging\app\backend\wwwroot\...     (React production build, already
+;                                             embedded in the backend publish)
+;
+; It contains NO source code, no node_modules, no .git, no dev scripts, and
+; requires no Node/npm/Python/pip/.NET SDK on the machine it's installed on.
 ;
 ; HOW TO BUILD (must be done on Windows — this can't be compiled from Linux):
-;   1. Install Inno Setup (free): https://jrsoftware.org/isdl.php
-;   2. Put this .iss file directly in your project root — the SAME folder as
-;      setup.ps1, start-all.ps1, backend/, frontend/, native/, analytics/
-;      (it copies with Source: ".\*", i.e. "everything next to me")
-;   3. Put SystemInfo.exe (built via ps2exe, see README-WINDOWS-INSTALLER.md)
-;      and SystemInfo.ico in that same project root
-;   4. Right-click SystemInfo.iss -> "Compile" (or run ISCC.exe SystemInfo.iss)
-;   5. Output lands in .\Output\SystemInfo-Setup.exe
+;   1. Run the CI pipeline (or its steps locally) to produce packaging\app\
+;   2. Install Inno Setup (free): https://jrsoftware.org/isdl.php
+;   3. Right-click SystemInfo.iss -> "Compile" (or run ISCC.exe SystemInfo.iss)
+;   4. Output lands in .\Output\SystemInfo-Setup.exe
 ;
 ; What it does when a user double-clicks the resulting installer:
-;   - Copies the whole project to Program Files (or wherever they choose)
+;   - Copies packaging\app\ to Program Files (or wherever they choose)
 ;   - Creates a Start Menu + optional Desktop shortcut called "SystemInfo"
-;     that runs start-all.ps1 with your icon
-;   - Runs setup.ps1 automatically at the end of install (prerequisite
-;     check/install, native build, dependency install, MONGO_URI prompt)
+;   - That's it. No post-install script runs. SystemInfo.exe (the launcher)
+;     starts the already-built backend and analytics executables itself.
 
 #define MyAppName "SystemInfo"
 #define MyAppVersion "1.0"
 #define MyAppExeName "SystemInfo.exe"
+#define StagingDir "packaging\app"
 
 [Setup]
 AppId={{A6E1F2B0-7C3D-4E5A-9B1C-000000000000}}
@@ -32,11 +42,17 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=Output
 OutputBaseFilename=SystemInfo-Setup
-SetupIconFile=SystemInfo.ico
+SetupIconFile={#StagingDir}\SystemInfo.ico
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=admin
 WizardStyle=modern
+; Refuse to compile against a stale/missing staging directory rather than
+; silently packaging an old build — this is the guardrail against the old
+; "copy the whole repo" failure mode.
+#if !FileExists(StagingDir + "\SystemInfo.exe")
+  #error "packaging\app\SystemInfo.exe not found. Run the production build (see .github/workflows/build-windows-installer.yml) before compiling the installer."
+#endif
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -45,25 +61,15 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-; This .iss file lives in the project root (alongside setup.ps1, start-all.ps1,
-; SystemInfo.exe, SystemInfo.ico) — so the source is ".\*", not "..\*".
-; Copies everything except node_modules/bin/obj/build junk, git internals, and
-; the installer's own build artifacts. *.ico is intentionally NOT excluded —
-; the shortcut in [Icons] below needs it present in {app} after install.
-Source: ".\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; \
-    Excludes: "node_modules,bin,obj,dist,build,.git,logs,Output,*.iss"
+; ONLY the production staging directory — nothing else in the repo.
+Source: "{#StagingDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-; Start Menu + optional Desktop shortcut, both named "SystemInfo", running the
-; launcher hidden-console via a tiny wrapper (see wrapper note below).
 Name: "{group}\{#MyAppName}"; Filename: "{app}\SystemInfo.exe"; IconFilename: "{app}\SystemInfo.ico"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\SystemInfo.exe"; IconFilename: "{app}\SystemInfo.ico"; Tasks: desktopicon
 
 [Run]
-; Runs setup.ps1 once, right after files are copied, before the wizard closes.
-Filename: "powershell.exe"; \
-    Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup.ps1"""; \
-    WorkingDir: "{app}"; \
-    Flags: runascurrentuser waituntilterminated; \
-    StatusMsg: "Running first-time setup (this can take several minutes)..."
+; The installer only installs. No setup.ps1, no build step, no dependency
+; installation happens here — SystemInfo.exe is already a fully self-contained
+; production build.
 Filename: "{app}\SystemInfo.exe"; Description: "Launch SystemInfo now"; Flags: postinstall nowait skipifsilent

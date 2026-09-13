@@ -4,6 +4,15 @@
 <TargetFramework>net10.0</TargetFramework>
 <Nullable>enable</Nullable>
 <ImplicitUsings>enable</ImplicitUsings>
+
+<!-- Production packaging: `dotnet publish -c Release -r win-x64` produces a
+     self-contained folder that runs on a clean Windows PC with no .NET
+     runtime/SDK installed. Not single-file, since systemmonitor_native.dll
+     needs to sit next to the exe as a normal loadable native library. -->
+<SelfContained>true</SelfContained>
+<RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
+<PublishSingleFile>false</PublishSingleFile>
+<InvariantGlobalization>true</InvariantGlobalization>
 </PropertyGroup>
 
 <ItemGroup>
@@ -19,5 +28,19 @@
 <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
 <None Include="systemmonitor_native.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('systemmonitor_native.dll')" />
 </ItemGroup>
+
+<!-- Pulls the already-built React production bundle (frontend/dist, built by
+     CI via `npm run build` BEFORE this project is published) into wwwroot so
+     Program.cs's UseStaticFiles()/MapFallbackToFile() can serve it. This is
+     the opposite of the old model where SystemInfo.iss excluded `dist`
+     entirely — here it becomes part of the actual publish output. Skipped
+     silently if frontend/dist doesn't exist (plain `dotnet build`/`dotnet run`
+     in local dev, where the frontend runs on its own via Vite). -->
+<Target Name="CopyFrontendDist" BeforeTargets="Publish" Condition="Exists('..\..\frontend\dist')">
+<ItemGroup>
+<FrontendDistFiles Include="..\..\frontend\dist\**\*" />
+</ItemGroup>
+<Copy SourceFiles="@(FrontendDistFiles)" DestinationFolder="wwwroot\%(RecursiveDir)" SkipUnchangedFiles="true" />
+</Target>
 
 </Project>

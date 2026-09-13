@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+<PropertyGroup>
+<OutputType>WinExe</OutputType>
+<TargetFramework>net10.0</TargetFramework>
+<Nullable>enable</Nullable>
+<ImplicitUsings>enable</ImplicitUsings>
+<AssemblyName>SystemInfo</AssemblyName>
+<ApplicationIcon>..\SystemInfo.ico</ApplicationIcon>
+
+<!-- Same reasoning as the backend: self-contained so the launcher runs on a
+     clean Windows PC with no .NET runtime installed. This REPLACES the old
+     ps2exe-compiled start-all.ps1 — no PowerShell execution policy, no
+     `dotnet run`/`npm run dev`, no dev-tool dependency at all. -->
+<SelfContained>true</SelfContained>
+<RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
+<PublishSingleFile>true</PublishSingleFile>
+<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+<InvariantGlobalization>true</InvariantGlobalization>
+
+<!-- WinExe hides the console window on Windows (equivalent to ps2exe's
+     -noConsole), while still letting us write to log files. -->
+</PropertyGroup>
+
+</Project>

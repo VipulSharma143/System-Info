@@ -25,4 +25,9 @@ add_library(systemmonitor_native SHARED
 
 if(NOT WIN32)
     target_link_libraries(systemmonitor_native stdc++fs)
+else()
+    # windows_provider.cpp relies on #pragma comment(lib, "dxgi.lib") for
+    # DXGI (CreateDXGIFactory), which only MSVC honors. Declaring it here too
+    # means the link doesn't silently depend on a compiler-specific pragma.
+    target_link_libraries(systemmonitor_native dxgi)
 endif()

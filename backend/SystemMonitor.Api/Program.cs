@@ -56,4 +56,17 @@ app.MapNativeEndpoints();
 app.MapAnalyticsEndpoints();
 app.MapSpeedTestEndpoints();
 
+// Production: serve the React production build (frontend/dist, copied to
+// wwwroot at publish time — see SystemMonitor.Api.csproj) directly from the
+// backend, so the packaged app is a single process with no `npm run dev`
+// dependency. In development wwwroot won't exist (the frontend runs
+// separately via Vite on :5173), so this is skipped rather than erroring.
+var webRootPath = app.Environment.WebRootPath;
+if (!string.IsNullOrEmpty(webRootPath) && Directory.Exists(webRootPath))
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+    app.MapFallbackToFile("index.html");
+}
+
 app.Run();
