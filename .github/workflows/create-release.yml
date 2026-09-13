@@ -1,20 +1,31 @@
+```yaml
 name: Create Release
 
-# Fires whenever EITHER build workflow finishes — but only actually creates
-# a release once BOTH have a successful run recorded for the same commit.
-# This is the fail-safe: if either build fails, no release is ever created,
-# no matter how many times this workflow itself runs.
+# Fires after the Create Release Tag workflow succeeds.
+#
+# The tag workflow is responsible for creating the version tag only after
+# the required build checks have passed.
+#
+# This workflow then:
+#   1. Finds the version from CHANGELOG.md.
+#   2. Builds the expected tag name (v1.0.3).
+#   3. Verifies the tag exists.
+#   4. Verifies BOTH Windows and Linux builds succeeded for the exact same commit.
+#   5. Downloads both build artifacts.
+#   6. Creates the GitHub Release.
+#
+# This keeps tag creation and release creation as two separate, reliable steps.
 
 on:
   workflow_run:
     workflows:
-      - "Build Windows Installer"
-      - "Build Linux Installer"
+      - "Create Release Tag"
     types:
       - completed
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: create-release-${{ github.event.workflow_run.head_sha }}
@@ -24,21 +35,16 @@ jobs:
   gate-and-release:
     runs-on: ubuntu-latest
 
-    # Only proceed at all if THIS run succeeded and came from a tag push.
-    # (A failed run here means one build failed — nothing further happens,
-    # which is exactly the point: no release gets created.)
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+    # Only continue when Create Release Tag completed successfully.
+    if: github.event.workflow_run.conclusion == 'success'
 
     steps:
 
       # ============================================================
-      # CHECK OUT THE EXACT COMMIT THAT WAS BUILT
+      # CHECK OUT THE EXACT COMMIT
       # ============================================================
 
-      - name: Check out the tagged commit
+      - name: Check out release commit
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
@@ -46,12 +52,70 @@ jobs:
 
 
       # ============================================================
-      # CHECK WHETHER BOTH BUILDS HAVE SUCCEEDED FOR THIS COMMIT
+      # FIND VERSION FROM CHANGELOG
       #
-      # Queries both workflows' run history filtered to this exact SHA.
-      # Only counts a workflow as "passed" if it has a completed,
-      # successful run for THIS commit — an old success from a
-      # different commit never counts.
+      # CHANGELOG:
+      #
+      # ## [1.0.3] - 2026-09-13
+      #
+      # Git tag:
+      #
+      # v1.0.3
+      # ============================================================
+
+      - name: Find release version
+        id: version
+        shell: bash
+        run: |
+          set -e
+
+          VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md)
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not find a version in CHANGELOG.md."
+            echo "Expected something like:"
+            echo "## [1.0.3] - 2026-09-13"
+            exit 1
+          fi
+
+          TAG="v$VERSION"
+
+          echo "Found version: $VERSION"
+          echo "Release tag: $TAG"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+
+      # ============================================================
+      # VERIFY RELEASE TAG EXISTS
+      # ============================================================
+
+      - name: Verify release tag exists
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -e
+
+          echo "Checking remote tag: $TAG"
+
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Release tag $TAG does not exist on origin."
+            exit 1
+          fi
+
+          echo "Verified: $TAG exists on origin."
+
+
+      # ============================================================
+      # CHECK BOTH BUILDS SUCCEEDED FOR THE SAME COMMIT
+      #
+      # IMPORTANT:
+      # We use the SHA from Create Release Tag.
+      #
+      # We do NOT use head_branch to determine the release version.
+      # The version comes from CHANGELOG.md.
       # ============================================================
 
       - name: Check both builds succeeded
@@ -59,11 +123,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
         run: |
           set -e
 
+          echo "Checking successful builds for commit:"
+          echo "$SHA"
+          echo ""
+
           check_workflow_success() {
             local workflow_name="$1"
+
             gh api "repos/${{ github.repository }}/actions/runs" \
               --paginate \
               -q ".workflow_runs[] | select(.name==\"$workflow_name\" and .head_sha==\"$SHA\" and .conclusion==\"success\") | .id" \
@@ -75,40 +145,59 @@ jobs:
 
           echo "Windows run for $SHA: ${WINDOWS_RUN_ID:-none}"
           echo "Linux run for $SHA:   ${LINUX_RUN_ID:-none}"
+          echo ""
 
-          if [ -z "$WINDOWS_RUN_ID" ] || [ -z "$LINUX_RUN_ID" ]; then
-            echo "Not both builds have succeeded yet for this commit — nothing to do."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          if [ -z "$WINDOWS_RUN_ID" ]; then
+            echo "::error::No successful Windows build found for $SHA."
+            exit 1
           fi
 
-          echo "Both builds succeeded — proceeding to release."
-          echo "ready=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$LINUX_RUN_ID" ]; then
+            echo "::error::No successful Linux build found for $SHA."
+            exit 1
+          fi
+
+          echo "Both builds succeeded for the exact same commit."
+
           echo "windows_run_id=$WINDOWS_RUN_ID" >> "$GITHUB_OUTPUT"
           echo "linux_run_id=$LINUX_RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Check release doesn't already exist
-        if: steps.gate.outputs.ready == 'true'
+
+      # ============================================================
+      # CHECK WHETHER RELEASE ALREADY EXISTS
+      #
+      # This makes the workflow safe if Create Release Tag triggers
+      # this workflow more than once.
+      # ============================================================
+
+      - name: Check release does not already exist
         id: existing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
         run: |
           set -e
-          TAG="${{ github.event.workflow_run.head_branch }}"
+
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — this is the second (redundant) trigger, skipping."
+            echo "Release $TAG already exists."
+            echo "Nothing else needs to be created."
+
             echo "should_create=false" >> "$GITHUB_OUTPUT"
           else
+            echo "Release $TAG does not exist."
+            echo "A new release will be created."
+
             echo "should_create=true" >> "$GITHUB_OUTPUT"
           fi
 
 
       # ============================================================
-      # DOWNLOAD ARTIFACTS FROM BOTH SUCCESSFUL RUNS
+      # DOWNLOAD WINDOWS INSTALLER
       # ============================================================
 
       - name: Download Windows installer artifact
-        if: steps.gate.outputs.ready == 'true' && steps.existing.outputs.should_create == 'true'
+        if: steps.existing.outputs.should_create == 'true'
         uses: actions/download-artifact@v4
         with:
           name: SystemInfo-Setup
@@ -116,8 +205,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: release-assets
 
+
+      # ============================================================
+      # DOWNLOAD LINUX APPIMAGE
+      # ============================================================
+
       - name: Download AppImage artifact
-        if: steps.gate.outputs.ready == 'true' && steps.existing.outputs.should_create == 'true'
+        if: steps.existing.outputs.should_create == 'true'
         uses: actions/download-artifact@v4
         with:
           name: SystemInfo-AppImage
@@ -125,8 +219,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: release-assets
 
+
+      # ============================================================
+      # DOWNLOAD LINUX DEB
+      # ============================================================
+
       - name: Download .deb artifact
-        if: steps.gate.outputs.ready == 'true' && steps.existing.outputs.should_create == 'true'
+        if: steps.existing.outputs.should_create == 'true'
         uses: actions/download-artifact@v4
         with:
           name: SystemInfo-deb
@@ -136,45 +235,99 @@ jobs:
 
 
       # ============================================================
-      # PREPARE RELEASE NOTES FROM CHANGELOG
+      # SHOW RELEASE ASSETS
+      #
+      # Useful for debugging. If an artifact is missing, the workflow
+      # will fail before attempting to publish an incomplete release.
+      # ============================================================
+
+      - name: Verify release assets
+        if: steps.existing.outputs.should_create == 'true'
+        shell: bash
+        run: |
+          set -e
+
+          echo "Release assets:"
+          find release-assets -type f -maxdepth 3 -print
+
+          if ! find release-assets -type f | grep -q .; then
+            echo "::error::No release assets were downloaded."
+            exit 1
+          fi
+
+
+      # ============================================================
+      # PREPARE RELEASE NOTES
       # ============================================================
 
       - name: Prepare release notes from CHANGELOG
-        if: steps.gate.outputs.ready == 'true' && steps.existing.outputs.should_create == 'true'
+        if: steps.existing.outputs.should_create == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
         run: |
           set -e
-          TAG="${{ github.event.workflow_run.head_branch }}"
-          VERSION="${TAG#v}"
-          ESCAPED_VERSION=$(printf '%s\n' "$VERSION" | sed 's/[.[\*^$]/\\&/g')
 
           if [ ! -f CHANGELOG.md ]; then
             echo "::error::CHANGELOG.md was not found."
             exit 1
           fi
 
-          NOTES=$(awk "/^## \[${ESCAPED_VERSION}\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md)
+          ESCAPED_VERSION=$(printf '%s\n' "$VERSION" | sed 's/[.[\*^$]/\\&/g')
+
+          NOTES=$(awk \
+            "/^## \[${ESCAPED_VERSION}\]/{flag=1; next} /^## \[/{flag=0} flag" \
+            CHANGELOG.md)
 
           if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
-            echo "::error::Could not find [$VERSION] in CHANGELOG.md."
+            echo "::error::Could not find release notes for [$VERSION] in CHANGELOG.md."
             exit 1
           fi
 
           echo "$NOTES" > release-notes.md
 
+          echo "Release notes prepared for version $VERSION."
+
 
       # ============================================================
-      # CREATE THE RELEASE — ONLY REACHED IF BOTH BUILDS PASSED
+      # CREATE GITHUB RELEASE
       # ============================================================
 
       - name: Create GitHub Release
-        if: steps.gate.outputs.ready == 'true' && steps.existing.outputs.should_create == 'true'
+        if: steps.existing.outputs.should_create == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.workflow_run.head_branch }}
-          name: "SystemInfo ${{ github.event.workflow_run.head_branch }}"
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "SystemInfo ${{ steps.version.outputs.tag }}"
           body_path: release-notes.md
           files: release-assets/**
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+      # ============================================================
+      # FINAL VERIFICATION
+      # ============================================================
+
+      - name: Verify GitHub Release
+        if: steps.existing.outputs.should_create == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -e
+
+          echo "Verifying GitHub Release: $TAG"
+
+          gh release view "$TAG"
+
+          echo ""
+          echo "============================================"
+          echo " GITHUB RELEASE CREATED SUCCESSFULLY"
+          echo "============================================"
+          echo "Release: $TAG"
+          echo "============================================"
+```
