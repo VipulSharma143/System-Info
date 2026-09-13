@@ -1,179 +1,649 @@
-# start-all.ps1 — one-command launcher for System Info (Windows)
-# Run: powershell -ExecutionPolicy Bypass -File start-all.ps1
+```powershell
+# start-all.ps1 — System Info Windows launcher
 #
-# Mirrors start-all.sh: starts backend, analytics, frontend in order,
-# waits for each to actually respond before starting the next, fails
-# loudly with the real log tail on timeout, and pins the frontend port
-# with --strictPort so a silent port bump never masquerades as success.
+# Supports:
+#   1. Running directly as start-all.ps1
+#   2. Running as the compiled SystemInfo.exe created with PS2EXE
+#
+# Responsibilities:
+#   - Resolve the application directory safely
+#   - Validate required application folders
+#   - Validate MONGO_URI
+#   - Check required ports
+#   - Start backend, analytics, and frontend in order
+#   - Wait for every service to become ready
+#   - Write useful logs
+#   - Clean up child jobs when the launcher exits
+#
+# Development launcher:
+#   powershell -ExecutionPolicy Bypass -File .\start-all.ps1
+#
+# Compiled launcher:
+#   SystemInfo.exe
 
 $ErrorActionPreference = "Stop"
-$ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# ============================================================
+# 1. Resolve application root safely
+# ============================================================
+#
+# When running as a normal .ps1 file, use the script location.
+#
+# When compiled with PS2EXE, $PSScriptRoot and
+# $MyInvocation.MyCommand.Path can be unavailable/null.
+# PS2EXE exposes $ScriptRoot for the executable location.
+#
+# We deliberately try multiple safe fallbacks so the launcher
+# does not fail with:
+#
+# "Cannot bind argument to parameter 'Path' because it is null."
+#
+
+$ProjectRoot = $null
+
+# Compiled PS2EXE executable
+if (-not [string]::IsNullOrWhiteSpace($ScriptRoot)) {
+    $ProjectRoot = $ScriptRoot
+}
+
+# Normal PowerShell script
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        $ProjectRoot = $PSScriptRoot
+    }
+}
+
+# MyInvocation fallback for normal .ps1 execution
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $scriptPath = $MyInvocation.MyCommand.Path
+
+    if (-not [string]::IsNullOrWhiteSpace($scriptPath)) {
+        $ProjectRoot = Split-Path -Parent $scriptPath
+    }
+}
+
+# Current executable/process directory as final fallback
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    try {
+        $ProjectRoot = [AppDomain]::CurrentDomain.BaseDirectory
+    }
+    catch {
+        $ProjectRoot = $null
+    }
+}
+
+# Final validation
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    Write-Host ""
+    Write-Host "==================================================" -ForegroundColor Red
+    Write-Host " [ERROR] Unable to determine application directory." -ForegroundColor Red
+    Write-Host "==================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "System Info could not determine where it was installed."
+    Write-Host "Please reinstall the application and try again."
+    Write-Host ""
+    exit 1
+}
+
+try {
+    $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+}
+catch {
+    Write-Host ""
+    Write-Host "[ERROR] Invalid application directory:" -ForegroundColor Red
+    Write-Host $ProjectRoot
+    Write-Host ""
+    exit 1
+}
+
+# Remove trailing directory separator except for filesystem root.
+$ProjectRoot = $ProjectRoot.TrimEnd('\', '/')
+
+# ============================================================
+# 2. Application paths
+# ============================================================
+
 $LogDir = Join-Path $ProjectRoot "logs"
-New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+$BackendDir = Join-Path $ProjectRoot "backend\SystemMonitor.Api"
+$AnalyticsDir = Join-Path $ProjectRoot "analytics"
+$FrontendDir = Join-Path $ProjectRoot "frontend"
+
+$BackendProject = Join-Path $BackendDir "SystemMonitor.Api.csproj"
+$AnalyticsService = Join-Path $AnalyticsDir "analytics_service.py"
+$FrontendPackage = Join-Path $FrontendDir "package.json"
 
 $AnalyticsPort = 8001
-$FrontendPort  = 5173
+$FrontendPort = 5173
+
 $Jobs = @()
 
-function Fail-WithLog($service, $logfile) {
+# ============================================================
+# 3. Logging
+# ============================================================
+
+try {
+    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+}
+catch {
+    Write-Host ""
+    Write-Host "[ERROR] Could not create log directory:" -ForegroundColor Red
+    Write-Host $LogDir
+    Write-Host ""
+    Write-Host $_.Exception.Message
+    exit 1
+}
+
+$BackendLog = Join-Path $LogDir "backend.log"
+$AnalyticsLog = Join-Path $LogDir "analytics.log"
+$FrontendLog = Join-Path $LogDir "frontend.log"
+
+# ============================================================
+# 4. Helper functions
+# ============================================================
+
+function Write-Header {
     Write-Host ""
     Write-Host "=================================================="
-    Write-Host " [ERROR] $service did not start correctly." -ForegroundColor Red
+    Write-Host " System Info — starting all services"
     Write-Host "=================================================="
-    Write-Host "Last 20 lines of ${logfile}:"
-    Write-Host "--------------------------------------------------"
-    Get-Content $logfile -Tail 20 -ErrorAction SilentlyContinue
-    Write-Host "--------------------------------------------------"
+    Write-Host ""
+    Write-Host "Application directory:"
+    Write-Host "  $ProjectRoot"
+    Write-Host ""
+}
+
+function Fail-WithLog {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Service,
+
+        [Parameter(Mandatory = $true)]
+        [string]$LogFile
+    )
+
+    Write-Host ""
+    Write-Host "==================================================" -ForegroundColor Red
+    Write-Host " [ERROR] $Service did not start correctly." -ForegroundColor Red
+    Write-Host "==================================================" -ForegroundColor Red
+
+    if (Test-Path $LogFile) {
+        Write-Host ""
+        Write-Host "Last 30 lines of $LogFile:"
+        Write-Host "--------------------------------------------------"
+
+        Get-Content `
+            -Path $LogFile `
+            -Tail 30 `
+            -ErrorAction SilentlyContinue
+
+        Write-Host "--------------------------------------------------"
+    }
+    else {
+        Write-Host ""
+        Write-Host "Log file was not created:"
+        Write-Host $LogFile
+    }
+
     Cleanup
+
     exit 1
 }
 
 function Cleanup {
     Write-Host ""
     Write-Host "Shutting down..."
-    foreach ($j in $Jobs) {
-        Stop-Job $j -ErrorAction SilentlyContinue | Out-Null
-        Remove-Job $j -Force -ErrorAction SilentlyContinue | Out-Null
+
+    foreach ($job in $Jobs) {
+        if ($null -ne $job) {
+            Stop-Job `
+                -Job $job `
+                -ErrorAction SilentlyContinue |
+                Out-Null
+
+            Remove-Job `
+                -Job $job `
+                -Force `
+                -ErrorAction SilentlyContinue |
+                Out-Null
+        }
     }
 }
 
-function Port-InUse($port) {
-    return [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+function Port-InUse {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$Port
+    )
+
+    return [bool](
+        Get-NetTCPConnection `
+            -LocalPort $Port `
+            -State Listen `
+            -ErrorAction SilentlyContinue
+    )
 }
 
-Write-Host "=================================================="
-Write-Host " System Info — starting all services"
-Write-Host "=================================================="
+function Require-Command {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CommandName
+    )
 
-# --- 1. MONGO_URI sanity check ---
-if (-not $env:MONGO_URI) {
-    Write-Host "[ERROR] MONGO_URI is not set." -ForegroundColor Red
-    Write-Host "        Run: `$env:MONGO_URI = 'mongodb+srv://...'"
-    exit 1
-}
-Write-Host "[OK] MONGO_URI is set."
-
-# --- 2. Preflight port check ---
-Write-Host "Checking required ports are free..."
-$conflict = $false
-foreach ($port in $FrontendPort, $AnalyticsPort) {
-    if (Port-InUse $port) {
-        Write-Host "[ERROR] Port $port is already in use." -ForegroundColor Red
-        $conflict = $true
+    if (-not (Get-Command $CommandName -ErrorAction SilentlyContinue)) {
+        Write-Host ""
+        Write-Host "[ERROR] Required command '$CommandName' was not found." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Make sure the required runtime is installed and available on PATH."
+        Write-Host ""
+        Cleanup
+        exit 1
     }
 }
-if ($conflict) {
-    Write-Host ""
-    Write-Host "Free the port(s) above and re-run start-all.ps1."
-    exit 1
-}
-Write-Host "[OK] Ports $FrontendPort and $AnalyticsPort are free."
 
-# --- 3. Start backend ---
-Write-Host "[1/3] Starting backend (.NET)..."
-$backendLog = Join-Path $LogDir "backend.log"
-Remove-Item $backendLog -ErrorAction SilentlyContinue
-$backendJob = Start-Job -ScriptBlock {
-    param($dir, $log)
-    Set-Location $dir
-    dotnet run *> $log
-} -ArgumentList (Join-Path $ProjectRoot "backend\SystemMonitor.Api"), $backendLog
-$Jobs += $backendJob
+function Require-Path {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
 
-Write-Host "      Waiting for backend to finish building and start listening..."
-$BackendPort = $null
-$elapsed = 0
-while (-not $BackendPort -and $elapsed -lt 90) {
-    if (Test-Path $backendLog) {
-        $match = Select-String -Path $backendLog -Pattern "Now listening on: http://localhost:(\d+)" -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($match) { $BackendPort = $match.Matches[0].Groups[1].Value }
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Write-Host ""
+        Write-Host "[ERROR] Required $Description was not found:" -ForegroundColor Red
+        Write-Host "        $Path"
+        Write-Host ""
+        Write-Host "The System Info installation appears to be incomplete."
+        Write-Host "Please reinstall the application."
+        Write-Host ""
+        Cleanup
+        exit 1
     }
-    if ($backendJob.State -eq "Failed" -or $backendJob.State -eq "Completed") {
-        Fail-WithLog "Backend" $backendLog
-    }
-    Start-Sleep -Seconds 1
-    $elapsed++
 }
-if (-not $BackendPort) { Fail-WithLog "Backend (timed out after 90s)" $backendLog }
+
+# ============================================================
+# 5. Cleanup on Ctrl+C / termination
+# ============================================================
 
 try {
-    Invoke-WebRequest -Uri "http://localhost:$BackendPort/api/system/all" -UseBasicParsing -TimeoutSec 5 | Out-Null
-} catch {
-    Fail-WithLog "Backend (listening but not responding)" $backendLog
+    [Console]::TreatControlCAsInput = $false
 }
+catch {
+    # Ignore if the host does not support this.
+}
+
+# ============================================================
+# 6. Start
+# ============================================================
+
+Write-Header
+
+# ============================================================
+# 7. Validate installation
+# ============================================================
+
+Write-Host "[CHECK] Validating System Info installation..."
+
+Require-Path `
+    -Path $BackendDir `
+    -Description "backend directory"
+
+Require-Path `
+    -Path $AnalyticsDir `
+    -Description "analytics directory"
+
+Require-Path `
+    -Path $FrontendDir `
+    -Description "frontend directory"
+
+Require-Path `
+    -Path $BackendProject `
+    -Description "backend project"
+
+Require-Path `
+    -Path $AnalyticsService `
+    -Description "analytics service"
+
+Require-Path `
+    -Path $FrontendPackage `
+    -Description "frontend package.json"
+
+Write-Host "[OK] Installation structure is valid."
+
+# ============================================================
+# 8. Validate required commands
+# ============================================================
+
+Write-Host ""
+Write-Host "[CHECK] Checking required runtimes..."
+
+Require-Command "dotnet"
+Require-Command "python"
+Require-Command "npm"
+
+Write-Host "[OK] Required runtimes are available."
+
+# ============================================================
+# 9. MONGO_URI
+# ============================================================
+
+Write-Host ""
+Write-Host "[CHECK] Checking database configuration..."
+
+if ([string]::IsNullOrWhiteSpace($env:MONGO_URI)) {
+    Write-Host ""
+    Write-Host "[ERROR] MONGO_URI is not set." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Set the MongoDB connection string before starting System Info."
+    Write-Host ""
+    Write-Host "Example:"
+    Write-Host "  `$env:MONGO_URI = 'mongodb+srv://...'"
+    Write-Host ""
+
+    exit 1
+}
+
+Write-Host "[OK] MONGO_URI is set."
+
+# ============================================================
+# 10. Port preflight
+# ============================================================
+
+Write-Host ""
+Write-Host "[CHECK] Checking required ports..."
+
+$PortConflict = $false
+
+foreach ($Port in @($FrontendPort, $AnalyticsPort)) {
+    if (Port-InUse $Port) {
+        Write-Host "[ERROR] Port $Port is already in use." -ForegroundColor Red
+        $PortConflict = $true
+    }
+}
+
+if ($PortConflict) {
+    Write-Host ""
+    Write-Host "Free the port(s) above and restart System Info."
+    Write-Host ""
+    exit 1
+}
+
+Write-Host "[OK] Ports $FrontendPort and $AnalyticsPort are free."
+
+# ============================================================
+# 11. Start backend
+# ============================================================
+
+Write-Host ""
+Write-Host "[1/3] Starting backend (.NET)..."
+
+Remove-Item `
+    -LiteralPath $BackendLog `
+    -Force `
+    -ErrorAction SilentlyContinue
+
+$BackendJob = Start-Job -ScriptBlock {
+    param(
+        [string]$Directory,
+        [string]$LogFile
+    )
+
+    Set-Location -LiteralPath $Directory
+
+    dotnet run *> $LogFile
+
+} -ArgumentList $BackendDir, $BackendLog
+
+$Jobs += $BackendJob
+
+Write-Host "      Waiting for backend to finish building and start..."
+
+$BackendPort = $null
+$Elapsed = 0
+$BackendTimeout = 90
+
+while (-not $BackendPort -and $Elapsed -lt $BackendTimeout) {
+
+    if (Test-Path $BackendLog) {
+
+        $Match = Select-String `
+            -Path $BackendLog `
+            -Pattern "Now listening on: http://localhost:(\d+)" `
+            -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+        if ($Match) {
+            $BackendPort = $Match.Matches[0].Groups[1].Value
+        }
+    }
+
+    if (
+        $BackendJob.State -eq "Failed" -or
+        $BackendJob.State -eq "Completed"
+    ) {
+        Fail-WithLog `
+            -Service "Backend" `
+            -LogFile $BackendLog
+    }
+
+    Start-Sleep -Seconds 1
+    $Elapsed++
+}
+
+if (-not $BackendPort) {
+    Fail-WithLog `
+        -Service "Backend (timed out after 90 seconds)" `
+        -LogFile $BackendLog
+}
+
+try {
+    Invoke-WebRequest `
+        -Uri "http://localhost:$BackendPort/api/system/all" `
+        -UseBasicParsing `
+        -TimeoutSec 5 |
+        Out-Null
+}
+catch {
+    Fail-WithLog `
+        -Service "Backend (listening but not responding)" `
+        -LogFile $BackendLog
+}
+
 Write-Host "[OK] Backend is up on port $BackendPort."
 
-# --- 4. Start analytics service ---
-Write-Host "[2/3] Starting analytics service (Python)..."
-$analyticsLog = Join-Path $LogDir "analytics.log"
-Remove-Item $analyticsLog -ErrorAction SilentlyContinue
-$analyticsJob = Start-Job -ScriptBlock {
-    param($dir, $log, $port)
-    Set-Location $dir
-    uvicorn analytics_service:app --port $port --ws none *> $log
-} -ArgumentList (Join-Path $ProjectRoot "analytics"), $analyticsLog, $AnalyticsPort
-$Jobs += $analyticsJob
+# ============================================================
+# 12. Start analytics
+# ============================================================
 
-Write-Host "      Waiting for analytics service to respond..."
-$elapsed = 0
-$analyticsReady = $false
-while ($elapsed -lt 30) {
+Write-Host ""
+Write-Host "[2/3] Starting analytics service (Python)..."
+
+Remove-Item `
+    -LiteralPath $AnalyticsLog `
+    -Force `
+    -ErrorAction SilentlyContinue
+
+$AnalyticsJob = Start-Job -ScriptBlock {
+    param(
+        [string]$Directory,
+        [string]$LogFile,
+        [int]$Port
+    )
+
+    Set-Location -LiteralPath $Directory
+
+    uvicorn analytics_service:app `
+        --port $Port `
+        --ws none *> $LogFile
+
+} -ArgumentList $AnalyticsDir, $AnalyticsLog, $AnalyticsPort
+
+$Jobs += $AnalyticsJob
+
+Write-Host "      Waiting for analytics service..."
+
+$Elapsed = 0
+$AnalyticsReady = $false
+$AnalyticsTimeout = 30
+
+while ($Elapsed -lt $AnalyticsTimeout) {
+
     try {
-        Invoke-WebRequest -Uri "http://localhost:$AnalyticsPort/health" -UseBasicParsing -TimeoutSec 2 | Out-Null
-        $analyticsReady = $true
+        Invoke-WebRequest `
+            -Uri "http://localhost:$AnalyticsPort/health" `
+            -UseBasicParsing `
+            -TimeoutSec 2 |
+            Out-Null
+
+        $AnalyticsReady = $true
         break
-    } catch {}
-    if ($analyticsJob.State -eq "Failed" -or $analyticsJob.State -eq "Completed") {
-        Fail-WithLog "Analytics service" $analyticsLog
     }
+    catch {
+        # Service is still starting.
+    }
+
+    if (
+        $AnalyticsJob.State -eq "Failed" -or
+        $AnalyticsJob.State -eq "Completed"
+    ) {
+        Fail-WithLog `
+            -Service "Analytics service" `
+            -LogFile $AnalyticsLog
+    }
+
     Start-Sleep -Seconds 1
-    $elapsed++
+    $Elapsed++
 }
-if (-not $analyticsReady) { Fail-WithLog "Analytics service (timed out after 30s)" $analyticsLog }
+
+if (-not $AnalyticsReady) {
+    Fail-WithLog `
+        -Service "Analytics service (timed out after 30 seconds)" `
+        -LogFile $AnalyticsLog
+}
+
 Write-Host "[OK] Analytics service is up on port $AnalyticsPort."
 
-# --- 5. Start frontend ---
+# ============================================================
+# 13. Start frontend
+# ============================================================
+
+Write-Host ""
 Write-Host "[3/3] Starting frontend (React)..."
-$frontendLog = Join-Path $LogDir "frontend.log"
-Remove-Item $frontendLog -ErrorAction SilentlyContinue
-$frontendJob = Start-Job -ScriptBlock {
-    param($dir, $log, $port)
-    Set-Location $dir
-    npm run dev -- --port $port --strictPort *> $log
-} -ArgumentList (Join-Path $ProjectRoot "frontend"), $frontendLog, $FrontendPort
-$Jobs += $frontendJob
+
+Remove-Item `
+    -LiteralPath $FrontendLog `
+    -Force `
+    -ErrorAction SilentlyContinue
+
+$FrontendJob = Start-Job -ScriptBlock {
+    param(
+        [string]$Directory,
+        [string]$LogFile,
+        [int]$Port
+    )
+
+    Set-Location -LiteralPath $Directory
+
+    npm run dev `
+        -- `
+        --port $Port `
+        --strictPort *> $LogFile
+
+} -ArgumentList $FrontendDir, $FrontendLog, $FrontendPort
+
+$Jobs += $FrontendJob
 
 Write-Host "      Waiting for frontend dev server..."
-$elapsed = 0
-$frontendReady = $false
-while ($elapsed -lt 30) {
-    if ((Test-Path $frontendLog) -and (Select-String -Path $frontendLog -Pattern "Local:" -Quiet)) {
-        $frontendReady = $true
-        break
+
+$Elapsed = 0
+$FrontendReady = $false
+$FrontendTimeout = 30
+
+while ($Elapsed -lt $FrontendTimeout) {
+
+    if (Test-Path $FrontendLog) {
+
+        if (
+            Select-String `
+                -Path $FrontendLog `
+                -Pattern "Local:" `
+                -Quiet `
+                -ErrorAction SilentlyContinue
+        ) {
+            $FrontendReady = $true
+            break
+        }
     }
-    if ($frontendJob.State -eq "Failed" -or $frontendJob.State -eq "Completed") {
-        Fail-WithLog "Frontend" $frontendLog
+
+    if (
+        $FrontendJob.State -eq "Failed" -or
+        $FrontendJob.State -eq "Completed"
+    ) {
+        Fail-WithLog `
+            -Service "Frontend" `
+            -LogFile $FrontendLog
     }
+
     Start-Sleep -Seconds 1
-    $elapsed++
+    $Elapsed++
 }
-if (-not $frontendReady) { Fail-WithLog "Frontend (timed out after 30s)" $frontendLog }
+
+if (-not $FrontendReady) {
+    Fail-WithLog `
+        -Service "Frontend (timed out after 30 seconds)" `
+        -LogFile $FrontendLog
+}
+
 Write-Host "[OK] Frontend is up on port $FrontendPort."
+
+# ============================================================
+# 14. Final status
+# ============================================================
 
 Write-Host ""
 Write-Host "=================================================="
 Write-Host " Everything is running and verified."
+Write-Host "=================================================="
 Write-Host ""
 Write-Host " Frontend:   http://localhost:$FrontendPort"
 Write-Host " Backend:    http://localhost:$BackendPort"
 Write-Host " Analytics:  http://localhost:$AnalyticsPort"
 Write-Host ""
-Write-Host " Logs in: $LogDir"
+Write-Host " Application: $ProjectRoot"
+Write-Host " Logs:        $LogDir"
+Write-Host ""
 Write-Host " Press Ctrl+C to stop everything."
 Write-Host "=================================================="
 
+# ============================================================
+# 15. Keep launcher alive
+# ============================================================
+
 try {
-    while ($true) { Start-Sleep -Seconds 1 }
-} finally {
+    while ($true) {
+        Start-Sleep -Seconds 1
+
+        # Detect unexpected job termination.
+        foreach ($Job in $Jobs) {
+
+            if ($Job.State -eq "Failed") {
+                Write-Host ""
+                Write-Host "[ERROR] A System Info service stopped unexpectedly." -ForegroundColor Red
+                Write-Host ""
+
+                Receive-Job `
+                    -Job $Job `
+                    -Keep `
+                    -ErrorAction SilentlyContinue
+
+                break
+            }
+        }
+    }
+}
+finally {
     Cleanup
 }
+```
