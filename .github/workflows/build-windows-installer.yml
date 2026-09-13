@@ -1,38 +1,38 @@
 name: Build Windows Installer
 
 on:
-  # Normal development builds
   push:
     branches:
       - main
 
-    # Version tags create official GitHub Releases
-    # Examples: v1.0.0, v1.0.1, v1.0.2
+    # Version tags create official GitHub Releases.
+    # Examples:
+    # v1.0.1
+    # v1.0.2
+    # v1.1.0
     tags:
       - "v*.*.*"
 
-  # Manual build from GitHub Actions
+  # Allows manual builds from GitHub Actions.
   workflow_dispatch:
 
-# Required to create GitHub Releases
+# Required for creating GitHub Releases.
 permissions:
   contents: write
 
-# If several commits are pushed quickly, cancel the older
-# unfinished build for the same branch/tag.
+# Prevent multiple unnecessary builds for the same ref.
 concurrency:
   group: windows-installer-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build Windows Installer
     runs-on: windows-latest
 
     steps:
 
       # ============================================================
-      # CHECKOUT
+      # CHECK OUT REPOSITORY
       # ============================================================
 
       - name: Check out the repo
@@ -62,8 +62,8 @@ jobs:
       # ============================================================
       # PYTHON
       #
-      # No cache-dependency-path here because your repository does
-      # not currently contain analytics/requirements.txt.
+      # No cache dependency is specified because the repository
+      # does not require analytics/requirements.txt to exist.
       # ============================================================
 
       - name: Set up Python
@@ -92,7 +92,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "Configuring native C++ engine..."
+          Write-Host "Configuring CMake..."
 
           cmake -B native/build -A x64 native
 
@@ -115,7 +115,7 @@ jobs:
             exit 1
           }
 
-          Write-Host "Found:"
+          Write-Host "Found native DLL:"
           Write-Host $dll.FullName
 
           $destination = "backend/SystemMonitor.Api/systemmonitor_native.dll"
@@ -125,7 +125,7 @@ jobs:
             -Destination $destination `
             -Force
 
-          Write-Host "Native DLL copied to:"
+          Write-Host "Copied native DLL to:"
           Write-Host $destination
 
 
@@ -133,18 +133,12 @@ jobs:
       # BUILD .NET BACKEND
       # ============================================================
 
-      - name: Restore .NET backend
+      - name: Restore and build .NET backend
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           dotnet restore backend/SystemMonitor.Api
-
-
-      - name: Build .NET backend
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
 
           dotnet build backend/SystemMonitor.Api `
             --configuration Release `
@@ -155,36 +149,26 @@ jobs:
       # BUILD FRONTEND
       # ============================================================
 
-      - name: Install frontend dependencies
+      - name: Install frontend dependencies and build
         working-directory: frontend
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           if (Test-Path "package-lock.json") {
-            Write-Host "package-lock.json found. Running npm ci..."
+            Write-Host "package-lock.json found. Using npm ci..."
             npm ci
           }
           else {
-            Write-Host "package-lock.json not found. Running npm install..."
+            Write-Host "package-lock.json not found. Using npm install..."
             npm install
           }
-
-
-      - name: Build frontend
-        working-directory: frontend
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
 
           npm run build
 
 
       # ============================================================
       # PYTHON ANALYTICS
-      #
-      # If analytics/requirements.txt exists, use it.
-      # Otherwise install the dependencies you previously specified.
       # ============================================================
 
       - name: Install Python analytics dependencies
@@ -193,18 +177,17 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          if (Test-Path "requirements.txt") {
-            Write-Host "analytics/requirements.txt found."
-            Write-Host "Installing Python dependencies from requirements.txt..."
+          python -m pip install --upgrade pip
 
-            python -m pip install --upgrade pip
+          if (Test-Path "requirements.txt") {
+            Write-Host "Installing dependencies from analytics/requirements.txt..."
+
             python -m pip install -r requirements.txt
           }
           else {
             Write-Host "analytics/requirements.txt not found."
             Write-Host "Installing required Python dependencies..."
 
-            python -m pip install --upgrade pip
             python -m pip install fastapi uvicorn pymongo
           }
 
@@ -254,7 +237,7 @@ jobs:
 
 
       # ============================================================
-      # COMPILE INSTALLER
+      # COMPILE INSTALLER WITH INNO SETUP
       # ============================================================
 
       - name: Compile installer with Inno Setup
@@ -275,7 +258,7 @@ jobs:
             exit 1
           }
 
-          Write-Host "Compiling Windows installer..."
+          Write-Host "Compiling installer..."
 
           & $iscc ".\SystemInfo.iss"
 
@@ -297,11 +280,10 @@ jobs:
           $installer = "Output/SystemInfo-Setup.exe"
 
           if (-not (Test-Path $installer)) {
-            Write-Error "Installer was not created:"
-            Write-Error $installer
+            Write-Error "Output/SystemInfo-Setup.exe was not created."
 
             Write-Host ""
-            Write-Host "Searching for all EXE files..."
+            Write-Host "Searching for EXE files..."
 
             Get-ChildItem `
               -Path . `
@@ -316,7 +298,7 @@ jobs:
 
           Write-Host ""
           Write-Host "============================================"
-          Write-Host " WINDOWS INSTALLER CREATED"
+          Write-Host " WINDOWS INSTALLER CREATED SUCCESSFULLY"
           Write-Host "============================================"
           Write-Host "Path: $($file.FullName)"
           Write-Host "Size: $($file.Length) bytes"
@@ -326,7 +308,7 @@ jobs:
       # ============================================================
       # UPLOAD ACTIONS ARTIFACT
       #
-      # Every successful build gets an artifact.
+      # Every successful build gets an Actions artifact.
       #
       # Normal main push:
       #   Actions -> Artifacts
@@ -348,17 +330,17 @@ jobs:
       # ============================================================
       # PREPARE RELEASE NOTES FROM CHANGELOG
       #
-      # Only runs for version tags.
+      # IMPORTANT:
       #
-      # Example:
+      # Git tag:
+      #     v1.0.2
       #
-      # v1.0.2
+      # CHANGELOG:
+      #     ## [1.0.2] - 2026-09-20
       #
-      # It finds:
+      # The "v" is removed before searching CHANGELOG.md.
       #
-      # ## [1.0.2]
-      #
-      # and takes ONLY that section.
+      # ONLY the matching version section is included.
       # ============================================================
 
       - name: Prepare release notes from CHANGELOG
@@ -367,9 +349,13 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $version = "${{ github.ref_name }}"
+          $tagVersion = "${{ github.ref_name }}"
 
-          Write-Host "Preparing release notes for $version..."
+          # Convert v1.0.2 -> 1.0.2
+          $version = $tagVersion -replace '^v', ''
+
+          Write-Host "Git tag: $tagVersion"
+          Write-Host "CHANGELOG version: $version"
 
           if (-not (Test-Path "CHANGELOG.md")) {
             Write-Error "CHANGELOG.md was not found."
@@ -382,9 +368,7 @@ jobs:
 
           $escapedVersion = [regex]::Escape($version)
 
-          # Find the section belonging to this version.
-          #
-          # Example:
+          # Find:
           #
           # ## [1.0.2] - 2026-09-20
           #
@@ -392,6 +376,8 @@ jobs:
           #
           # ## [1.0.1]
           #
+          # or the end of the file.
+
           $pattern = "(?ms)^## \[$escapedVersion\].*?(?=^## \[|\z)"
 
           $match = [regex]::Match(
@@ -409,8 +395,9 @@ jobs:
 
           $notes = $match.Value.Trim()
 
-          # Remove the ## [version] heading.
-          # GitHub will use the release title instead.
+          # Remove the version heading.
+          # GitHub already displays the release title.
+
           $notes = $notes -replace `
             "(?m)^## \[$escapedVersion\].*\r?\n", ""
 
@@ -428,7 +415,7 @@ jobs:
 
           Write-Host ""
           Write-Host "============================================"
-          Write-Host " RELEASE NOTES FOR $version"
+          Write-Host " RELEASE NOTES FOR $tagVersion"
           Write-Host "============================================"
           Write-Host $notes
           Write-Host "============================================"
@@ -441,15 +428,14 @@ jobs:
       #
       # Example:
       #
-      # git tag v1.0.2
-      # git push origin v1.0.2
+      # v1.0.2
       #
       # Creates:
       #
       # SystemInfo v1.0.2
       #
-      # with:
-      # - Only the 1.0.2 CHANGELOG section
+      # With:
+      # - The matching CHANGELOG section
       # - SystemInfo-Setup.exe
       # ============================================================
 
