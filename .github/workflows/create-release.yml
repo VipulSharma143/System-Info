@@ -1,3 +1,4 @@
+```yaml
 name: Create Release
 
 on:
@@ -84,17 +85,48 @@ jobs:
 
           TAG="$VERSION"
 
-          SHA=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
+          # IMPORTANT:
+          # refs/tags/$TAG returns the SHA of the tag object when the tag
+          # is annotated.
+          #
+          # refs/tags/$TAG^{} dereferences the tag and returns the SHA
+          # of the actual commit the tag points to.
+
+          SHA=$(git ls-remote origin "refs/tags/$TAG^{}" | awk '{print $1}')
 
           if [ -z "$SHA" ]; then
             echo "::error::Could not determine commit for tag $TAG."
             exit 1
           fi
 
-          echo "Release tag: $TAG"
+          echo "Release tag:    $TAG"
           echo "Release commit: $SHA"
 
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release tag points to current main
+        env:
+          SHA: ${{ steps.commit.outputs.sha }}
+        shell: bash
+        run: |
+          set -e
+
+          git fetch origin main
+
+          MAIN_SHA=$(git rev-parse origin/main)
+
+          echo "Release commit: $SHA"
+          echo "Current main:   $MAIN_SHA"
+          echo ""
+
+          if [ "$SHA" != "$MAIN_SHA" ]; then
+            echo "::error::Release tag does not point to the current main commit."
+            echo "Tag target: $SHA"
+            echo "Main:       $MAIN_SHA"
+            exit 1
+          fi
+
+          echo "Verified: release tag points to the current main commit."
 
       - name: Check successful Windows and Linux builds
         id: builds
@@ -255,7 +287,8 @@ jobs:
 
           echo ""
           echo "============================================"
-          echo " GITHUB RELEASE CREATED SUCCESSFULLY"
+          echo " GITHUB RELEASE VERIFIED SUCCESSFULLY"
           echo "============================================"
           echo "Version: $VERSION"
           echo "============================================"
+```

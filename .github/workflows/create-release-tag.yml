@@ -162,7 +162,6 @@ jobs:
       - name: Check existing release tag
         id: tag
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           SHA: ${{ steps.commit.outputs.sha }}
         shell: bash
@@ -173,7 +172,12 @@ jobs:
 
           echo "Checking release tag: $TAG"
 
-          EXISTING_SHA=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
+          # IMPORTANT:
+          # refs/tags/$TAG returns the SHA of an annotated tag object.
+          # refs/tags/$TAG^{} dereferences the tag and returns the SHA
+          # of the actual commit the tag points to.
+
+          EXISTING_SHA=$(git ls-remote origin "refs/tags/$TAG^{}" | awk '{print $1}')
 
           if [ -z "$EXISTING_SHA" ]; then
             echo "Tag $TAG does not exist."
@@ -183,8 +187,8 @@ jobs:
           fi
 
           echo "Tag $TAG already exists."
-          echo "Existing tag SHA: $EXISTING_SHA"
-          echo "Expected SHA:      $SHA"
+          echo "Existing target commit: $EXISTING_SHA"
+          echo "Expected commit:        $SHA"
 
           if [ "$EXISTING_SHA" = "$SHA" ]; then
             echo "Tag already points to the correct release commit."
@@ -194,8 +198,8 @@ jobs:
           fi
 
           echo "::error::Release tag $TAG already exists but points to a different commit."
-          echo "::error::Existing: $EXISTING_SHA"
-          echo "::error::Expected: $SHA"
+          echo "::error::Existing target: $EXISTING_SHA"
+          echo "::error::Expected target: $SHA"
           echo "Refusing to move or overwrite an existing release tag."
           exit 1
 
@@ -216,18 +220,21 @@ jobs:
           echo "Creating release tag: $TAG"
           echo "Target commit: $SHA"
 
+          # Create a lightweight tag pointing directly to the release commit.
           git tag "$TAG" "$SHA"
+
           git push origin "$TAG"
 
           echo ""
           echo "Verifying remote tag..."
 
-          REMOTE_SHA=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
+          # Always dereference the tag when checking the target commit.
+          REMOTE_SHA=$(git ls-remote origin "refs/tags/$TAG^{}" | awk '{print $1}')
 
           if [ "$REMOTE_SHA" != "$SHA" ]; then
             echo "::error::Tag verification failed."
-            echo "Remote:   $REMOTE_SHA"
-            echo "Expected: $SHA"
+            echo "Remote target:   $REMOTE_SHA"
+            echo "Expected target: $SHA"
             exit 1
           fi
 
