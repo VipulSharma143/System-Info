@@ -72,7 +72,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm cmake build-essential imagemagick file
+          sudo apt-get install -y nasm cmake build-essential imagemagick file libfuse2
 
       - name: Determine version
         id: version
@@ -196,7 +196,10 @@ jobs:
           cp systeminfo.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/systeminfo.png"
           cp systeminfo.png "$APPDIR/systeminfo.png"
 
-          ARCH=x86_64 ./appimagetool "$APPDIR" "Output/SystemInfo-${{ steps.version.outputs.version }}-x86_64.AppImage"
+          # --appimage-extract-and-run avoids needing a working FUSE mount,
+          # which GitHub's Ubuntu runners frequently lack inside their
+          # container environment — this bypasses that entirely.
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$APPDIR" "Output/SystemInfo-${{ steps.version.outputs.version }}-x86_64.AppImage"
 
           if [ ! -f "Output/SystemInfo-${{ steps.version.outputs.version }}-x86_64.AppImage" ]; then
             echo "::error::AppImage was not created"
