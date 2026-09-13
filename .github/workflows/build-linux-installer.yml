@@ -291,48 +291,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-
       # ============================================================
-      # PREPARE RELEASE NOTES FROM CHANGELOG
-      #
-      # Same pattern as the Windows workflow — kept identical on
-      # purpose so both workflows attach to the same GitHub Release
-      # for a given version tag without conflicting.
+      # Release creation itself now lives entirely in the separate
+      # "Create Release" workflow (.github/workflows/create-release.yml),
+      # which only fires once BOTH this workflow AND the Windows one
+      # have succeeded for the same commit. This workflow's only job
+      # is to build and upload its artifacts — never to publish a
+      # release on its own, even on a tag push.
       # ============================================================
-
-      - name: Prepare release notes from CHANGELOG
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          set -e
-          TAG_VERSION="${GITHUB_REF_NAME}"
-          VERSION="${TAG_VERSION#v}"
-          ESCAPED_VERSION=$(printf '%s\n' "$VERSION" | sed 's/[.[\*^$]/\\&/g')
-
-          if [ ! -f CHANGELOG.md ]; then
-            echo "::error::CHANGELOG.md was not found."
-            exit 1
-          fi
-
-          NOTES=$(awk "/^## \[${ESCAPED_VERSION}\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md)
-
-          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
-            echo "::error::Could not find [$VERSION] in CHANGELOG.md."
-            exit 1
-          fi
-
-          echo "$NOTES" > release-notes.md
-
-      - name: Create or update GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: "SystemInfo ${{ github.ref_name }}"
-          body_path: release-notes.md
-          files: |
-            Output/*.AppImage
-            Output/*.deb
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

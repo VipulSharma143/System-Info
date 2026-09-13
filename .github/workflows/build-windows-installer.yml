@@ -308,14 +308,12 @@ jobs:
       # ============================================================
       # UPLOAD ACTIONS ARTIFACT
       #
-      # Every successful build gets an Actions artifact.
-      #
-      # Normal main push:
-      #   Actions -> Artifacts
-      #
-      # Version tag:
-      #   Actions -> Artifacts
-      #   AND GitHub Release
+      # Release creation itself now lives entirely in the separate
+      # "Create Release" workflow (.github/workflows/create-release.yml),
+      # which only fires once BOTH this workflow AND the Linux one have
+      # succeeded for the same commit. This workflow's only job is to
+      # build and upload its artifact — never to publish a release on
+      # its own, even on a tag push.
       # ============================================================
 
       - name: Upload installer artifact
@@ -325,129 +323,3 @@ jobs:
           path: Output/SystemInfo-Setup.exe
           if-no-files-found: error
           retention-days: 30
-
-
-      # ============================================================
-      # PREPARE RELEASE NOTES FROM CHANGELOG
-      #
-      # IMPORTANT:
-      #
-      # Git tag:
-      #     v1.0.2
-      #
-      # CHANGELOG:
-      #     ## [1.0.2] - 2026-09-20
-      #
-      # The "v" is removed before searching CHANGELOG.md.
-      #
-      # ONLY the matching version section is included.
-      # ============================================================
-
-      - name: Prepare release notes from CHANGELOG
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $tagVersion = "${{ github.ref_name }}"
-
-          # Convert v1.0.2 -> 1.0.2
-          $version = $tagVersion -replace '^v', ''
-
-          Write-Host "Git tag: $tagVersion"
-          Write-Host "CHANGELOG version: $version"
-
-          if (-not (Test-Path "CHANGELOG.md")) {
-            Write-Error "CHANGELOG.md was not found."
-            exit 1
-          }
-
-          $changelog = Get-Content `
-            "CHANGELOG.md" `
-            -Raw
-
-          $escapedVersion = [regex]::Escape($version)
-
-          # Find:
-          #
-          # ## [1.0.2] - 2026-09-20
-          #
-          # and stop before:
-          #
-          # ## [1.0.1]
-          #
-          # or the end of the file.
-
-          $pattern = "(?ms)^## \[$escapedVersion\].*?(?=^## \[|\z)"
-
-          $match = [regex]::Match(
-            $changelog,
-            $pattern
-          )
-
-          if (-not $match.Success) {
-            Write-Error "Could not find [$version] in CHANGELOG.md."
-            Write-Error ""
-            Write-Error "Expected something like:"
-            Write-Error "## [$version] - YYYY-MM-DD"
-            exit 1
-          }
-
-          $notes = $match.Value.Trim()
-
-          # Remove the version heading.
-          # GitHub already displays the release title.
-
-          $notes = $notes -replace `
-            "(?m)^## \[$escapedVersion\].*\r?\n", ""
-
-          $notes = $notes.Trim()
-
-          if ([string]::IsNullOrWhiteSpace($notes)) {
-            Write-Error "The CHANGELOG section for $version is empty."
-            exit 1
-          }
-
-          Set-Content `
-            -Path "release-notes.md" `
-            -Value $notes `
-            -Encoding utf8
-
-          Write-Host ""
-          Write-Host "============================================"
-          Write-Host " RELEASE NOTES FOR $tagVersion"
-          Write-Host "============================================"
-          Write-Host $notes
-          Write-Host "============================================"
-
-
-      # ============================================================
-      # CREATE GITHUB RELEASE
-      #
-      # ONLY runs for v*.*.* tags.
-      #
-      # Example:
-      #
-      # v1.0.2
-      #
-      # Creates:
-      #
-      # SystemInfo v1.0.2
-      #
-      # With:
-      # - The matching CHANGELOG section
-      # - SystemInfo-Setup.exe
-      # ============================================================
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: "SystemInfo ${{ github.ref_name }}"
-          body_path: release-notes.md
-          files: Output/SystemInfo-Setup.exe
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

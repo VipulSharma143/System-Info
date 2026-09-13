@@ -1,0 +1,121 @@
+name: Create Release Tag
+
+on:
+  workflow_run:
+    workflows:
+      - Build Windows Installer
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    # Only run when the Windows build completed successfully.
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ============================================================
+      # CHECK OUT THE EXACT COMMIT THAT PASSED THE BUILD
+      # ============================================================
+
+      - name: Check out successful commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+
+      # ============================================================
+      # FIND THE VERSION FROM CHANGELOG.md
+      # ============================================================
+
+      - name: Find release version
+        id: version
+        shell: bash
+        run: |
+          set -e
+
+          VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md)
+
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: Could not find a version in CHANGELOG.md."
+            echo "Expected something like:"
+            echo "## [1.0.3] - 2026-09-25"
+            exit 1
+          fi
+
+          echo "Found version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+
+      # ============================================================
+      # CHECK WHETHER THIS VERSION HAS ALREADY BEEN RELEASED
+      # ============================================================
+
+      - name: Check whether release tag already exists
+        id: tag
+        shell: bash
+        run: |
+          set -e
+          TAG="v${{ steps.version.outputs.version }}"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Release tag $TAG already exists."
+            echo "No new release will be created."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Release tag $TAG does not exist."
+            echo "A new release can be created."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+
+      # ============================================================
+      # CREATE NEW VERSION TAG
+      #
+      # `set -e` is critical here: without it, a failed `git push`
+      # (permissions, tag protection rule, anything) would silently
+      # fall through to the "Successfully created" echo and the whole
+      # job would still report green — exactly the bug that caused a
+      # tag to never actually appear despite this workflow showing
+      # success every time.
+      # ============================================================
+
+      - name: Create and push release tag
+        if: steps.tag.outputs.exists == 'false'
+        shell: bash
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="v$VERSION"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "Creating release tag: $TAG"
+
+          git tag "$TAG" "${{ github.event.workflow_run.head_sha }}"
+          git push origin "$TAG"
+
+          # Explicit verification, not just trusting a zero exit code —
+          # confirms the tag genuinely exists on the remote before
+          # declaring success.
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "ERROR: git push reported no error, but $TAG is not on the remote."
+            echo "This usually means a permissions issue or a tag protection rule."
+            exit 1
+          fi
+
+          echo "Verified: $TAG exists on origin."
+          echo "Successfully created and pushed $TAG."
+          echo "The Windows installer workflow will now build the release."
