@@ -20,7 +20,7 @@ function Fail-WithLog($service, $logfile) {
     Write-Host "=================================================="
     Write-Host " [ERROR] $service did not start correctly." -ForegroundColor Red
     Write-Host "=================================================="
-    Write-Host "Last 20 lines of $logfile:"
+    Write-Host "Last 20 lines of ${logfile}:"
     Write-Host "--------------------------------------------------"
     Get-Content $logfile -Tail 20 -ErrorAction SilentlyContinue
     Write-Host "--------------------------------------------------"

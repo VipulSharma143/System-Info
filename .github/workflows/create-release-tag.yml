@@ -3,41 +3,65 @@ name: Create Release Tag
 on:
   workflow_run:
     workflows:
-      - Build Windows Installer
+      - "Build Windows Installer"
+      - "Build Linux Installer"
     types:
       - completed
     branches:
       - main
 
+  workflow_dispatch:
+
 permissions:
   contents: write
+  actions: read
+
+concurrency:
+  group: create-release-tag-main
+  cancel-in-progress: false
 
 jobs:
   tag-release:
-    # Only run when the Windows build completed successfully.
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push'
-
     runs-on: ubuntu-latest
 
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push'
+      )
+
     steps:
-
-      # ============================================================
-      # CHECK OUT THE EXACT COMMIT THAT PASSED THE BUILD
-      # ============================================================
-
-      - name: Check out successful commit
+      - name: Check out main
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Determine release commit
+        id: commit
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          CURRENT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -e
 
-      # ============================================================
-      # FIND THE VERSION FROM CHANGELOG.md
-      # ============================================================
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            SHA="$CURRENT_SHA"
+          else
+            SHA="$WORKFLOW_SHA"
+          fi
+
+          if [ -z "$SHA" ]; then
+            echo "::error::Could not determine release commit SHA."
+            exit 1
+          fi
+
+          echo "Release commit: $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
       - name: Find release version
         id: version
@@ -45,77 +69,182 @@ jobs:
         run: |
           set -e
 
-          VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md)
-
-          if [ -z "$VERSION" ]; then
-            echo "ERROR: Could not find a version in CHANGELOG.md."
-            echo "Expected something like:"
-            echo "## [1.0.3] - 2026-09-25"
+          if [ ! -f CHANGELOG.md ]; then
+            echo "::error::CHANGELOG.md was not found."
             exit 1
           fi
 
-          echo "Found version: $VERSION"
+          VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md)
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not find a release version in CHANGELOG.md."
+            echo "Expected format:"
+            echo "## [1.0.3] - 2026-09-13"
+            exit 1
+          fi
+
+          echo "Release version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-
-      # ============================================================
-      # CHECK WHETHER THIS VERSION HAS ALREADY BEEN RELEASED
-      # ============================================================
-
-      - name: Check whether release tag already exists
-        id: tag
+      - name: Check both builds succeeded for exact commit
+        id: builds
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.commit.outputs.sha }}
         shell: bash
         run: |
           set -e
-          TAG="v${{ steps.version.outputs.version }}"
 
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "Release tag $TAG already exists."
-            echo "No new release will be created."
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Release tag $TAG does not exist."
-            echo "A new release can be created."
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+          echo "Checking builds for commit:"
+          echo "$SHA"
+          echo ""
+
+          get_successful_run() {
+            local workflow_name="$1"
+
+            gh api \
+              "repos/${{ github.repository }}/actions/runs" \
+              --paginate \
+              -q ".workflow_runs[] | select(
+                    .name == \"$workflow_name\" and
+                    .head_sha == \"$SHA\" and
+                    .conclusion == \"success\"
+                  ) | .id" \
+              | head -n 1
+          }
+
+          WINDOWS_RUN_ID=$(get_successful_run "Build Windows Installer")
+          LINUX_RUN_ID=$(get_successful_run "Build Linux Installer")
+
+          echo "Windows run: ${WINDOWS_RUN_ID:-not found}"
+          echo "Linux run:   ${LINUX_RUN_ID:-not found}"
+          echo ""
+
+          if [ -z "$WINDOWS_RUN_ID" ]; then
+            echo "Windows build has not succeeded for this commit yet."
+            echo "This workflow will safely exit."
+            exit 0
           fi
 
+          if [ -z "$LINUX_RUN_ID" ]; then
+            echo "Linux build has not succeeded for this commit yet."
+            echo "This workflow will safely exit."
+            exit 0
+          fi
 
-      # ============================================================
-      # CREATE NEW VERSION TAG
-      #
-      # `set -e` is critical here: without it, a failed `git push`
-      # (permissions, tag protection rule, anything) would silently
-      # fall through to the "Successfully created" echo and the whole
-      # job would still report green — exactly the bug that caused a
-      # tag to never actually appear despite this workflow showing
-      # success every time.
-      # ============================================================
+          echo "Both builds succeeded for the exact same commit."
+
+          echo "windows_run_id=$WINDOWS_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "linux_run_id=$LINUX_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release commit is correct
+        env:
+          SHA: ${{ steps.commit.outputs.sha }}
+        shell: bash
+        run: |
+          set -e
+
+          git fetch origin main
+
+          MAIN_SHA=$(git rev-parse origin/main)
+
+          echo "Release commit: $SHA"
+          echo "Current main:   $MAIN_SHA"
+
+          if [ "$SHA" != "$MAIN_SHA" ]; then
+            echo "::error::Release commit is not the current main commit."
+            echo "Refusing to create a release tag."
+            exit 1
+          fi
+
+          echo "Verified: release commit is the current main commit."
+
+      - name: Check existing release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ steps.commit.outputs.sha }}
+        shell: bash
+        run: |
+          set -e
+
+          TAG="$VERSION"
+
+          echo "Checking release tag: $TAG"
+
+          EXISTING_SHA=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
+
+          if [ -z "$EXISTING_SHA" ]; then
+            echo "Tag $TAG does not exist."
+            echo "A new release tag can be created."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Tag $TAG already exists."
+          echo "Existing tag SHA: $EXISTING_SHA"
+          echo "Expected SHA:      $SHA"
+
+          if [ "$EXISTING_SHA" = "$SHA" ]; then
+            echo "Tag already points to the correct release commit."
+            echo "No new tag is required."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::error::Release tag $TAG already exists but points to a different commit."
+          echo "::error::Existing: $EXISTING_SHA"
+          echo "::error::Expected: $SHA"
+          echo "Refusing to move or overwrite an existing release tag."
+          exit 1
 
       - name: Create and push release tag
         if: steps.tag.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ steps.commit.outputs.sha }}
         shell: bash
         run: |
           set -e
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="v$VERSION"
+
+          TAG="$VERSION"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           echo "Creating release tag: $TAG"
+          echo "Target commit: $SHA"
 
-          git tag "$TAG" "${{ github.event.workflow_run.head_sha }}"
+          git tag "$TAG" "$SHA"
           git push origin "$TAG"
 
-          # Explicit verification, not just trusting a zero exit code —
-          # confirms the tag genuinely exists on the remote before
-          # declaring success.
-          if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "ERROR: git push reported no error, but $TAG is not on the remote."
-            echo "This usually means a permissions issue or a tag protection rule."
+          echo ""
+          echo "Verifying remote tag..."
+
+          REMOTE_SHA=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
+
+          if [ "$REMOTE_SHA" != "$SHA" ]; then
+            echo "::error::Tag verification failed."
+            echo "Remote:   $REMOTE_SHA"
+            echo "Expected: $SHA"
             exit 1
           fi
 
-          echo "Verified: $TAG exists on origin."
-          echo "Successfully created and pushed $TAG."
-          echo "The Windows installer workflow will now build the release."
+          echo ""
+          echo "============================================"
+          echo " RELEASE TAG CREATED SUCCESSFULLY"
+          echo "============================================"
+          echo "Version: $VERSION"
+          echo "Tag:     $TAG"
+          echo "Commit:  $SHA"
+          echo "============================================"
+
+      - name: Release tag already exists
+        if: steps.tag.outputs.exists == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          echo "Release tag $VERSION already exists and points to the correct commit."
+          echo "No new tag was created."
