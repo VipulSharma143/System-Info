@@ -46,7 +46,6 @@ jobs:
           fi
 
           echo "Release candidate commit: $SHA"
-
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
       - name: Determine release version
@@ -209,27 +208,37 @@ jobs:
         run: |
           set -e
 
-          EXISTING_SHA=$(git ls-remote origin "refs/tags/$TAG^{}" | awk '{print $1}')
+          echo "Checking whether tag $TAG already exists..."
 
-          if [ -z "$EXISTING_SHA" ]; then
+          # First check for an annotated tag and dereference it to its
+          # target commit.
+          TAG_SHA=$(git ls-remote origin "refs/tags/$TAG^{}" | awk '{print $1}')
+
+          # If no dereferenced target exists, check for a lightweight tag.
+          if [ -z "$TAG_SHA" ]; then
+            TAG_SHA=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
+          fi
+
+          if [ -z "$TAG_SHA" ]; then
             echo "Tag $TAG does not exist."
             echo "exists=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "Existing tag $TAG points to:"
-          echo "$EXISTING_SHA"
+          echo "$TAG_SHA"
 
           echo "Expected commit:"
           echo "$TARGET_SHA"
 
-          if [ "$EXISTING_SHA" != "$TARGET_SHA" ]; then
+          if [ "$TAG_SHA" != "$TARGET_SHA" ]; then
             echo "::error::Tag $TAG already exists but points to a different commit."
-            echo "::error::Existing: $EXISTING_SHA"
+            echo "::error::Existing: $TAG_SHA"
             echo "::error::Expected: $TARGET_SHA"
             exit 1
           fi
 
+          echo ""
           echo "Tag already points to the correct commit."
 
           echo "exists=true" >> "$GITHUB_OUTPUT"
@@ -243,9 +252,9 @@ jobs:
         run: |
           set -e
 
-          echo "Creating tag $TAG at $TARGET_SHA..."
+          echo "Creating annotated tag $TAG at $TARGET_SHA..."
 
-          git tag "$TAG" "$TARGET_SHA"
+          git tag -a "$TAG" "$TARGET_SHA" -m "Release $TAG"
 
           git push origin "$TAG"
 
@@ -261,16 +270,34 @@ jobs:
 
           git fetch --tags origin
 
+          echo "Verifying release tag $TAG..."
+
+          # Prefer annotated-tag dereferencing.
           TAG_SHA=$(git ls-remote origin "refs/tags/$TAG^{}" | awk '{print $1}')
 
+          # Fall back to the direct tag reference so existing lightweight
+          # tags, such as the current 1.0.4 tag, are also supported.
+          if [ -z "$TAG_SHA" ]; then
+            TAG_SHA=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
+          fi
+
+          echo ""
           echo "Remote tag target:"
           echo "$TAG_SHA"
 
           echo "Expected target:"
           echo "$TARGET_SHA"
 
+          if [ -z "$TAG_SHA" ]; then
+            echo "::error::Release tag $TAG could not be found on origin."
+            exit 1
+          fi
+
           if [ "$TAG_SHA" != "$TARGET_SHA" ]; then
             echo "::error::Release tag verification failed."
+            echo "::error::Tag: $TAG"
+            echo "::error::Remote: $TAG_SHA"
+            echo "::error::Expected: $TARGET_SHA"
             exit 1
           fi
 
