@@ -5,22 +5,11 @@ on:
     branches:
       - main
 
-    # Version tags create official GitHub Releases.
-    # Examples:
-    # v1.0.1
-    # v1.0.2
-    # v1.1.0
-    tags:
-      - "v*.*.*"
-
-  # Allows manual builds from GitHub Actions.
   workflow_dispatch:
 
-# Required for creating GitHub Releases.
 permissions:
-  contents: write
+  contents: read
 
-# Prevent multiple unnecessary builds for the same ref.
 concurrency:
   group: windows-installer-${{ github.ref }}
   cancel-in-progress: true
@@ -61,9 +50,6 @@ jobs:
 
       # ============================================================
       # PYTHON
-      #
-      # No cache dependency is specified because the repository
-      # does not require analytics/requirements.txt to exist.
       # ============================================================
 
       - name: Set up Python
@@ -306,14 +292,7 @@ jobs:
 
 
       # ============================================================
-      # UPLOAD ACTIONS ARTIFACT
-      #
-      # Release creation itself now lives entirely in the separate
-      # "Create Release" workflow (.github/workflows/create-release.yml),
-      # which only fires once BOTH this workflow AND the Linux one have
-      # succeeded for the same commit. This workflow's only job is to
-      # build and upload its artifact — never to publish a release on
-      # its own, even on a tag push.
+      # UPLOAD INSTALLER ARTIFACT
       # ============================================================
 
       - name: Upload installer artifact
