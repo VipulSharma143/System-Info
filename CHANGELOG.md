@@ -13,6 +13,25 @@ All notable changes to SystemInfo are documented here.
 ### Known Issues
 
 
+## [1.0.4.1] - 2026-09-14
+
+### Added
+
+### Changed
+
+- `backend/SystemMonitor.Api/Endpoints/AnalyticsEndpoints.cs` no longer builds a `?file=...` query parameter when proxying to the analytics service. That was leftover from before the project moved to MongoDB (Phase 8) — `analytics_service.py` hasn't accepted or used a file path in a long time, so this was silently-ignored dead code computing a nonsense path in production (`AppContext.BaseDirectory\..\..\..\data\snapshots.jsonl`, which only made sense inside a dev `bin/Debug/...` folder).
+- `analytics/run_analytics.py` and the PyInstaller build step in `release.yml` now pin uvicorn's HTTP/loop implementation explicitly (`http="h11"`, `loop="asyncio"`) and explicitly collect uvicorn's submodules (`--collect-submodules uvicorn`) instead of relying on its "auto" runtime resolution. Not confirmed to have caused a real failure, but uvicorn resolves some internals dynamically by string name at startup, which PyInstaller's static analysis can silently miss — this closes that gap defensively.
+
+### Fixed
+
+- `WindowsSystemInfoProvider.cs`'s `GetBattery()` was a hardcoded stub (`Note: "Battery reporting not yet implemented on Windows"`) that never read real data. It now reads actual charge percentage and charging/discharging/fully-charged status via the Win32 `GetSystemPowerStatus()` API (the same source Windows' own taskbar battery icon uses). Capacity (mAh), health %, cycle count, model, and manufacturer are still not implemented — those need WMI's `Win32_Battery`/`Win32_PortableBattery`, which are unreliable across vendors — and are left honestly `null` with an explanatory note rather than guessed.
+- CI version detection (`release.yml`) only matched a strict 3-segment `X.Y.Z` version in `CHANGELOG.md`. Widened to accept 3 or 4 segments (`X.Y.Z` or `X.Y.Z.W`) so a hotfix version like this one doesn't silently fail version detection.
+
+### Known Issues
+
+- Analytics (`/api/analytics/stats`, `/trend`, `/bottlenecks`) returns `500` with "MONGO_URI not set" unless a MongoDB connection string is placed at `%LOCALAPPDATA%\SystemInfo\config\mongo_uri.txt` on the machine running it. This is expected, not a bug — analytics has no other data source. Live dashboard metrics (CPU/RAM/disk/network/battery) work with no MongoDB setup at all. That config file lives outside the install directory, so it survives reinstalls/updates once set.
+
+
 ## [1.0.4] - 2026-09-13
 
 ### Added

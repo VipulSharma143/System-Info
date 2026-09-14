@@ -62,7 +62,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md || true)
+          VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+(?:\.[0-9]+){2,3}(?=\])' CHANGELOG.md || true)
 
           if [ -z "$VERSION" ]; then
             echo "::error::Could not find a version in CHANGELOG.md. Expected a line like '## [1.2.3]'."
@@ -259,7 +259,19 @@ jobs:
           if (Test-Path "dist") { Remove-Item -Path "dist" -Recurse -Force }
           if (Test-Path "analytics.spec") { Remove-Item -Path "analytics.spec" -Force }
 
-          python -m PyInstaller --onefile --clean --noconfirm --name analytics run_analytics.py
+          # uvicorn resolves some of its internals (HTTP protocol impl,
+          # lifespan handling, event loop) dynamically by string name at
+          # startup, not via ordinary Python imports — PyInstaller's static
+          # dependency scan can't see those, so without explicitly collecting
+          # them, analytics.exe builds successfully but crashes on launch the
+          # moment uvicorn tries to load one. --collect-submodules pulls in
+          # every uvicorn submodule so this can't silently go missing again.
+          python -m PyInstaller --onefile --clean --noconfirm --name analytics `
+            --collect-submodules uvicorn `
+            --hidden-import uvicorn.protocols.http.h11_impl `
+            --hidden-import uvicorn.lifespan.on `
+            --hidden-import uvicorn.loops.asyncio `
+            run_analytics.py
 
           if (-not (Test-Path "dist/analytics.exe")) {
             Write-Error "PyInstaller did not create analytics.exe."
