@@ -160,20 +160,32 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
         return result;
     }
 
-    // Battery — reads real data via GetSystemPowerStatus() (see the P/Invoke
-    // declaration above). BatteryFlag 128 means "no system battery" (the
-    // normal desktop case) and 255 means "unknown status" — both are treated
-    // as no battery present, same honesty convention as get_fan_rpm()/
-    // get_amd_gpu_usage_percent() elsewhere in this project. Capacity in
-    // mAh, health %, voltage, cycle count, model, and manufacturer require
-    // WMI's Win32_Battery/Win32_PortableBattery, which are unreliable across
-    // vendors and not wired up here — left null with an honest note rather
-    // than guessed.
+    // Battery — GetSystemPowerStatus (above) only covers basic power state:
+    // AC connected, charge %, and a coarse charging flag. It has no concept
+    // of cycle count, designed/full-charge capacity, or voltage, so it is
+    // no longer treated as the complete battery source. Those fields come
+    // from WindowsBatteryInterop, which talks to the battery class driver
+    // directly via IOCTL_BATTERY_QUERY_INFORMATION / IOCTL_BATTERY_QUERY_STATUS
+    // — the same interface Windows' own "powercfg /batteryreport" uses.
     public BatteryInfo GetBattery()
     {
-        if (!GetSystemPowerStatus(out var status) ||
-            status.BatteryFlag == 128 ||
-            status.BatteryFlag == 255)
+        bool haveStatus = GetSystemPowerStatus(out var status);
+
+        List<WindowsBatteryInterop.RawBatteryData> devices;
+        try
+        {
+            devices = WindowsBatteryInterop.QueryAllBatteries();
+        }
+        catch
+        {
+            // A driver/permission failure here must degrade to the basic
+            // power-status path below, not crash the whole endpoint.
+            devices = new List<WindowsBatteryInterop.RawBatteryData>();
+        }
+
+        bool noBatteryPerStatus = !haveStatus || status.BatteryFlag == 128 || status.BatteryFlag == 255;
+
+        if (noBatteryPerStatus && devices.Count == 0)
         {
             return new BatteryInfo(
                 Available: false, Status: null, CapacityPercent: null, CycleCount: null,
@@ -184,36 +196,119 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
             );
         }
 
-        // BatteryFlag bit 3 (value 8) means "charging". Otherwise, on AC
-        // power at 100% counts as fully charged; on AC but not full/charging
-        // is treated as charging too (Windows briefly reports this state
-        // right after plugging in); off AC is discharging.
-        var charging = (status.BatteryFlag & 0x08) != 0;
-        string batteryStatus = charging
-            ? "Charging"
-            : status.ACLineStatus == 1 && status.BatteryLifePercent >= 100
-                ? "Fully Charged"
-                : status.ACLineStatus == 1
-                    ? "Charging"
-                    : "Discharging";
+        int? capacityPercent = haveStatus && status.BatteryLifePercent <= 100
+            ? status.BatteryLifePercent
+            : (int?)null;
 
-        int? capacityPercent = status.BatteryLifePercent <= 100 ? status.BatteryLifePercent : null;
+        // Combine power-state flags across every enumerated battery device
+        // (desktops normally have zero, laptops normally have exactly one;
+        // this also tolerates the multi-battery case without hardcoding a
+        // device count).
+        uint combinedPowerState = 0;
+        foreach (var d in devices) combinedPowerState |= d.PowerState;
+
+        bool isCharging = devices.Count > 0 && WindowsBatteryInterop.IsCharging(combinedPowerState);
+        bool isDischarging = devices.Count > 0 && WindowsBatteryInterop.IsDischarging(combinedPowerState);
+        bool isPluggedIn = (haveStatus && status.ACLineStatus == 1) ||
+                            (devices.Count > 0 && WindowsBatteryInterop.IsPluggedIn(combinedPowerState));
+
+        string batteryStatus;
+        if (isPluggedIn && isCharging)
+            batteryStatus = "Charging";
+        else if (isPluggedIn && capacityPercent >= 100)
+            batteryStatus = "Fully Charged";
+        else if (isPluggedIn)
+            // AC connected but the driver reports neither "charging" nor
+            // 100% — a legitimate state (charge limits, sensor rounding,
+            // trickle-charge holds), not an error to paper over.
+            batteryStatus = "Not Charging";
+        else if (isDischarging || !isPluggedIn)
+            batteryStatus = "Discharging";
+        else
+            batteryStatus = "Unknown";
+
+        if (devices.Count == 0)
+        {
+            // IOCTL enumeration found nothing usable, but GetSystemPowerStatus
+            // did detect a battery — report what basic power status gives us
+            // and say plainly that the detailed fields are unavailable rather
+            // than fabricating them.
+            return new BatteryInfo(
+                Available: true,
+                Status: batteryStatus,
+                CapacityPercent: capacityPercent,
+                CycleCount: null,
+                CycleCountNote: "This battery/Windows driver does not expose cycle-count information.",
+                DesignCapacityMah: null,
+                FullCapacityMah: null,
+                NowCapacityMah: null,
+                HealthPercent: null,
+                VoltageNow: null,
+                PowerWatts: null,
+                Model: null,
+                Manufacturer: null,
+                Note: "Charge % and status from Windows' basic power API. The battery device did not respond to the detailed battery-information query (IOCTL_BATTERY_QUERY_INFORMATION), so capacity, health, voltage, and cycle count are unavailable.",
+                CapacityUnit: "mWh"
+            );
+        }
+
+        // Aggregate capacities across all batteries (preferred approach when
+        // more than one is present — see engineering-spec §7). Cycle count is
+        // per-battery and is never summed; with multiple batteries we surface
+        // the first one that reports it and note the limitation.
+        double? designedSum = SumIfAnyPresent(devices.Select(d => d.DesignedCapacityMWh));
+        double? fullSum = SumIfAnyPresent(devices.Select(d => d.FullChargedCapacityMWh));
+        double? currentSum = SumIfAnyPresent(devices.Select(d => d.CurrentCapacityMWh));
+
+        double? healthPercent = null;
+        if (designedSum is > 0 && fullSum is not null)
+        {
+            healthPercent = Math.Clamp(Math.Round(fullSum.Value / designedSum.Value * 100, 1), 0, 100);
+        }
+
+        var cycleDevice = devices.FirstOrDefault(d => d.CycleCount != null);
+        long? cycleCount = cycleDevice?.CycleCount;
+        string? cycleNote = cycleCount == null
+            ? "This battery/Windows driver does not expose cycle-count information."
+            : devices.Count > 1
+                ? $"Multiple batteries detected; cycle count shown is from the first battery that reports it ({devices.Count} batteries total)."
+                : null;
+
+        double? voltageV = devices.FirstOrDefault(d => d.VoltageMV != null)?.VoltageMV is { } mv
+            ? Math.Round(mv / 1000.0, 2)
+            : null;
+
+        double? powerWatts = null;
+        var rates = devices.Where(d => d.RateMW != null).Select(d => d.RateMW!.Value).ToList();
+        if (rates.Count > 0)
+        {
+            powerWatts = Math.Round(Math.Abs(rates.Sum()) / 1000.0, 1);
+        }
 
         return new BatteryInfo(
             Available: true,
             Status: batteryStatus,
             CapacityPercent: capacityPercent,
-            CycleCount: null,
-            CycleCountNote: "Cycle count is not exposed by the Windows Power API used here (GetSystemPowerStatus).",
-            DesignCapacityMah: null,
-            FullCapacityMah: null,
-            NowCapacityMah: null,
-            HealthPercent: null,
-            VoltageNow: null,
-            PowerWatts: null,
+            CycleCount: cycleCount,
+            CycleCountNote: cycleNote,
+            DesignCapacityMah: designedSum,
+            FullCapacityMah: fullSum,
+            NowCapacityMah: currentSum,
+            HealthPercent: healthPercent,
+            VoltageNow: voltageV,
+            PowerWatts: powerWatts,
             Model: null,
             Manufacturer: null,
-            Note: "Charge % and status from Windows' Power API. Capacity, health, voltage, model, and manufacturer are not implemented yet (would require WMI's Win32_Battery/Win32_PortableBattery)."
+            Note: devices.Count > 1
+                ? $"Aggregated from {devices.Count} battery devices via IOCTL_BATTERY_QUERY_INFORMATION/STATUS."
+                : null,
+            CapacityUnit: "mWh"
         );
+    }
+
+    private static double? SumIfAnyPresent(IEnumerable<double?> values)
+    {
+        var present = values.Where(v => v != null).Select(v => v!.Value).ToList();
+        return present.Count > 0 ? present.Sum() : null;
     }
 }

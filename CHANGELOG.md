@@ -13,6 +13,41 @@ All notable changes to SystemInfo are documented here.
 ### Known Issues
 
 
+
+## [1.0.4.2] - 2026-09-14
+
+### Added
+
+* Added proper Windows battery monitoring using the Win32 `GetSystemPowerStatus()` API for reliable battery percentage, AC power state, charging, discharging, and fully-charged status detection.
+* Added detailed Windows battery information through the Windows battery class driver using `IOCTL_BATTERY_QUERY_INFORMATION` and `IOCTL_BATTERY_QUERY_STATUS` where supported.
+* Added Windows battery capacity, health, voltage, power usage, and cycle-count reporting when the installed battery and Windows driver expose the required information.
+* Added support for aggregating battery capacity information when multiple battery devices are detected.
+
+### Changed
+
+* Updated `WindowsSystemInfoProvider.GetBattery()` to use real Windows battery and power-state information instead of the previous Windows battery placeholder/stub.
+* Windows battery values reported by the battery class driver are handled using `mWh` capacity units, while Linux battery reporting continues using its existing `mAh` unit.
+* Battery status detection now distinguishes between `Charging`, `Discharging`, `Fully Charged`, `Not Charging`, and `Unknown` states.
+* Windows battery reporting now gracefully falls back to the basic Windows power API when detailed battery-driver information is unavailable.
+* Battery cycle count is treated as a per-battery value and is no longer incorrectly aggregated across multiple batteries.
+* Battery health is calculated from designed capacity versus full-charge capacity when both values are available.
+* Cleaned up duplicate Windows system-provider and system-information model/interface definitions that caused .NET compilation conflicts during the hotfix build.
+
+### Fixed
+
+* Fixed Windows battery reporting always returning the previous `"Battery reporting not yet implemented on Windows"` placeholder.
+* Fixed Windows battery percentage and charging status not being reported from the actual Windows power subsystem.
+* Fixed Windows battery monitoring failing to compile because of duplicate `WindowsSystemInfoProvider` definitions.
+* Fixed duplicate `ISystemInfoProvider`, `BatteryInfo`, `RamInfo`, `CpuInfo`, `ProcessInfo`, `DiskInfo`, and `NetworkInfo` definitions causing `CS0101`, `CS0111`, `CS0229`, `CS0121`, and related compilation errors.
+* Fixed the Windows battery implementation so unavailable hardware information is returned as `null` with an explanatory note instead of fabricated values.
+* Fixed the Windows backend build so the `SystemMonitor.Api` project successfully compiles after the battery-monitoring changes.
+
+### Known Issues
+
+* Detailed battery information such as cycle count, voltage, capacity, and health depends on the battery hardware and Windows battery driver exposing the corresponding information. Some systems may therefore report only battery percentage and power status.
+* Windows installer and end-to-end Windows hardware verification still require validation on an actual Windows machine.
+
+
 ## [1.0.4.1] - 2026-09-14
 
 ### Added
