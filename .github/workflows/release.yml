@@ -1,0 +1,679 @@
+name: Release
+
+# ============================================================
+# SINGLE consolidated pipeline. Replaces the old 4-workflow chain
+# (Build Windows Installer / Build Linux Installer / Create Release Tag /
+# Create Release) that was connected via `workflow_run` events.
+#
+# Why that design was replaced:
+#   - workflow_run fires once PER upstream workflow, not once per "both
+#     finished" — so the tag/release workflow ran twice per push and had
+#     to poll-and-guess whether the other build was done yet.
+#   - If the tag-creation job failed for any reason, the release job's
+#     `if: conclusion == 'success'` check just silently skipped it — no
+#     visible error anywhere.
+#   - Once a version's tag existed (even from a broken build), every
+#     future push died at the same "tag already exists" check forever,
+#     regardless of whether the new build succeeded.
+#   - Version number was computed independently (with different regex/
+#     fallback logic) in three separate files.
+#
+# This workflow uses `needs:` instead, which is GitHub Actions' native
+# primitive for "run this job only after these other jobs succeeded,
+# regardless of which one finished first." No polling, no cross-workflow
+# events, no partial states.
+# ============================================================
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ============================================================
+  # JOB 1 — determine version, decide whether a release is needed at all.
+  # Single source of truth for the version number: every other job reads
+  # it from here instead of re-computing it.
+  # ============================================================
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.version }}
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine version from CHANGELOG.md
+        id: version
+        shell: bash
+        run: |
+          set -e
+          VERSION=$(grep -m 1 -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md || true)
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not find a version in CHANGELOG.md. Expected a line like '## [1.2.3]'."
+            exit 1
+          fi
+
+          echo "Version from CHANGELOG.md: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version is already released
+        id: check
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.version }}
+        run: |
+          set -e
+
+          git fetch --tags origin
+
+          TAG_SHA=$(git rev-list -n 1 "refs/tags/$TAG" 2>/dev/null || true)
+          CURRENT_SHA="${{ github.sha }}"
+
+          echo "Tag:           $TAG"
+          echo "Tag commit:    ${TAG_SHA:-<does not exist>}"
+          echo "Current commit: $CURRENT_SHA"
+
+          if [ -z "$TAG_SHA" ]; then
+            echo "Tag does not exist yet — this push will create a new release."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          elif [ "$TAG_SHA" == "$CURRENT_SHA" ]; then
+            echo "Tag already points at this exact commit — already released. Nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+
+          else
+            echo "::error::Version $TAG is already tagged, but at a DIFFERENT commit ($TAG_SHA)."
+            echo "::error::CHANGELOG.md still lists $TAG as the top version, but that version was already released from different code."
+            echo "::error::Add a new version entry to CHANGELOG.md before pushing again — released versions are never moved or overwritten."
+            exit 1
+          fi
+
+  # ============================================================
+  # JOB 2 — Windows build. Only starts once `version` has decided a
+  # release is actually needed (skip=false). Any failure here means the
+  # `release` job below never runs, automatically — no manual status
+  # checking required.
+  # ============================================================
+  build-windows:
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install NASM
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install nasm -y
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install innosetup -y
+
+      - name: Build native C++ engine
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          cmake -B native/build -A x64 native
+          cmake --build native/build --config Release --parallel
+
+          $dll = Get-ChildItem -Path "native/build" -Recurse -Filter "systemmonitor_native.dll" | Select-Object -First 1
+          if (-not $dll) {
+            Write-Error "systemmonitor_native.dll was not produced."
+            exit 1
+          }
+
+          Copy-Item -Path $dll.FullName -Destination "backend/SystemMonitor.Api/systemmonitor_native.dll" -Force
+
+      - name: Install frontend dependencies and build
+        working-directory: frontend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (Test-Path "package-lock.json") { npm ci } else { npm install }
+          npm run build
+
+          if (-not (Test-Path "dist")) {
+            Write-Error "Frontend dist directory was not created."
+            exit 1
+          }
+
+      - name: Embed frontend into backend wwwroot
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $wwwroot = "backend/SystemMonitor.Api/wwwroot"
+          if (Test-Path $wwwroot) { Remove-Item -Path $wwwroot -Recurse -Force }
+          New-Item -ItemType Directory -Path $wwwroot -Force | Out-Null
+          Copy-Item -Path "frontend/dist/*" -Destination $wwwroot -Recurse -Force
+
+          $files = Get-ChildItem -Path $wwwroot -Recurse -File
+          if ($files.Count -eq 0) {
+            Write-Error "Backend wwwroot is empty after copying frontend/dist."
+            exit 1
+          }
+
+      - name: Restore backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          dotnet restore backend/SystemMonitor.Api
+
+      - name: Publish backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (Test-Path "build/backend") { Remove-Item -Path "build/backend" -Recurse -Force }
+          New-Item -ItemType Directory -Path "build/backend" -Force | Out-Null
+
+          dotnet publish backend/SystemMonitor.Api `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --no-restore `
+            --output build/backend `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true
+
+          $backendExe = "build/backend/SystemMonitor.Api.exe"
+          if (-not (Test-Path $backendExe)) {
+            Write-Error "Published backend executable was not created: $backendExe"
+            exit 1
+          }
+
+          $nativeDll = "backend/SystemMonitor.Api/systemmonitor_native.dll"
+          if (-not (Test-Path $nativeDll)) {
+            Write-Error "Native DLL is missing: $nativeDll"
+            exit 1
+          }
+
+          Copy-Item -Path $nativeDll -Destination "build/backend/systemmonitor_native.dll" -Force
+
+      - name: Install analytics dependencies
+        working-directory: analytics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          python -m pip install --upgrade pip
+
+          if (Test-Path "requirements.txt") {
+            python -m pip install -r requirements.txt
+          } else {
+            python -m pip install fastapi uvicorn pymongo
+          }
+
+          if (Test-Path "requirements-build.txt") {
+            python -m pip install -r requirements-build.txt
+          } else {
+            python -m pip install pyinstaller
+          }
+
+      - name: Build analytics.exe with PyInstaller
+        working-directory: analytics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (Test-Path "build") { Remove-Item -Path "build" -Recurse -Force }
+          if (Test-Path "dist") { Remove-Item -Path "dist" -Recurse -Force }
+          if (Test-Path "analytics.spec") { Remove-Item -Path "analytics.spec" -Force }
+
+          python -m PyInstaller --onefile --clean --noconfirm --name analytics run_analytics.py
+
+          if (-not (Test-Path "dist/analytics.exe")) {
+            Write-Error "PyInstaller did not create analytics.exe."
+            exit 1
+          }
+
+      - name: Publish production SystemInfo launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (Test-Path "build/launcher") { Remove-Item -Path "build/launcher" -Recurse -Force }
+          New-Item -ItemType Directory -Path "build/launcher" -Force | Out-Null
+
+          dotnet publish launcher/SystemInfo.Launcher.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --output build/launcher `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true
+
+          if (-not (Test-Path "build/launcher/SystemInfo.exe")) {
+            Write-Error "Production launcher was not created."
+            exit 1
+          }
+
+      - name: Assemble production packaging/app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $staging = "packaging/app"
+          if (Test-Path $staging) { Remove-Item -Path $staging -Recurse -Force }
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          New-Item -ItemType Directory -Path "$staging/backend" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$staging/analytics" -Force | Out-Null
+
+          Copy-Item "build/launcher/SystemInfo.exe" "$staging/SystemInfo.exe" -Force
+          Copy-Item "SystemInfo.ico" "$staging/SystemInfo.ico" -Force
+          Copy-Item "build/backend/*" "$staging/backend" -Recurse -Force
+          Copy-Item "analytics/dist/analytics.exe" "$staging/analytics/analytics.exe" -Force
+
+      - name: Validate production staging
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $requiredFiles = @(
+            "packaging/app/SystemInfo.exe",
+            "packaging/app/SystemInfo.ico",
+            "packaging/app/backend/SystemMonitor.Api.exe",
+            "packaging/app/backend/systemmonitor_native.dll",
+            "packaging/app/analytics/analytics.exe"
+          )
+
+          foreach ($file in $requiredFiles) {
+            if (-not (Test-Path $file)) {
+              Write-Error "Required production file is missing: $file"
+              exit 1
+            }
+            if ((Get-Item $file).Length -le 0) {
+              Write-Error "Production file is empty: $file"
+              exit 1
+            }
+          }
+
+          $wwwroot = "packaging/app/backend/wwwroot"
+          if (-not (Test-Path $wwwroot)) {
+            Write-Error "Production backend wwwroot is missing."
+            exit 1
+          }
+          $frontendFiles = Get-ChildItem -Path $wwwroot -Recurse -File
+          if ($frontendFiles.Count -eq 0) {
+            Write-Error "Production backend wwwroot contains no frontend files."
+            exit 1
+          }
+
+          Write-Host "Production staging validated ($($frontendFiles.Count) frontend files)."
+
+      - name: Set installer version
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $iss = Get-Content "SystemInfo.iss" -Raw
+          $updated = $iss -replace '#define MyAppVersion "1\.0"', "#define MyAppVersion `"$env:APP_VERSION`""
+
+          if ($updated -eq $iss) {
+            Write-Error "Could not find the expected MyAppVersion definition in SystemInfo.iss."
+            exit 1
+          }
+
+          Set-Content -Path "SystemInfo.iss" -Value $updated -Encoding UTF8
+
+      - name: Compile installer with Inno Setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Error "Inno Setup compiler was not found: $iscc"
+            exit 1
+          }
+
+          & $iscc ".\SystemInfo.iss"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Inno Setup failed with exit code $LASTEXITCODE."
+            exit $LASTEXITCODE
+          }
+
+      - name: Verify installer exists
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $installer = "Output/SystemInfo-Setup.exe"
+          if (-not (Test-Path $installer)) {
+            Write-Error "Output/SystemInfo-Setup.exe was not created."
+            exit 1
+          }
+
+          Get-Item $installer | Select-Object FullName, Length
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SystemInfo-Setup
+          path: Output/SystemInfo-Setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  # ============================================================
+  # JOB 3 — Linux build. Runs in PARALLEL with build-windows (both only
+  # depend on `version`, not on each other) — order between them no
+  # longer matters at all.
+  # ============================================================
+  build-linux:
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y nasm cmake build-essential imagemagick file libfuse2
+
+      - name: Build native C++ engine
+        shell: bash
+        run: |
+          set -e
+          mkdir -p native/build
+          bash native/build.sh
+
+      - name: Restore and build .NET backend
+        shell: bash
+        run: |
+          set -e
+          dotnet restore backend/SystemMonitor.Api
+          dotnet build backend/SystemMonitor.Api --configuration Release --no-restore
+
+      - name: Install frontend dependencies and build
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -e
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm run build
+
+      - name: Install Python analytics dependencies
+        working-directory: analytics
+        shell: bash
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          else
+            python -m pip install fastapi uvicorn pymongo
+          fi
+
+      - name: Stage shared payload
+        shell: bash
+        run: |
+          set -e
+          mkdir -p stage
+          cp -r backend frontend native analytics assembly stage/
+          cp start-all.sh setup.sh build.sh stage/
+          chmod +x stage/start-all.sh stage/setup.sh stage/build.sh
+
+          sed -i \
+            's|LOG_DIR="\$PROJECT_ROOT/logs"|LOG_DIR="${SYSTEMINFO_LOG_DIR:-$PROJECT_ROOT/logs}"|' \
+            stage/start-all.sh
+
+          grep -q "SYSTEMINFO_LOG_DIR" stage/start-all.sh || {
+            echo "::error::start-all.sh LOG_DIR patch did not apply"
+            exit 1
+          }
+
+      - name: Convert icon to PNG
+        shell: bash
+        run: |
+          set -e
+          mkdir -p Output
+          if [ -f packaging/linux/systeminfo.png ]; then
+            cp packaging/linux/systeminfo.png systeminfo.png
+          elif [ -f SystemInfo.ico ]; then
+            convert "SystemInfo.ico[0]" -resize 256x256 systeminfo.png
+          else
+            echo "::error::No icon source found."
+            exit 1
+          fi
+
+      - name: Build AppImage
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -e
+
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+
+          APPDIR="AppDir"
+          mkdir -p "$APPDIR/usr/share/systeminfo"
+          cp -r stage/* "$APPDIR/usr/share/systeminfo/"
+
+          cp packaging/linux/AppRun "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+
+          mkdir -p "$APPDIR/usr/share/applications"
+          cp packaging/linux/systeminfo.desktop "$APPDIR/usr/share/applications/"
+          cp packaging/linux/systeminfo.desktop "$APPDIR/systeminfo.desktop"
+
+          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+          cp systeminfo.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/systeminfo.png"
+          cp systeminfo.png "$APPDIR/systeminfo.png"
+
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$APPDIR" "Output/SystemInfo-${VERSION}-x86_64.AppImage"
+
+          if [ ! -f "Output/SystemInfo-${VERSION}-x86_64.AppImage" ]; then
+            echo "::error::AppImage was not created."
+            exit 1
+          fi
+
+      - name: Build .deb package
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -e
+
+          PKG_DIR="deb/systeminfo_${VERSION}_amd64"
+          mkdir -p "$PKG_DIR/DEBIAN" "$PKG_DIR/opt/systeminfo" "$PKG_DIR/usr/bin" \
+                   "$PKG_DIR/usr/share/applications" "$PKG_DIR/usr/share/icons/hicolor/256x256/apps"
+
+          cp -r stage/* "$PKG_DIR/opt/systeminfo/"
+          cp systeminfo.png "$PKG_DIR/usr/share/icons/hicolor/256x256/apps/systeminfo.png"
+
+          sed 's|Exec=start-all.sh|Exec=/opt/systeminfo/start-all.sh|' \
+            packaging/linux/systeminfo.desktop > "$PKG_DIR/usr/share/applications/systeminfo.desktop"
+
+          cat > "$PKG_DIR/usr/bin/systeminfo" << 'WRAPPER'
+          #!/bin/bash
+          exec /opt/systeminfo/start-all.sh "$@"
+          WRAPPER
+          chmod +x "$PKG_DIR/usr/bin/systeminfo"
+
+          cat > "$PKG_DIR/DEBIAN/control" << CONTROL
+          Package: systeminfo
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Vipul Sharma
+          Description: Multi-language system performance monitor
+           A full-stack system monitor reading CPU, memory, disk, network, and
+           process data directly from kernel interfaces, with a native C++/
+           Assembly engine, Python analytics, and a React dashboard.
+          CONTROL
+
+          dpkg-deb --build --root-owner-group "$PKG_DIR" "Output/systeminfo_${VERSION}_amd64.deb"
+
+          if [ ! -f "Output/systeminfo_${VERSION}_amd64.deb" ]; then
+            echo "::error::.deb package was not created."
+            exit 1
+          fi
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SystemInfo-AppImage
+          path: Output/*.AppImage
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SystemInfo-deb
+          path: Output/*.deb
+          if-no-files-found: error
+          retention-days: 30
+
+  # ============================================================
+  # JOB 4 — Release. `needs: [build-windows, build-linux]` means this
+  # ONLY runs if BOTH succeeded — GitHub Actions skips it automatically
+  # otherwise, no polling, no manual status checks, no "one finished but
+  # not the other" gap. Order between the two builds is irrelevant.
+  #
+  # Tag + release are created together, atomically, by
+  # softprops/action-gh-release: if the tag doesn't exist yet, this
+  # single step creates it (pointing at this exact commit) AND publishes
+  # the release in one call — no separate git-tag-then-push race.
+  # ============================================================
+  release:
+    needs: [version, build-windows, build-linux]
+    if: needs.version.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SystemInfo-Setup
+          path: release-assets
+
+      - name: Download Linux AppImage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SystemInfo-AppImage
+          path: release-assets
+
+      - name: Download Linux deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SystemInfo-deb
+          path: release-assets
+
+      - name: Prepare release notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        shell: bash
+        run: |
+          set -e
+
+          awk -v version="$VERSION" '
+            $0 ~ "^## \\[" version "\\]" { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "SystemInfo $VERSION" > release-notes.md
+            echo "" >> release-notes.md
+            echo "Release $VERSION." >> release-notes.md
+          fi
+
+          cat release-notes.md
+
+      - name: Create GitHub release (creates the tag automatically)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: SystemInfo ${{ needs.version.outputs.version }}
+          body_path: release-notes.md
+          target_commitish: ${{ github.sha }}
+          files: |
+            release-assets/SystemInfo-Setup.exe
+            release-assets/*.AppImage
+            release-assets/*.deb
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Verify release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -e
+          gh release view "$TAG"
+          echo ""
+          echo "Release $TAG created and verified."

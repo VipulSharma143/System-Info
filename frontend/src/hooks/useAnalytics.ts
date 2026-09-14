@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { BottlenecksResponse, StatsResponse, TrendResponse } from '../types/analytics';
 
-const API_BASE = 'http://localhost:5132';
+// See useSystemMetrics.ts for why this is empty (same-origin) in production
+// and a fixed dev URL only when running under `npm run dev`.
+const API_BASE = import.meta.env.DEV ? 'http://localhost:5132' : '';
 const ANALYTICS_WINDOW_MINUTES = 30;
 const POLL_INTERVAL_MS = 10_000; // analytics is a rolling-window aggregate,
 // not a live-tick value, so this polls slower than the 2s system-metrics loop
