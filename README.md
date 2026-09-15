@@ -12,7 +12,7 @@
 ![C++](https://img.shields.io/badge/C++-20-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)
 ![Assembly](https://img.shields.io/badge/Assembly-x86--64-FF6600?style=for-the-badge&logo=assemblyscript&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-FastAPI-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white)
+![SQLite](https://img.shields.io/badge/Storage-Local%20JSONL-47A248?style=for-the-badge&logo=jsonwebtokens&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)
 
 **[🎯 What is this?](#-what-is-this) · [💡 Why build this?](#-why-build-this) · [✨ Features](#-features) · [🏗️ Architecture](#%EF%B8%8F-architecture) · [🧰 Tech Stack](#-tech-stack) · [🚀 Getting Started](#-getting-started) · [📂 Project Structure](#-project-structure) · [📍 Project Status](#-project-status)**
@@ -23,12 +23,14 @@
 
 ## 🎯 What is this?
 
-A full-stack system monitor where **every layer does real, non-trivial work** — CPU, memory, disk, network, and process data read directly from Linux `/proc` and `/sys`, a native C++ engine for hardware sensors, hand-optimized x86-64 Assembly for CPU benchmarking, a Python analytics engine for trend and bottleneck detection, and persistent historical storage in MongoDB.
+A full-stack system monitor where **every layer does real, non-trivial work** — CPU, memory, disk, network, and process data read directly from Linux `/proc` and `/sys`, a native C++ engine for hardware sensors, hand-optimized x86-64 Assembly for CPU benchmarking, a Python analytics engine for trend and bottleneck detection, and persistent historical storage in local JSON Lines files — no database, no cloud account, no internet connection required.
 
 ```
 React (TS) ──► .NET 10 (C#) ──► C++ (CMake) ──► x86-64 Assembly (NASM)
                     │
-                    ├──► Python (FastAPI) ──► MongoDB Atlas
+                    ├──► Local JSONL snapshots (data/snapshots/*.jsonl)
+                    │
+                    └──► Python (FastAPI) ──► reads local JSONL directly
 ```
 
 > **This is not a wrapper.** Most system monitors shell out to existing CLI tools or import high-level metrics libraries. This project deliberately avoids that: every data point is sourced directly from kernel interfaces, first-principles native code, or hand-written analysis logic.
@@ -66,13 +68,13 @@ Dynamically traverses `/sys/class/drm`, dispatching vendor-specific logic (NVIDI
 A real CPU benchmark loop written directly in NASM, with a companion SIMD (SSE2) implementation measuring real scalar-vs-vector speedup (3.94–3.95×).
 
 ### 📈 Python Analytics Service
-A background service logs CPU/network snapshots to MongoDB. A FastAPI service computes rolling stats, linear trend detection (climbing/dropping/flat), and bottleneck detection — sustained high-load episodes and isolated spikes, classified as CPU-bound or combined CPU+network load.
+A background service logs CPU/network snapshots to local, append-only JSON Lines files on disk. A FastAPI service reads only the date-range it needs from those files and computes rolling stats, linear trend detection (climbing/dropping/flat), and bottleneck detection — sustained high-load episodes and isolated spikes, classified as CPU-bound or combined CPU+network load.
 
 ### 🗄️ Persistent Historical Storage
-MongoDB Atlas stores every snapshot, queried directly by the analytics service — no flat files, no unbounded growth, indexed time-range queries.
+Every snapshot is appended to a local `data/snapshots/{yyyy}/{MM}/{dd}.jsonl` file (one file per day), read directly by the analytics service — no database, no account, no network dependency. Only the days a request actually needs are opened, so history can grow for months without slowing anything down.
 
 ### 🔋 Battery Health
-Real charge/discharge status, capacity-fade (design capacity vs current full-charge capacity), and cycle count read directly from `/sys/class/power_supply/BAT*`, dynamically discovered (not hardcoded to `BAT0`) the same way GPU vendor detection scans `/sys/class/drm`. Live on the Overview dashboard as charge and health cards, plus a dedicated Battery tab with full capacity/voltage/device detail. Same honest "unavailable" fallback as every other sensor on a desktop with no battery, or on Windows where the provider is currently a stub. Drain-trend analysis exists in `trend_analysis.py`, reusing the Phase 7 rolling-mean/slope functions — not yet reachable from the dashboard itself pending a Mongo port (tracked in Phase 11).
+Real charge/discharge status, capacity-fade (design capacity vs current full-charge capacity), and cycle count read directly from `/sys/class/power_supply/BAT*`, dynamically discovered (not hardcoded to `BAT0`) the same way GPU vendor detection scans `/sys/class/drm`. Live on the Overview dashboard as charge and health cards, plus a dedicated Battery tab with full capacity/voltage/device detail. Same honest "unavailable" fallback as every other sensor on a desktop with no battery. On Windows, real cycle count, designed/full-charge capacity, and health now come from the battery class driver via `IOCTL_BATTERY_QUERY_INFORMATION`/`IOCTL_BATTERY_QUERY_STATUS`, not just `GetSystemPowerStatus`. Drain-trend analysis exists in `trend_analysis.py`, reusing the Phase 7 rolling-mean/slope functions.
 
 ### 🛡️ Graceful Degradation Throughout
 Missing sensors, an unreachable analytics service, or a dropped database connection all report `"unavailable"`/`"degraded"` honestly rather than faking data or crashing.
@@ -98,7 +100,7 @@ flowchart TB
 
     API -- HTTP proxy<br/>graceful 503 on failure --> PY[Python Analytics<br/>FastAPI]
     PY -- stats / trend / bottlenecks --> API
-    PY -- query --> DB[(MongoDB Atlas)]
+    PY -- reads --> DB[(Local JSONL files)]
     API -- write snapshots --> DB
 ```
 
@@ -113,7 +115,7 @@ flowchart TB
 | **Native Engine** | C++20, CMake | Kernel file descriptor reads, hardware identification |
 | **Performance** | x86-64 Assembly (NASM) | Scalar & SIMD instruction benchmarking |
 | **Analytics** | Python, FastAPI | Bottleneck detection, trend analysis, HTTP analytics service |
-| **Storage** | MongoDB Atlas | Historical snapshot persistence, queried by the analytics service |
+| **Storage** | Local JSON Lines files | Historical snapshot persistence, read directly by the analytics service — no database |
 
 ---
 
@@ -124,7 +126,6 @@ flowchart TB
 - **.NET SDK:** 10.0+
 - **Node.js:** 20.x or higher
 - **Python:** 3.10+ (for the analytics service)
-- **MongoDB Atlas:** a cluster + connection string (or adapt to a local MongoDB instance)
 - **Build Tools:** CMake 3.20+, NASM 2.15+
 - **Compiler:** GCC/G++ 12+ (Linux) or MSVC / Visual Studio 2022+ (Windows)
 
@@ -136,7 +137,7 @@ flowchart TB
 ./setup.sh
 ```
 
-Checks every prerequisite, installs anything missing, builds the native engine, installs frontend/analytics dependencies, and walks you through setting `MONGO_URI` — then offers to launch everything immediately. Safe to re-run any time.
+Checks every prerequisite, installs anything missing, builds the native engine, installs frontend/analytics dependencies, and creates the local data directory — then offers to launch everything immediately. No database account needed. Safe to re-run any time.
 
 **Before every real run** (first time, or after pulling new changes) — validate the whole project builds cleanly, then launch:
 
@@ -148,11 +149,11 @@ An 8-stage, fail-fast pipeline — nothing starts until every stage passes:
 
 1. **Project structure** — confirms `backend/`, `frontend/`, `native/`, `analytics/`, and the key files inside each (`.csproj`, `Program.cs`, `package.json`, `vite.config.ts`, `analytics_service.py`, `native/build.sh`, `setup.sh`, `start-all.sh`) actually exist
 2. **Build commands** — checks `dotnet`, `node`, `npm`, `python3`, `cmake`, `gcc`, `g++`, `make` are all on `PATH` (unlike `setup.sh`, it does **not** install anything missing — it just fails immediately with a clear "not installed" error, so run `setup.sh` first on a truly fresh machine)
-3. **Environment** — logs installed versions of Node/npm/.NET/Python; warns (doesn't fail) if `MONGO_URI` isn't set, since that's needed at runtime, not at build time
+3. **Environment** — logs installed versions of Node/npm/.NET/Python; checks the local data directory is writable
 4. **Native C++ engine** — runs `native/build.sh`, then confirms `libsystemmonitor_native.so` actually landed in `backend/SystemMonitor.Api/`
 5. **.NET backend** — `dotnet restore` + `dotnet build --configuration Release`, then greps `Program.cs` to confirm both `MapSystemEndpoints` and `MapSpeedTestEndpoints` are registered
 6. **Frontend** — `npm install` if `node_modules` is missing, then a real production build (`npm run build`), confirms `frontend/dist` was generated, and checks a set of speed-test frontend files exist (`types/speedtest.ts`, `hooks/useSpeedTest.ts`, `components/SpeedTestCard.tsx`)
-7. **Python analytics** — `py_compile`s `analytics_service.py`, confirms `fastapi`/`uvicorn`/`pymongo` are importable (prints installed versions), and confirms the FastAPI `app` object itself imports without error
+7. **Python analytics** — `py_compile`s `analytics_service.py`, confirms `fastapi`/`uvicorn` are importable (prints installed versions), and confirms the FastAPI `app` object itself imports without error
 8. **Final validation** — makes `setup.sh`/`start-all.sh` executable if they aren't, then runs `bash -n` syntax checks on `setup.sh`, `start-all.sh`, and `build.sh` itself
 
 Every step's full output goes to `logs/build.log` (overwritten each run) as well as the console, so a failure points you straight at the real error instead of a vague "something broke." **If every stage passes, `build.sh` automatically execs `./start-all.sh` for you** — one command from a clean clone (or a fresh pull) all the way to a running app.
@@ -182,7 +183,10 @@ cp libsystemmonitor_native.so ../../backend/SystemMonitor.Api/
 **2. Set the database connection string**
 
 ```bash
-export MONGO_URI="mongodb+srv://user:pass@cluster.xxxxx.mongodb.net/SystemMonitorDB"
+# No database setup needed — historical data is stored locally.
+# Optional override for where local history is stored (defaults to
+# %LOCALAPPDATA%\SystemInfo\data on Windows, ~/.local/share/SystemInfo/data on Linux):
+export SYSTEM_INFO_DATA_DIR="$HOME/.local/share/SystemInfo/data"
 ```
 
 Required by both the backend (`SnapshotLogger.cs`) and the analytics service — set it once in your shell profile (`~/.bashrc`) so every terminal has it.
@@ -209,7 +213,7 @@ Dashboard available at `http://localhost:5173`.
 **5. Start the Analytics Service**
 
 ```bash
-pip install fastapi uvicorn pymongo
+pip install fastapi uvicorn
 cd analytics
 uvicorn analytics_service:app --reload --port 8001
 ```
@@ -245,7 +249,7 @@ system-info/
 ├── analytics/                    # Python analytics: stats, trend, bottleneck
 │   │                              detection, and the FastAPI service exposing them
 │
-├── setup.sh                      # First-time prerequisite install + MONGO_URI setup
+├── setup.sh                      # First-time prerequisite install + local data dir setup
 ├── build.sh                      # Fail-fast full build/validation, then launches start-all.sh
 ├── start-all.sh                  # Starts backend + analytics + frontend together
 │
@@ -267,7 +271,7 @@ system-info/
 | — | Cross-Platform Refactor | C# + C++ | ✅ Done |
 | — | Optimization Pass | C# | ✅ Done |
 | 7 | Python Analytics (trend + bottleneck detection) | Python / FastAPI | ✅ Done |
-| 8 | Database (MongoDB Atlas) | MongoDB Atlas | ✅ Done |
+| 8 | Historical Storage | Local JSON Lines files | ✅ Done |
 | 9 | Battery Health (charge/discharge, health %, cycle count) | C++ / sysfs / React | ✅ Done |
 | 10 | Advanced Dashboard UI | React | 🔶 In Progress — layout & UI being remade |
 | 11 | Maintenance & Extensibility | Cross-cutting | ⬜ Planned |

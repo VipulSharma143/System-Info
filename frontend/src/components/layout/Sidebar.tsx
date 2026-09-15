@@ -1,14 +1,18 @@
 import {
   Activity,
+  BatteryMedium,
   Cpu,
+  HardDrive,
+  Info,
+  ListTree,
+  Moon,
   Network,
   PanelLeftClose,
   PanelLeftOpen,
   Sun,
-  Moon,
-  ListTree,
 } from 'lucide-react';
 import type { Theme } from '../../hooks/useTheme';
+import type { ConnectionState } from '../../hooks/useSystemMetrics';
 import StatusIndicator from '../common/StatusIndicator';
 
 export interface NavItem {
@@ -19,13 +23,17 @@ export interface NavItem {
 
 const ICONS: Record<string, typeof Cpu> = {
   overview: Cpu,
-  network: Network,
-  processes: ListTree,
   analytics: Activity,
+  processes: ListTree,
+  storage: HardDrive,
+  network: Network,
+  battery: BatteryMedium,
+  system: Info,
 };
 
 interface SidebarProps {
-  isLive: boolean;
+  connection: ConnectionState;
+  lastUpdated: number | null;
   theme: Theme;
   onToggleTheme: () => void;
   items: NavItem[];
@@ -36,7 +44,8 @@ interface SidebarProps {
 }
 
 export default function Sidebar({
-  isLive,
+  connection,
+  lastUpdated,
   theme,
   onToggleTheme,
   items,
@@ -56,7 +65,7 @@ export default function Sidebar({
         </span>
         {!collapsed && (
           <span className="truncate text-[13px] font-semibold tracking-tight text-[var(--text)]">
-            Signal
+            System Info
           </span>
         )}
       </div>
@@ -97,7 +106,7 @@ export default function Sidebar({
       <div className="space-y-2 border-t border-[var(--border)] p-2.5">
         {!collapsed && (
           <div className="px-0.5">
-            <StatusIndicator live={isLive} />
+            <StatusIndicator connection={connection} lastUpdated={lastUpdated} />
           </div>
         )}
         <div className="flex items-center gap-1.5">

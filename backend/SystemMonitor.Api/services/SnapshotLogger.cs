@@ -1,92 +1,90 @@
 // SnapshotLogger.cs
-// Same public interface as before (Append(cpu, network)) — only the
-// destination changed, from a JSONL file to a MongoDB Atlas collection
-// (SystemMonitorDB.snapshots), matching the document shape already
-// proven in test_mongo_insert.py.
+// Same public interface as before (Append(cpu, network, battery)) — only the
+// destination changed, from MongoDB Atlas to local JSONL files via
+// ISnapshotStore (see LocalJsonSnapshotStore). MongoDB Atlas, MONGO_URI, and
+// any external database are no longer required by this application.
 //
-// Reads the connection string from the MONGO_URI environment variable,
-// same variable already set in ~/.bashrc and used by the Python side —
-// one shared secret, not duplicated across languages.
-//
-// Graceful degradation preserved: a failed insert is logged to stderr
-// and does not crash the background sampling loop.
+// Graceful degradation preserved: a failed write is logged to stderr and
+// does not crash the background sampling loop.
 
-using MongoDB.Bson;
-using MongoDB.Driver;
+using System.Text.Json.Nodes;
 using SystemMonitor.Api.Interface;
 
 namespace SystemMonitor.Api.Services;
 
 public static class SnapshotLogger
 {
-private static readonly IMongoCollection<BsonDocument>? Collection = InitCollection();
+    // Set once at startup (see Program.cs) after the local data directory is
+    // resolved and created. Kept as a static field so the existing static
+    // Append(...) call sites in SystemMonitorBackgroundService don't need to
+    // change to instance/DI-based calls.
+    private static ISnapshotStore? _store;
 
-private static IMongoCollection<BsonDocument>? InitCollection()
+    public static void Initialize(ISnapshotStore store)
     {
-var uri = Environment.GetEnvironmentVariable("MONGO_URI");
-if (string.IsNullOrWhiteSpace(uri))
-        {
-Console.Error.WriteLine("[SnapshotLogger] MONGO_URI not set — snapshot logging disabled.");
-return null;
-        }
-
-try
-        {
-var client = new MongoClient(uri);
-var db = client.GetDatabase("SystemMonitorDB");
-return db.GetCollection<BsonDocument>("snapshots");
-        }
-catch (Exception ex)
-        {
-Console.Error.WriteLine($"[SnapshotLogger] failed to connect to Mongo: {ex.Message}");
-return null;
-        }
+        _store = store;
     }
 
     // battery is optional so any existing caller passing just (cpu, network)
-    // still compiles — but the background service now always supplies it.
-public static void Append(CpuInfo? cpu, List<NetworkInfo>? network, BatteryInfo? battery = null)
+    // still compiles — but the background service always supplies it.
+    public static void Append(CpuInfo? cpu, List<NetworkInfo>? network, BatteryInfo? battery = null)
     {
-if (Collection is null)
-return;
-
-try
+        if (_store is null)
         {
-var networkArray = new BsonArray(
-                (network ?? new List<NetworkInfo>()).Select(n => new BsonDocument
-                {
-                    { "iface", n.Iface },
-                    { "rxKBps", n.RxKBps },
-                    { "txKBps", n.TxKBps }
-                })
-            );
+            Console.Error.WriteLine("[SnapshotLogger] store not initialized — snapshot logging disabled.");
+            return;
+        }
 
-var doc = new BsonDocument
+        try
+        {
+            var timestamp = DateTime.UtcNow;
+
+            var networkArray = new JsonArray();
+            foreach (var n in network ?? new List<NetworkInfo>())
             {
-                { "timestamp", DateTime.UtcNow },
-                { "cpuUsedPercent", cpu?.UsedPercent ?? 0 },
-                { "network", networkArray }
+                networkArray.Add(new JsonObject
+                {
+                    ["iface"] = n.Iface,
+                    ["rxKBps"] = n.RxKBps,
+                    ["txKBps"] = n.TxKBps
+                });
+            }
+
+            var obj = new JsonObject
+            {
+                // ISO-8601 UTC with a trailing "Z" — matches what the Python
+                // analytics side already parses via fromisoformat().
+                ["timestamp"] = timestamp.ToString("o"),
+                ["cpuUsedPercent"] = cpu?.UsedPercent ?? 0,
+                ["network"] = networkArray
             };
 
-            // Only written when a battery is actually present — desktops (or
-            // Windows until that provider is implemented) simply omit the
-            // field rather than storing fabricated/null placeholder values.
+            // Only written when a battery is actually present — desktops
+            // simply omit the field rather than storing fabricated/null
+            // placeholder values.
             if (battery is { Available: true })
             {
-                doc["battery"] = new BsonDocument
+                obj["battery"] = new JsonObject
                 {
-                    { "status", battery.Status ?? "unknown" },
-                    { "capacityPercent", battery.CapacityPercent ?? -1 },
-                    { "healthPercent", battery.HealthPercent ?? -1 },
-                    { "powerWatts", battery.PowerWatts ?? -1 }
+                    ["status"] = battery.Status ?? "unknown",
+                    ["capacityPercent"] = battery.CapacityPercent ?? -1,
+                    ["healthPercent"] = battery.HealthPercent ?? -1,
+                    ["powerWatts"] = battery.PowerWatts ?? -1
                 };
             }
 
-Collection.InsertOne(doc);
+            var json = obj.ToJsonString();
+
+            // The background service's loop is not async-friendly here (Append
+            // is called from a synchronous context), so we block on the write.
+            // Local disk I/O for a single short line is fast enough that this
+            // has never been the bottleneck (unlike the old network round-trip
+            // to Atlas, which this replaces).
+            _store.AppendAsync(new SystemSnapshot(timestamp, json)).GetAwaiter().GetResult();
         }
-catch (Exception ex)
+        catch (Exception ex)
         {
-Console.Error.WriteLine($"[SnapshotLogger] failed to write snapshot: {ex.Message}");
+            Console.Error.WriteLine($"[SnapshotLogger] failed to write snapshot: {ex.Message}");
         }
     }
 }

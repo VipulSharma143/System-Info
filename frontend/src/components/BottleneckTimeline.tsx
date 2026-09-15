@@ -31,17 +31,25 @@ export default function BottleneckTimeline({ bottlenecks, findNearest }: Bottlen
   const [openRow, setOpenRow] = useState<string | null>(null);
 
   const sustained: LabeledEpisode[] = [
-    ...bottlenecks.sustained_cpu_episodes.map((e) => ({ ...e, __label: 'CPU' })),
-    ...bottlenecks.sustained_network_episodes.map((e) => ({ ...e, __label: 'Network' })),
+    // Every array here is optional: analytics_service.py returns only
+    // { message, count: 0 } when the window holds no history, which is the
+    // normal fresh-install state. Default to [] rather than letting an
+    // undefined .map() blank the whole dashboard.
+    ...(bottlenecks.sustained_cpu_episodes ?? []).map((e) => ({ ...e, __label: 'CPU' })),
+    ...(bottlenecks.sustained_network_episodes ?? []).map((e) => ({ ...e, __label: 'Network' })),
   ];
-  const spikes = bottlenecks.isolated_cpu_spikes;
+  const spikes = bottlenecks.isolated_cpu_spikes ?? [];
   const hasAny = sustained.length > 0 || spikes.length > 0;
   const openSpikeIndex = openRow?.startsWith('spike-') ? Number(openRow.split('-')[1]) : null;
 
   return (
     <Panel
       title="Bottlenecks"
-      meta={`${bottlenecks.summary.sustained_cpu_episode_count} CPU · ${bottlenecks.summary.sustained_network_episode_count} network · ${bottlenecks.summary.isolated_cpu_spike_count} spikes`}
+      meta={
+        bottlenecks.summary
+          ? `${bottlenecks.summary.sustained_cpu_episode_count} CPU · ${bottlenecks.summary.sustained_network_episode_count} network · ${bottlenecks.summary.isolated_cpu_spike_count} spikes`
+          : 'no history in this window'
+      }
     >
       {!hasAny && <EmptyState title="No bottleneck episodes in this window" />}
 

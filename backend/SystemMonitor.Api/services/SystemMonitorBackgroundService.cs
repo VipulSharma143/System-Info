@@ -33,7 +33,7 @@ var network = await _provider.GetNetworkAsync();
 
 // Battery is a single-pass sync read (no delta sampling needed,
 // same reasoning as GetDisks()) — not cached separately, just
-// pulled fresh each loop so the Mongo snapshot includes it.
+// pulled fresh each loop so the local snapshot includes it.
 var battery = _provider.GetBattery();
 
 lock (_lock)

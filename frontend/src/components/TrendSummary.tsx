@@ -31,17 +31,40 @@ function DirectionTag({ t }: { t: DirectionalTrend }) {
   );
 }
 
-function windowMinutes(from: string, to: string) {
-  return Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000);
+function windowMinutes(from?: string, to?: string) {
+  if (!from || !to) return null;
+  const minutes = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000);
+  return Number.isFinite(minutes) ? minutes : null;
 }
 
 export default function TrendSummary({ trend }: { trend: TrendResponse }) {
-  const networkEntries = Object.entries(trend.network_trend_rx);
+  // cpu_trend/network_trend_rx are absent when the requested window holds
+  // no history — the normal state right after a fresh install. Guard here:
+  // Object.entries(undefined) throws, and an unguarded throw during render
+  // blanks the entire app, not just this panel.
+  const networkEntries = Object.entries(trend.network_trend_rx ?? {});
+  const cpuTrend = trend.cpu_trend;
+
+  if (!cpuTrend) {
+    return (
+      <Panel title="Trend">
+        <p className="text-[13px] text-[var(--text-faint)]">
+          Not enough history recorded yet to establish a trend.
+        </p>
+      </Panel>
+    );
+  }
+
+  const mins = windowMinutes(trend.from, trend.to);
+
   return (
-    <Panel title="Trend" meta={`${trend.count} samples · last ${windowMinutes(trend.from, trend.to)} min`}>
+    <Panel
+      title="Trend"
+      meta={`${trend.count} samples${mins !== null ? ` · last ${mins} min` : ''}`}
+    >
       <div className="mb-3 flex items-center gap-2 text-[13px] text-[var(--text-muted)]">
         CPU
-        <DirectionTag t={trend.cpu_trend} />
+        <DirectionTag t={cpuTrend} />
       </div>
       {networkEntries.length > 0 && (
         <table className="w-full border-collapse">

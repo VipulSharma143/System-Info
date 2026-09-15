@@ -9,11 +9,18 @@ const SEVERITY_COLOR: Record<string, string> = {
 interface UsageBarProps {
   percent: number;
   compact?: boolean;
+  /**
+   * Severity normally assumes "high is bad" (disk nearly full, CPU pegged).
+   * Battery charge is the opposite: 80% is healthy and 10% is critical.
+   * Set this so the colour keeps its meaning instead of painting a
+   * well-charged battery amber.
+   */
+  lowIsBad?: boolean;
 }
 
-export default function UsageBar({ percent, compact = false }: UsageBarProps) {
+export default function UsageBar({ percent, compact = false, lowIsBad = false }: UsageBarProps) {
   const clamped = Math.min(100, Math.max(0, percent));
-  const color = SEVERITY_COLOR[severity(percent)];
+  const color = SEVERITY_COLOR[severity(lowIsBad ? 100 - percent : percent)];
 
   return (
     <div className="flex items-center gap-2">

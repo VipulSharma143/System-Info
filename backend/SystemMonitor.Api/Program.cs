@@ -4,6 +4,16 @@ using SystemMonitor.Api.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Local historical storage — replaces MongoDB Atlas. Resolves and creates
+// the writable app-data directory (dev: ./data, Windows: %LOCALAPPDATA%\SystemInfo\data,
+// Linux: ~/.local/share/SystemInfo/data) once at startup, then a single
+// LocalJsonSnapshotStore instance is shared for the app's lifetime.
+var dataDir = AppDataPath.ResolveAndEnsureCreated();
+Console.WriteLine($"[Startup] Local data directory: {dataDir}");
+var snapshotStore = new LocalJsonSnapshotStore(dataDir);
+SnapshotLogger.Initialize(snapshotStore);
+builder.Services.AddSingleton<ISnapshotStore>(snapshotStore);
+
 // Register the correct platform-specific provider at startup
 if (OperatingSystem.IsWindows())
 {

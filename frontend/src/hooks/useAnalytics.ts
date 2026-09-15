@@ -4,7 +4,7 @@ import type { BottlenecksResponse, StatsResponse, TrendResponse } from '../types
 // See useSystemMetrics.ts for why this is empty (same-origin) in production
 // and a fixed dev URL only when running under `npm run dev`.
 const API_BASE = import.meta.env.DEV ? 'http://localhost:5132' : '';
-const ANALYTICS_WINDOW_MINUTES = 30;
+const DEFAULT_WINDOW_MINUTES = 60;
 const POLL_INTERVAL_MS = 10_000; // analytics is a rolling-window aggregate,
 // not a live-tick value, so this polls slower than the 2s system-metrics loop
 
@@ -17,7 +17,10 @@ interface AnalyticsState {
   loading: boolean;
 }
 
-export function useAnalytics() {
+// windowMinutes is driven by the Analytics page's range selector. Changing
+// it re-runs the effect below (fetchAnalytics depends on it), which swaps
+// the polling loop over to the new range — it does NOT add a second loop.
+export function useAnalytics(windowMinutes: number = DEFAULT_WINDOW_MINUTES) {
   const [state, setState] = useState<AnalyticsState>({
     trend: null,
     bottlenecks: null,
@@ -27,7 +30,7 @@ export function useAnalytics() {
   });
 
   const fetchAnalytics = useCallback(async () => {
-    const params = `minutes=${ANALYTICS_WINDOW_MINUTES}`;
+    const params = `minutes=${windowMinutes}`;
 
     try {
       const [trendRes, bottlenecksRes, statsRes] = await Promise.all([
@@ -59,7 +62,7 @@ export function useAnalytics() {
       // "unavailable" treatment as an explicit 503 from the proxy.
       setState((prev) => ({ ...prev, unavailable: true, loading: false }));
     }
-  }, []);
+  }, [windowMinutes]);
 
   useEffect(() => {
     fetchAnalytics();

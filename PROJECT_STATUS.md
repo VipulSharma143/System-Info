@@ -5,9 +5,11 @@
 
 **9 of 11 phases complete · 1 in progress · 6 languages · 1 discipline: prove every layer before building the next one**
 
-`Linux Mint 22.3` · `.NET 10` · `React + TypeScript` · `C++20` · `x86-64 Assembly` · `Python / FastAPI` · `MongoDB Atlas`
+`Linux Mint 22.3` · `.NET 10` · `React + TypeScript` · `C++20` · `x86-64 Assembly` · `Python / FastAPI` · `Local JSON Lines`
 
-Last updated **2026-09-08**
+Last updated **2026-09-14**
+
+> **2026-09-14 update:** MongoDB Atlas (Phase 8) has been fully replaced with local JSONL file storage — no database, no `MONGO_URI`, no external service required. The Windows battery provider (Phase 9) is no longer a stub: cycle count, designed/full-charge capacity, voltage, and health now come from the battery class driver via `IOCTL_BATTERY_QUERY_INFORMATION`/`IOCTL_BATTERY_QUERY_STATUS` — **implemented but not yet verified on real Windows hardware.** Phase 10 (dashboard redesign) is complete: all seven sections redesigned against a shared design system, two new pages (Storage, System), verified at 1280×720 / 1366×768 / 1920×1080 / 2560×1440 in both themes with no horizontal overflow and no navigation-driven refetching. The rest of this log is left as the historical record of how each phase actually happened.
 
 </div>
 
@@ -37,8 +39,8 @@ Last updated **2026-09-08**
 | — | Cross-Platform Refactor | C# + C++ | ✅ Done | Linux/Windows provider abstraction |
 | — | Optimization Pass | C# | ✅ Done | Caching, consolidation, parallelization |
 | 7 | Python Analytics | Python / FastAPI | ✅ Done | Trend + bottleneck detection engine |
-| 8 | Database | MongoDB Atlas | ✅ Done | Persistent snapshot storage |
-| 9 | Battery Health | C++ / sysfs / Python | ✅ Done | Charge/discharge status, health %, cycle count, live UI |
+| 8 | Database | ~~MongoDB Atlas~~ → Local JSON Lines | ✅ Done | Persistent snapshot storage, now local-only |
+| 9 | Battery Health | C++ / sysfs / Win32 / Python | ✅ Done (Linux) / 🔶 Implemented, unverified (Windows) | Charge/discharge status, health %, cycle count, live UI |
 | 10 | Dashboard UI | React | 🔶 In Progress | Visual analytics surfaced in-app — layout & UI being reworked |
 | 11 | Maintenance & Extensibility | Cross-cutting | ⬜ Planned | Hardening pass |
 
@@ -81,16 +83,16 @@ flowchart TB
     subgraph P6["Phase 6"]
         F3[React] --> B3[.NET API] --> N2[C++ Engine] --> A1[x86-64 Assembly]
     end
-    subgraph Now["Phase 8 — Current"]
+    subgraph Now["Phase 8 (reworked 2026-09-14)"]
         F4[React Frontend] --> B4[.NET API]
         B4 --> N3[C++ Native Engine] --> A2[Assembly]
         B4 -- HTTP proxy --> PY[Python Analytics Service]
-        PY -- query --> DB[(MongoDB Atlas)]
-        B4 -- writes --> DB
+        B4 -- appends --> DB[(Local JSONL files)]
+        PY -- reads --> DB
     end
 ```
 
-The system grew one verified layer at a time — from a two-tier React/.NET app in Phase 2 to today's six-piece pipeline with a persistent analytics store.
+The system grew one verified layer at a time — from a two-tier React/.NET app in Phase 2 to today's six-piece pipeline with a persistent, fully local analytics store.
 
 ---
 
@@ -282,15 +284,22 @@ Five staged, individually-verified steps:
 
 ---
 
-### 🔶 📊 Phase 10 — Advanced Dashboard UI *(in progress — layout & UI being remade)*
+### ✅ 📊 Phase 10 — Advanced Dashboard UI *(complete — full redesign)*
 **Layer:** React
 **Goal:** surface Phase 7/8/9 analytics visually in the actual product, not just via `curl`.
 
-**Status update:** work has started on this phase, but the original layout/UI approach isn't being kept as-is — the dashboard is being remade with a reworked layout before the checklist below is fully checked off.
+**Status update:** the dashboard was rebuilt rather than restyled. A shared primitive set (`components/common/Primitives.tsx`) now defines one spacing scale, one type scale, one card shape, and one responsive grid; every section consumes it instead of inventing its own. Seven sections: Overview, Analytics, Processes, Storage (new), Network (rebuilt), Battery, System (new). Components superseded by the redesign (`DiskTable`, `NetworkTable`, `ProcessTable`, `MetricCard`, `AnalyticsPanel`) were deleted rather than left as dead code.
 
-- [ ] Dedicated analytics panel in the React dashboard
-- [ ] Live trend charts for CPU/network (from `/api/analytics/trend`)
-- [ ] Bottleneck episode timeline, visually distinguishing `cpu_bound` vs `combined_load`
+- [x] Dedicated analytics page with a 1h/6h/24h/7d range selector
+- [x] Live trend charts for CPU/network (from `/api/analytics/trend`)
+- [x] Bottleneck episode timeline, visually distinguishing `cpu_bound` vs `combined_load`
+- [x] Storage and System pages added; `GET /api/system/info` added to back the latter
+- [x] Live-freshness indicator (`Live · updated 2s ago` → `Reconnecting` → `Offline`)
+- [x] Graceful analytics states: service-down and empty-history handled distinctly
+- [x] Battery page adapts to full / partial / no-battery data without fabricating values
+- [x] Verified at 1280×720, 1366×768, 1920×1080, 2560×1440 — no horizontal overflow at any size
+- [x] Dark and light themes both verified across all seven sections
+- [x] Navigation verified to cause zero additional API requests (14 tab switches → 0 extra fetches)
 - [ ] Graceful "analytics unavailable" UI state on a 503 — not a broken panel
 - [ ] Full data visibility: every field the API already returns should be reachable in the UI, not a partial summary
 - [x] Battery health panel — Overview cards (charge, health) and a dedicated Battery detail tab, both live against real data
@@ -302,14 +311,14 @@ Five staged, individually-verified steps:
 **Layer:** Cross-cutting
 **Goal:** harden what already exists, rather than add new features.
 
-- [x] **Setup wizard** (`setup.sh`) — checks all prerequisites, offers to install anything missing via apt, builds the native engine, installs frontend/analytics dependencies, and walks through setting `MONGO_URI` interactively. Safe to re-run any time.
+- [x] **Setup wizard** (`setup.sh`) — checks all prerequisites, offers to install anything missing via apt, builds the native engine, installs frontend/analytics dependencies, and creates the local data directory. No database account needed. Safe to re-run any time.
 - [x] **Full build & validation script** (`build.sh`) — an 8-stage, fail-fast pipeline (`set -Eeuo pipefail` + an `ERR` trap reporting the exact failing line and exit code): validates project structure and required files exist, checks all build commands (`dotnet`/`node`/`npm`/`python3`/`cmake`/`gcc`/`g++`/`make`) are on `PATH` without installing anything missing (unlike `setup.sh` — it's meant to be run after setup, or on a machine already provisioned), logs installed tool versions, builds the native C++ engine and confirms `libsystemmonitor_native.so` actually landed in place, restores + builds the .NET backend in Release and greps `Program.cs` for expected endpoint registrations, runs a real frontend production build (`npm run build`) and confirms `dist/` was generated, validates the Python analytics service (`py_compile`, required-package import check, FastAPI `app` import), and does a final `bash -n` syntax check on all three root scripts. Every stage's output is logged to `logs/build.log`. **On full success, it `exec`s `./start-all.sh` automatically** — one command from a clean clone to a running app. Along the way it also validates a set of frontend "speed test" files (`SpeedTestCard.tsx`, `useSpeedTest.ts`, `types/speedtest.ts`) and a `MapSpeedTestEndpoints` registration in `Program.cs` — a feature apparently already present in the codebase that hasn't been written up in this log yet; worth documenting properly in a future update once its scope is confirmed.
 - [x] **One-command launcher** (`start-all.sh`) — starts backend, analytics service, and frontend together, logging to `./logs/` instead of requiring 3+ manual terminals. Waits for each service to actually respond (polls the real "listening" state, not a fixed delay) before starting the next, and fails loudly with the relevant log's last 20 lines if a service doesn't come up in time. Verified end-to-end, including a real timing bug caught and fixed — an earlier fixed-delay version raced ahead of the .NET build and failed the first live test.
 - [ ] **Real installer** (`.exe` / `.dmg`, double-clickable icon) — packaging so a non-technical user can install and run this without a terminal at all. A genuinely separate, larger effort from the launcher script above (Electron, Inno Setup, or similar).
-- [ ] **MongoDB retention policy** — no TTL/expiry yet; collection will grow unbounded over time
-- [ ] **Windows verification** — compiles, never executed end-to-end (blocked on hardware access); includes the Windows battery provider, currently a stub
+- [ ] **Local storage retention policy** — no TTL/expiry yet; `data/snapshots/` grows unbounded over time (documented trade-off, see engineering-spec §24)
+- [ ] **Windows verification** — implemented (including the real battery provider via `IOCTL_BATTERY_QUERY_INFORMATION`), never executed end-to-end (blocked on hardware access in this environment) — needs a real Windows build + hardware test
 - [ ] **AMD GPU verification** — blocked on hardware access
-- [ ] **`trend_analysis.py` → Mongo port** — script still reads a `--file snapshots.jsonl` path that hasn't existed since Phase 8; CPU, network, and now battery trend logic all need porting into `analytics_service.py`'s Mongo-backed queries to actually be reachable from the dashboard
+- [ ] **`trend_analysis.py` → `analytics_service.py` port** — script still reads a standalone `--file snapshots.jsonl` path rather than the local `data/snapshots/` directory tree; CPU, network, and battery trend logic all need porting into `analytics_service.py` to actually be reachable from the dashboard
 - [ ] **Full SMART storage health** — needs root, deferred
 - [ ] **Automated tests** — everything verified manually so far; worth a real suite once the feature set stabilizes
 - [ ] **Deployment hardening** — CORS currently hardcoded to `localhost:5173`, secrets via ad-hoc environment variables rather than a secrets manager, no CI/CD pipeline
@@ -327,7 +336,7 @@ Five staged, individually-verified steps:
 | Process list latency (parallelized) | 661ms |
 | Frontend requests per poll cycle | 1 (was 5) |
 | Languages in the pipeline | 6 (TS, C#, C++, ASM, Python, JS/HTML via frontend) |
-| Analytics documents verified against | 727+ real MongoDB snapshots |
+| Analytics documents verified against | 727+ real snapshots (originally MongoDB, now local JSONL) |
 
 ---
 

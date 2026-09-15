@@ -68,13 +68,17 @@ echo "=================================================="
 echo " System Info — starting all services"
 echo "=================================================="
 
-# --- 1. MONGO_URI sanity check ---
-if [ -z "$MONGO_URI" ]; then
-    echo "[ERROR] MONGO_URI is not set."
-    echo "        Run: export MONGO_URI=\"mongodb+srv://...\""
+# --- 1. Local data directory sanity check ---
+# No database connection string required — history is stored on this
+# machine. SYSTEM_INFO_DATA_DIR can override the location.
+DATA_DIR_CHECK="${SYSTEM_INFO_DATA_DIR:-$HOME/.local/share/SystemInfo/data}"
+mkdir -p "$DATA_DIR_CHECK/snapshots"
+if [ ! -w "$DATA_DIR_CHECK" ]; then
+    echo "[ERROR] Local data directory is not writable: $DATA_DIR_CHECK"
+    echo "        Set SYSTEM_INFO_DATA_DIR to a writable location."
     exit 1
 fi
-echo "[OK] MONGO_URI is set."
+echo "[OK] Local data directory ready: $DATA_DIR_CHECK"
 
 # --- 2. Preflight: fail fast on port conflicts, before starting anything ---
 # (Backend port is skipped here — ASP.NET picks it dynamically and is

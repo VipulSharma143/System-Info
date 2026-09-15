@@ -56,5 +56,41 @@ var battery = provider.GetBattery();
 return new { ram, cpu, processes, disks, network, battery };
 })
 .WithName("GetAllSystemInfo");
+
+// Static host/hardware identification for the System page. Deliberately
+// separate from /api/system/all: none of this changes while the app runs,
+// so the frontend fetches it once instead of re-polling it every 2s.
+app.MapGet("/api/system/info", () =>
+{
+    string cpuModel;
+    int coreCount;
+    try
+    {
+        var buffer = new System.Text.StringBuilder(256);
+        coreCount = Native.NativeInterop.GetCpuInfo(buffer, buffer.Capacity);
+        cpuModel = buffer.ToString();
+    }
+    catch
+    {
+        // Native engine unavailable — report honestly rather than guessing.
+        cpuModel = "";
+        coreCount = 0;
+    }
+
+    return new
+    {
+        osDescription = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+        osArchitecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
+        processArchitecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+        frameworkDescription = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+        machineName = Environment.MachineName,
+        cpuModel = string.IsNullOrWhiteSpace(cpuModel) ? null : cpuModel,
+        coreCount = coreCount > 0 ? coreCount : (int?)null,
+        logicalProcessors = Environment.ProcessorCount,
+        appVersion = System.Reflection.Assembly.GetExecutingAssembly()
+            .GetName().Version?.ToString() ?? "unknown",
+    };
+})
+.WithName("GetSystemIdentification");
     }
 }

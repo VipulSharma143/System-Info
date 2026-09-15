@@ -240,7 +240,7 @@ jobs:
           if (Test-Path "requirements.txt") {
             python -m pip install -r requirements.txt
           } else {
-            python -m pip install fastapi uvicorn pymongo
+            python -m pip install fastapi uvicorn
           }
 
           if (Test-Path "requirements-build.txt") {
@@ -474,7 +474,7 @@ jobs:
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           else
-            python -m pip install fastapi uvicorn pymongo
+            python -m pip install fastapi uvicorn
           fi
 
       - name: Stage shared payload

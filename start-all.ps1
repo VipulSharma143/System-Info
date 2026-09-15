@@ -12,7 +12,7 @@
 # Responsibilities:
 #   - Resolve the application directory safely
 #   - Validate required application folders/files
-#   - Validate MONGO_URI
+#   - Validate local data directory
 #   - Check required ports
 #   - Start backend, analytics, and frontend in order
 #   - Wait for every service to become ready
@@ -487,29 +487,27 @@ Require-Command "npm"
 Write-Host "[OK] Required runtimes are available."
 
 # ============================================================
-# 8. Validate MONGO_URI
+# 8. Validate local data directory
 # ============================================================
 
 Write-Host ""
-Write-Host "[CHECK] Checking database configuration..."
+Write-Host "[CHECK] Checking local storage..."
 
-if ([string]::IsNullOrWhiteSpace($env:MONGO_URI)) {
-
+$dataDir = if ($env:SYSTEM_INFO_DATA_DIR) { $env:SYSTEM_INFO_DATA_DIR } else { Join-Path $env:LOCALAPPDATA "SystemInfo\data" }
+try {
+    New-Item -ItemType Directory -Force -Path (Join-Path $dataDir "snapshots") -ErrorAction Stop | Out-Null
+} catch {
     Write-Host ""
     Write-Host "==================================================" -ForegroundColor Red
-    Write-Host " [ERROR] MONGO_URI is not set." -ForegroundColor Red
+    Write-Host " [ERROR] Local data directory is not writable: $dataDir" -ForegroundColor Red
     Write-Host "==================================================" -ForegroundColor Red
     Write-Host ""
-    Write-Host "Set the MongoDB connection string before starting System Info."
+    Write-Host "Set `$env:SYSTEM_INFO_DATA_DIR to a writable location."
     Write-Host ""
-    Write-Host "Example:"
-    Write-Host "  `$env:MONGO_URI = 'mongodb+srv://...'"
-    Write-Host ""
-
     exit 1
 }
 
-Write-Host "[OK] MONGO_URI is set."
+Write-Host "[OK] Local data directory ready: $dataDir"
 
 # ============================================================
 # 9. Port preflight

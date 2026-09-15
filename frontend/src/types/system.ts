@@ -50,6 +50,24 @@ export interface BatteryInfo {
   model: string | null;
   manufacturer: string | null;
   note: string | null;
+  // "mAh" on Linux (sysfs charge_* files) or "mWh" on Windows (the battery
+  // class driver reports energy, never charge). The capacity fields above
+  // are named *Mah for backwards compatibility with the existing contract,
+  // so the UI must read this to label them correctly rather than assuming.
+  capacityUnit: string | null;
+}
+
+// Shape returned by /api/system/info — static, fetched once, not polled.
+export interface SystemIdentification {
+  osDescription: string;
+  osArchitecture: string;
+  processArchitecture: string;
+  frameworkDescription: string;
+  machineName: string;
+  cpuModel: string | null;
+  coreCount: number | null;
+  logicalProcessors: number;
+  appVersion: string;
 }
 
 // Shape returned by /api/system/all

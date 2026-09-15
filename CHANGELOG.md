@@ -13,39 +13,34 @@ All notable changes to SystemInfo are documented here.
 ### Known Issues
 
 
-
-## [1.0.4.2] - 2026-09-14
+## [2.0.0] - 2026-09-15
 
 ### Added
 
-* Added proper Windows battery monitoring using the Win32 `GetSystemPowerStatus()` API for reliable battery percentage, AC power state, charging, discharging, and fully-charged status detection.
-* Added detailed Windows battery information through the Windows battery class driver using `IOCTL_BATTERY_QUERY_INFORMATION` and `IOCTL_BATTERY_QUERY_STATUS` where supported.
-* Added Windows battery capacity, health, voltage, power usage, and cycle-count reporting when the installed battery and Windows driver expose the required information.
-* Added support for aggregating battery capacity information when multiple battery devices are detected.
+- Real Windows battery data: `WindowsBatteryInterop.cs` queries the battery class driver directly via `IOCTL_BATTERY_QUERY_TAG`/`IOCTL_BATTERY_QUERY_INFORMATION`/`IOCTL_BATTERY_QUERY_STATUS` (the same interface `powercfg /batteryreport` uses) instead of relying solely on `GetSystemPowerStatus`. Cycle count, designed/full-charge capacity, voltage, and health % are now real values on Windows where the driver exposes them, aggregated across multiple batteries when present. **Not yet verified on real Windows hardware.**
+- Local historical storage: `ISnapshotStore` / `LocalJsonSnapshotStore` write append-only `data/snapshots/{yyyy}/{MM}/{dd}.jsonl` files instead of MongoDB Atlas. `AppDataPath.cs` resolves the writable location (`%LOCALAPPDATA%\SystemInfo\data` on Windows, `~/.local/share/SystemInfo/data` on Linux, `./data` in dev), created automatically at startup.
+- Full frontend redesign: new shared design-system primitives (`Primitives.tsx`), redesigned Overview / Analytics / Processes / Network / Battery, and two new pages — **Storage** and **System** — backed by a new `GET /api/system/info` endpoint (static host/CPU/OS identification, fetched once rather than polled).
+- Analytics time-range selector (1 hour / 6 hours / 24 hours / 7 days), replacing the previously hardcoded 30-minute window.
+- Live-freshness indicator: the header now shows `Live · updated 2s ago`, and degrades through `Reconnecting` to `Offline` so stale readings can never be mistaken for current ones.
 
 ### Changed
 
-* Updated `WindowsSystemInfoProvider.GetBattery()` to use real Windows battery and power-state information instead of the previous Windows battery placeholder/stub.
-* Windows battery values reported by the battery class driver are handled using `mWh` capacity units, while Linux battery reporting continues using its existing `mAh` unit.
-* Battery status detection now distinguishes between `Charging`, `Discharging`, `Fully Charged`, `Not Charging`, and `Unknown` states.
-* Windows battery reporting now gracefully falls back to the basic Windows power API when detailed battery-driver information is unavailable.
-* Battery cycle count is treated as a per-battery value and is no longer incorrectly aggregated across multiple batteries.
-* Battery health is calculated from designed capacity versus full-charge capacity when both values are available.
-* Cleaned up duplicate Windows system-provider and system-information model/interface definitions that caused .NET compilation conflicts during the hotfix build.
+- `SnapshotLogger.cs` writes to `ISnapshotStore` instead of MongoDB.
+- `analytics_service.py` reads only the local `.jsonl` files covering the requested date range instead of querying Mongo — malformed lines are logged and skipped rather than crashing the request.
+- `setup.sh`/`setup.ps1`/`build.sh`/`start-all.sh`/`start-all.ps1`/`launcher/Program.cs` no longer reference `MONGO_URI` — they check/create the local data directory instead.
+- `MongoDB.Driver` removed from `SystemMonitor.Api.csproj`; `pymongo` removed from `analytics/requirements.txt`.
 
 ### Fixed
 
-* Fixed Windows battery reporting always returning the previous `"Battery reporting not yet implemented on Windows"` placeholder.
-* Fixed Windows battery percentage and charging status not being reported from the actual Windows power subsystem.
-* Fixed Windows battery monitoring failing to compile because of duplicate `WindowsSystemInfoProvider` definitions.
-* Fixed duplicate `ISystemInfoProvider`, `BatteryInfo`, `RamInfo`, `CpuInfo`, `ProcessInfo`, `DiskInfo`, and `NetworkInfo` definitions causing `CS0101`, `CS0111`, `CS0229`, `CS0121`, and related compilation errors.
-* Fixed the Windows battery implementation so unavailable hardware information is returned as `null` with an explanatory note instead of fabricated values.
-* Fixed the Windows backend build so the `SystemMonitor.Api` project successfully compiles after the battery-monitoring changes.
+- **Fresh-install white screen.** `analytics_service.py` returns `{"message": ..., "count": 0}` when the requested window contains no history — with no `cpu_trend`, `network_trend_rx`, or episode arrays. `TrendSummary`/`StatsSummary`/`BottleneckTimeline` accessed those unconditionally, so `Object.entries(undefined)` threw during render and blanked the **entire dashboard**, not just the analytics panel. Now every one of those fields is optional in `types/analytics.ts` and guarded at each use, and the Analytics page shows an explicit "No history for this range yet" state. This became far more likely after the MongoDB removal, since local storage starts empty on every new install.
+- **Unbounded sparklines rendered as solid blocks.** `Sparkline` hardcoded `max=100` (correct for percentages), so network throughput (~1,500 KB/s) clamped every point to the ceiling. Added `max="auto"` for unbounded series; the Network page's two series share one derived scale so up/down stay visually comparable.
+- **Battery charge bar used inverted severity colours.** `UsageBar` assumes "high is bad", which painted a healthy 78%-charged battery amber. Added `lowIsBad` so status colour keeps a consistent meaning.
+- **C# → Python timestamp incompatibility.** `DateTime.ToString("o")` emits seven fractional-second digits, which `datetime.fromisoformat` rejects before Python 3.11 — working on a dev machine and failing on an older interpreter. Timestamp parsing now truncates the fraction to six digits instead of assuming the runtime.
 
 ### Known Issues
 
-* Detailed battery information such as cycle count, voltage, capacity, and health depends on the battery hardware and Windows battery driver exposing the corresponding information. Some systems may therefore report only battery percentage and power status.
-* Windows installer and end-to-end Windows hardware verification still require validation on an actual Windows machine.
+- Windows battery IOCTL support has not been build-verified (no Windows/`dotnet` toolchain available in the environment that wrote it) or hardware-tested — needs a real Windows CI build and a real laptop test before Phase 9 can be marked fully done.
+- Local storage has no retention/TTL policy yet — `data/snapshots/` grows unbounded over time (documented trade-off, not a bug).
 
 
 ## [1.0.4.1] - 2026-09-14

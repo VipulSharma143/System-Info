@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 
 # ============================================================
@@ -196,6 +195,13 @@ require_command cmake
 require_command gcc
 require_command g++
 require_command make
+# nasm assembles the Phase 6 benchmark files (assembly/*.asm) that
+# native/CMakeLists.txt unconditionally links into the native library.
+# Missing it doesn't fail here — cmake/gcc/g++/make all still report fine —
+# it fails four steps later at the native build with a much less obvious
+# "No CMAKE_ASM_NASM_COMPILER could be found" error. Catch it up front
+# instead, in the same place every other prerequisite is caught.
+require_command nasm
 
 ok "Required build commands are available."
 
@@ -205,11 +211,12 @@ ok "Required build commands are available."
 
 step "3/8 — Checking environment"
 
-if [ -z "${MONGO_URI:-}" ]; then
-    warn "MONGO_URI is not set."
-    warn "Build will continue because MongoDB is required at runtime, not compilation time."
+DATA_DIR_CHECK="${SYSTEM_INFO_DATA_DIR:-$HOME/.local/share/SystemInfo/data}"
+mkdir -p "$DATA_DIR_CHECK/snapshots"
+if [ -w "$DATA_DIR_CHECK" ]; then
+    ok "Local data directory is writable: $DATA_DIR_CHECK"
 else
-    ok "MONGO_URI is configured."
+    warn "Local data directory is not writable: $DATA_DIR_CHECK (set SYSTEM_INFO_DATA_DIR to override)"
 fi
 
 NODE_VERSION="$(node --version)"
@@ -381,16 +388,14 @@ log "Checking required Python modules..."
 if python3 - <<'PY' >> "$BUILD_LOG" 2>&1
 import fastapi
 import uvicorn
-import pymongo
 print("fastapi:", fastapi.__version__)
 print("uvicorn:", uvicorn.__version__)
-print("pymongo:", pymongo.version)
 PY
 then
     ok "Required Python modules are available."
 else
     fail "Required Python analytics dependencies are missing."
-    echo "Run: pip3 install fastapi uvicorn pymongo --break-system-packages"
+    echo "Run: pip3 install fastapi uvicorn --break-system-packages"
     exit 1
 fi
 

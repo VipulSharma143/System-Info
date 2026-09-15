@@ -4,21 +4,22 @@ analytics_service.py
 
 Place this in: ./analytics/analytics_service.py
 
-Phase 8 update: reads from MongoDB Atlas (SystemMonitorDB.snapshots)
-instead of the JSONL file. SnapshotLogger.cs now writes there directly,
-so this replaces the file-based load_snapshots() with a Mongo query.
-Everything downstream (stats/trend/bottleneck logic) is unchanged —
-only where the data comes from changed.
-
-The `file` query param from the Phase 7 version is gone; callers no
-longer need to know or pass a file path.
+Reads from local JSON Lines snapshot files instead of MongoDB Atlas.
+SnapshotLogger.cs now writes to data/snapshots/{yyyy}/{MM}/{dd}.jsonl on
+disk instead of a Mongo collection; this replaces the Mongo-query
+load_snapshots() with a local file read. Everything downstream
+(stats/trend/bottleneck logic) is unchanged — only where the data comes
+from changed. No MongoDB, no MONGO_URI, no external database.
 
 SETUP (run once):
-    pip install fastapi uvicorn pymongo
+    pip install fastapi uvicorn
 
-Requires MONGO_URI set in the environment (same variable used by
-SnapshotLogger.cs and the earlier test scripts):
-    export MONGO_URI="mongodb+srv://user:pass@cluster.../SystemMonitorDB"
+Data directory resolution (same precedence as the .NET backend's
+AppDataPath.Resolve(), see backend/SystemMonitor.Api/services/AppDataPath.cs):
+    1. SYSTEM_INFO_DATA_DIR env var, if set
+    2. ./data next to the working directory, if SYSTEM_INFO_ENV=Development
+    3. Platform default: %LOCALAPPDATA%\\SystemInfo\\data (Windows) or
+       ~/.local/share/SystemInfo/data (Linux)
 
 RUN:
     cd analytics
@@ -32,39 +33,95 @@ Then:
     http://localhost:8001/docs   (interactive API docs)
 """
 
+import json
 import os
+import platform
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
-from pymongo import MongoClient, ASCENDING
+from fastapi import FastAPI, Query
 
-app = FastAPI(title="System Monitor Analytics", version="0.2.0")
-
-# ---------------------------------------------------------------------------
-# Mongo connection (one client, reused across requests)
-# ---------------------------------------------------------------------------
-
-MONGO_URI = os.environ.get("MONGO_URI")
-_client: Optional[MongoClient] = None
-_collection = None
-
-if MONGO_URI:
-    _client = MongoClient(MONGO_URI)
-    _collection = _client["SystemMonitorDB"]["snapshots"]
-
-
-def get_collection():
-    if _collection is None:
-        raise HTTPException(
-            status_code=500,
-            detail="MONGO_URI not set — analytics service has no database connection.",
-        )
-    return _collection
-
+app = FastAPI(title="System Monitor Analytics", version="0.3.0")
 
 # ---------------------------------------------------------------------------
-# Shared loading logic — now a Mongo query instead of a file read
+# Local data directory resolution — mirrors AppDataPath.Resolve() in the
+# .NET backend so both sides agree on where history lives without needing
+# to talk to each other about it.
+# ---------------------------------------------------------------------------
+
+def resolve_data_dir() -> Path:
+    override = os.environ.get("SYSTEM_INFO_DATA_DIR")
+    if override:
+        return Path(override)
+
+    if os.environ.get("SYSTEM_INFO_ENV", "").lower() == "development":
+        return Path.cwd() / "data"
+
+    if platform.system() == "Windows":
+        local_app_data = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
+        return Path(local_app_data) / "SystemInfo" / "data"
+
+    return Path.home() / ".local" / "share" / "SystemInfo" / "data"
+
+
+DATA_DIR = resolve_data_dir()
+SNAPSHOTS_DIR = DATA_DIR / "snapshots"
+
+
+def parse_timestamp(raw):
+    """
+    Parse a snapshot timestamp written by SnapshotLogger.cs.
+
+    C#'s DateTime.ToString("o") emits SEVEN fractional-second digits
+    ("2026-09-14T10:25:31.1220000Z"), but datetime.fromisoformat only
+    accepts 3 or 6 before Python 3.11 — so the obvious one-liner silently
+    works on a dev machine and breaks on an older interpreter. Truncate the
+    fraction to 6 digits before parsing rather than assume the runtime.
+
+    Returns an aware UTC datetime, or None if the value is unusable.
+    """
+    if not isinstance(raw, str):
+        return None
+
+    text = raw.strip().replace("Z", "+00:00")
+
+    # Trim over-long fractional seconds: ...31.1220000+00:00 -> ...31.122000+00:00
+    match = re.match(r"^(.*\.\d{6})\d+(.*)$", text)
+    if match:
+        text = match.group(1) + match.group(2)
+
+    try:
+        ts = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def snapshot_files_for_range(start: datetime, end: datetime):
+    """
+    Yields only the daily .jsonl files that can possibly contain data in
+    [start, end] — never reads the whole history for a request scoped to
+    the last N minutes/hours.
+    """
+    if not SNAPSHOTS_DIR.exists():
+        return
+
+    day = start.date()
+    last_day = end.date()
+    while day <= last_day:
+        f = SNAPSHOTS_DIR / f"{day.year:04d}" / f"{day.month:02d}" / f"{day.day:02d}.jsonl"
+        if f.exists():
+            yield f
+        day += timedelta(days=1)
+
+
+# ---------------------------------------------------------------------------
+# Shared loading logic — reads only the relevant local JSONL files
 # ---------------------------------------------------------------------------
 
 def load_snapshots(since: Optional[datetime]):
@@ -72,35 +129,38 @@ def load_snapshots(since: Optional[datetime]):
     Returns a list of (timestamp, record) tuples, sorted oldest-first,
     same shape the rest of this file already expects — so stats/trend/
     bottleneck logic below needed no changes.
+
+    A malformed/partial JSON line (e.g. from an unclean shutdown mid-write)
+    is logged and skipped rather than raised — one bad line must not take
+    down analytics for an entire day's history.
     """
-    collection = get_collection()
-
-    query = {}
-    if since is not None:
-        # Docs are stored as naive UTC datetimes (written via C#'s
-        # DateTime.UtcNow); strip tzinfo so the comparison matches.
-        query["timestamp"] = {"$gte": since.replace(tzinfo=None)}
-
-    cursor = collection.find(query).sort("timestamp", ASCENDING)
+    now = datetime.now(timezone.utc)
+    start = since if since is not None else datetime(1970, 1, 1, tzinfo=timezone.utc)
 
     snapshots = []
-    for doc in cursor:
-        ts = doc.get("timestamp")
-        if ts is None:
-            continue
-        # Defensive: handle both native Mongo datetimes (written by
-        # SnapshotLogger.cs) and ISO-format strings (e.g. leftover from
-        # manual test inserts) so a stray document of the wrong shape
-        # doesn't crash every query.
-        if isinstance(ts, str):
-            try:
-                ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            except ValueError:
-                continue
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        snapshots.append((ts, doc))
+    for path in snapshot_files_for_range(start, now):
+        with open(path, "r", encoding="utf-8") as fh:
+            for line_no, line in enumerate(fh, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    doc = json.loads(line)
+                except json.JSONDecodeError as e:
+                    print(f"[analytics] skipping malformed line {path}:{line_no}: {e}")
+                    continue
 
+                ts = parse_timestamp(doc.get("timestamp"))
+                if ts is None:
+                    print(f"[analytics] skipping line with bad timestamp {path}:{line_no}")
+                    continue
+
+                if since is not None and ts < since:
+                    continue
+
+                snapshots.append((ts, doc))
+
+    snapshots.sort(key=lambda pair: pair[0])
     return snapshots
 
 
@@ -123,13 +183,14 @@ def resolve_since(minutes: Optional[float]):
 
 @app.get("/health")
 def health():
-    if _collection is None:
-        return {"status": "degraded", "detail": "MONGO_URI not set"}
-    try:
-        _client.admin.command("ping")
-        return {"status": "ok", "database": "connected"}
-    except Exception as e:
-        return {"status": "degraded", "detail": str(e)}
+    if not SNAPSHOTS_DIR.exists():
+        return {
+            "status": "ok",
+            "storage": "local",
+            "detail": "data directory not created yet — no snapshots recorded so far",
+            "data_dir": str(DATA_DIR),
+        }
+    return {"status": "ok", "storage": "local", "data_dir": str(DATA_DIR)}
 
 
 # ---------------------------------------------------------------------------

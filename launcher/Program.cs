@@ -28,13 +28,13 @@ Directory.CreateDirectory(configDir);
 var backendLog = Path.Combine(logDir, "backend.log");
 var analyticsLog = Path.Combine(logDir, "analytics.log");
 
-// Optional: %LOCALAPPDATA%\SystemInfo\config\mongo_uri.txt lets a user opt
-// into historical/analytics logging by dropping their connection string in
-// one file. Both the backend and analytics service already degrade
-// gracefully (documented in SnapshotLogger.cs / analytics_service.py) when
-// MONGO_URI isn't set, so this is optional, not a blocking setup step.
-var mongoUriFile = Path.Combine(configDir, "mongo_uri.txt");
-var mongoUri = File.Exists(mongoUriFile) ? File.ReadAllText(mongoUriFile).Trim() : null;
+// Local historical storage lives at %LOCALAPPDATA%\SystemInfo\data. Passed
+// explicitly to both child processes so the backend (writer) and analytics
+// service (reader) are guaranteed to agree on the path, rather than relying
+// on each independently re-deriving the same default. No database, no
+// connection string, no account — see AppDataPath.cs / analytics_service.py.
+var snapshotDataDir = Path.Combine(dataDir, "data");
+Directory.CreateDirectory(snapshotDataDir);
 
 var children = new List<Process>();
 
@@ -44,7 +44,7 @@ Console.CancelKeyPress += (_, e) => { e.Cancel = true; KillChildren(); Environme
 try
 {
     var backendExe = Path.Combine(appDir, "backend", "SystemMonitor.Api.exe");
-    var backendPort = StartBackendAndWaitForPort(backendExe, appDir, backendLog, mongoUri);
+    var backendPort = StartBackendAndWaitForPort(backendExe, appDir, backendLog, snapshotDataDir);
     if (backendPort is null)
     {
         Fail("Backend", backendLog);
@@ -53,7 +53,7 @@ try
 
     var analyticsExe = Path.Combine(appDir, "analytics", "analytics.exe");
     var analyticsPort = 8001;
-    StartAnalytics(analyticsExe, appDir, analyticsLog, analyticsPort, mongoUri);
+    StartAnalytics(analyticsExe, appDir, analyticsLog, analyticsPort, snapshotDataDir);
     if (!WaitForHttp($"http://127.0.0.1:{analyticsPort}/health", TimeSpan.FromSeconds(30)))
     {
         // Analytics is non-critical for the dashboard to load — log and continue,
@@ -84,7 +84,7 @@ finally
     KillChildren();
 }
 
-int? StartBackendAndWaitForPort(string exePath, string workingDir, string logFile, string? mongoUri)
+int? StartBackendAndWaitForPort(string exePath, string workingDir, string logFile, string dataDirForChild)
 {
     if (!File.Exists(exePath))
     {
@@ -102,7 +102,7 @@ int? StartBackendAndWaitForPort(string exePath, string workingDir, string logFil
     };
     psi.Environment["ASPNETCORE_URLS"] = "http://127.0.0.1:0"; // OS-assigned free port
     psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
-    if (mongoUri is not null) psi.Environment["MONGO_URI"] = mongoUri;
+    psi.Environment["SYSTEM_INFO_DATA_DIR"] = dataDirForChild;
 
     var proc = Process.Start(psi)!;
     children.Add(proc);
@@ -129,7 +129,7 @@ int? StartBackendAndWaitForPort(string exePath, string workingDir, string logFil
     return port;
 }
 
-void StartAnalytics(string exePath, string workingDir, string logFile, int port, string? mongoUri)
+void StartAnalytics(string exePath, string workingDir, string logFile, int port, string dataDirForChild)
 {
     if (!File.Exists(exePath))
     {
@@ -145,7 +145,7 @@ void StartAnalytics(string exePath, string workingDir, string logFile, int port,
         RedirectStandardError = true,
         CreateNoWindow = true,
     };
-    if (mongoUri is not null) psi.Environment["MONGO_URI"] = mongoUri;
+    psi.Environment["SYSTEM_INFO_DATA_DIR"] = dataDirForChild;
 
     var proc = Process.Start(psi)!;
     children.Add(proc);

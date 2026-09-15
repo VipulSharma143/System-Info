@@ -3,13 +3,28 @@ import Panel from './common/Panel';
 import { Th, Td, Tr } from './common/Table';
 
 export default function StatsSummary({ stats }: { stats: StatsResponse }) {
-  const networkEntries = Object.entries(stats.network);
+  // cpu_percent/network are absent when the window has no history (fresh
+  // install). Guard rather than assume — reading .mean off undefined here
+  // would take down the whole dashboard, not just this panel.
+  const networkEntries = Object.entries(stats.network ?? {});
+  const cpu = stats.cpu_percent;
+
+  if (!cpu) {
+    return (
+      <Panel title="Stats">
+        <p className="text-[13px] text-[var(--text-faint)]">
+          No samples recorded in this window yet.
+        </p>
+      </Panel>
+    );
+  }
+
   return (
     <Panel title="Stats" meta={`${stats.count} samples`}>
       <div className="tabular mb-3 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-[var(--text-muted)]">
-        <span>CPU mean <span className="text-[var(--text)]">{stats.cpu_percent.mean}%</span></span>
-        <span>min <span className="text-[var(--text)]">{stats.cpu_percent.min}%</span></span>
-        <span>max <span className="text-[var(--text)]">{stats.cpu_percent.max}%</span></span>
+        <span>CPU mean <span className="text-[var(--text)]">{cpu.mean}%</span></span>
+        <span>min <span className="text-[var(--text)]">{cpu.min}%</span></span>
+        <span>max <span className="text-[var(--text)]">{cpu.max}%</span></span>
       </div>
       {networkEntries.length > 0 && (
         <table className="w-full border-collapse">

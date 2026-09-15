@@ -4,9 +4,10 @@
 #
 # Checks every prerequisite this project needs, offers to install
 # whatever's missing (Linux/apt-based systems), builds the native
-# engine, installs frontend/analytics dependencies, walks the user
-# through setting MONGO_URI, checks the ports start-all.sh will need,
-# and finally offers to launch everything via start-all.sh.
+# engine, installs frontend/analytics dependencies, creates the local
+# data directory (no database account needed), checks the ports
+# start-all.sh will need, and finally offers to launch everything via
+# start-all.sh.
 #
 # Designed to be safe to re-run: every step checks "is this already
 # done?" before doing it, so running this twice doesn't break anything.
@@ -104,30 +105,28 @@ echo ""
 
 # --- 5. Analytics dependencies ---
 echo "Checking analytics dependencies..."
-if python3 -c "import fastapi, uvicorn, pymongo" &> /dev/null; then
-    ok "fastapi, uvicorn, and pymongo already installed."
+if python3 -c "import fastapi, uvicorn" &> /dev/null; then
+    ok "fastapi and uvicorn already installed."
 else
-    pip3 install fastapi uvicorn pymongo --break-system-packages --quiet
+    pip3 install fastapi uvicorn --break-system-packages --quiet
     ok "Python analytics dependencies installed."
 fi
 
 echo ""
 
-# --- 6. MONGO_URI ---
-echo "Checking database connection..."
-if [ -n "$MONGO_URI" ]; then
-    ok "MONGO_URI already set in this shell."
+# --- 6. Local data directory ---
+# No database account, connection string, or cloud cluster needed — all
+# history is stored on this machine. SYSTEM_INFO_DATA_DIR can override the
+# location; otherwise it resolves to the platform default (see
+# backend/SystemMonitor.Api/services/AppDataPath.cs).
+echo "Setting up local historical storage..."
+DATA_DIR="${SYSTEM_INFO_DATA_DIR:-$HOME/.local/share/SystemInfo/data}"
+mkdir -p "$DATA_DIR/snapshots"
+if [ -w "$DATA_DIR" ]; then
+    ok "Local data directory ready: $DATA_DIR"
 else
-    warn "MONGO_URI is not set."
-    echo "You need a MongoDB Atlas connection string (mongodb+srv://user:pass@cluster.../DBNAME)."
-    read -r -p "Paste it now (or press Enter to skip and set it manually later): " mongo_input
-    if [ -n "$mongo_input" ]; then
-        echo "export MONGO_URI=\"$mongo_input\"" >> "$HOME/.bashrc"
-        export MONGO_URI="$mongo_input"
-        ok "Saved to ~/.bashrc and set for this session."
-    else
-        warn "Skipped. Set MONGO_URI manually before running start-all.sh."
-    fi
+    fail "Local data directory is not writable: $DATA_DIR"
+    exit 1
 fi
 
 echo ""

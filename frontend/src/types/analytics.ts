@@ -10,12 +10,19 @@ export interface DirectionalTrend {
   per_minute: number;
 }
 
+// IMPORTANT: analytics_service.py short-circuits with
+//   { "message": "no snapshots found in requested window", "count": 0 }
+// when the requested window contains no history — cpu_trend and
+// network_trend_rx are absent entirely in that case. That is the NORMAL
+// state for a fresh install (local storage starts empty), not an error, so
+// these are optional and every consumer must handle them being missing.
 export interface TrendResponse {
   count: number;
-  from: string; // ISO timestamp
-  to: string; // ISO timestamp
-  cpu_trend: DirectionalTrend;
-  network_trend_rx: Record<string, DirectionalTrend>; // keyed by interface name
+  from?: string; // ISO timestamp
+  to?: string; // ISO timestamp
+  message?: string;
+  cpu_trend?: DirectionalTrend;
+  network_trend_rx?: Record<string, DirectionalTrend>; // keyed by interface name
 }
 
 export type BottleneckClassification = 'cpu_bound' | 'combined_load';
@@ -36,12 +43,13 @@ export interface BottleneckEpisode {
 
 export interface BottlenecksResponse {
   count: number;
-  from: string;
-  to: string;
-  sustained_cpu_episodes: BottleneckEpisode[];
-  sustained_network_episodes: BottleneckEpisode[];
-  isolated_cpu_spikes: BottleneckEpisode[];
-  summary: {
+  from?: string;
+  to?: string;
+  message?: string;
+  sustained_cpu_episodes?: BottleneckEpisode[];
+  sustained_network_episodes?: BottleneckEpisode[];
+  isolated_cpu_spikes?: BottleneckEpisode[];
+  summary?: {
     sustained_cpu_episode_count: number;
     sustained_network_episode_count: number;
     isolated_cpu_spike_count: number;
@@ -60,10 +68,13 @@ export interface NetworkStat {
   tx_kbps: StatSummary;
 }
 
+// Same empty-window short-circuit as TrendResponse above — on a fresh
+// install cpu_percent/network simply aren't present.
 export interface StatsResponse {
   count: number;
-  from: string;
-  to: string;
-  cpu_percent: StatSummary;
-  network: Record<string, NetworkStat>; // keyed by interface name
+  from?: string;
+  to?: string;
+  message?: string;
+  cpu_percent?: StatSummary;
+  network?: Record<string, NetworkStat>; // keyed by interface name
 }

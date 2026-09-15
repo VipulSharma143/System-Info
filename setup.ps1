@@ -11,7 +11,7 @@
 #
 # Windows equivalent of setup.sh. Checks prerequisites, offers to install
 # missing ones via winget, builds the native engine with the Visual Studio
-# generator, installs frontend/analytics deps, walks through MONGO_URI,
+# generator, installs frontend/analytics deps, sets up local storage,
 # checks ports, and offers to launch start-all.ps1.
 #
 # KNOWN GAP (flagging honestly, not hiding it): this assumes native/CMakeLists.txt
@@ -140,32 +140,25 @@ Write-Host ""
 
 # --- 5. Analytics dependencies ---
 Write-Host "Checking analytics dependencies..."
-$check = python -c "import fastapi, uvicorn, pymongo" 2>&1
+$check = python -c "import fastapi, uvicorn" 2>&1
 if ($LASTEXITCODE -eq 0) {
-    Ok "fastapi, uvicorn, and pymongo already installed."
+    Ok "fastapi and uvicorn already installed."
 } else {
-    pip install fastapi uvicorn pymongo --quiet
+    pip install fastapi uvicorn --quiet
     Ok "Python analytics dependencies installed."
 }
 
 Write-Host ""
 
-# --- 6. MONGO_URI ---
-Write-Host "Checking database connection..."
-if ($env:MONGO_URI) {
-    Ok "MONGO_URI already set in this session."
-} else {
-    Warn "MONGO_URI is not set."
-    Write-Host "You need a MongoDB Atlas connection string (mongodb+srv://user:pass@cluster.../DBNAME)."
-    $mongoInput = Read-Host "Paste it now (or press Enter to skip and set it manually later)"
-    if ($mongoInput) {
-        [System.Environment]::SetEnvironmentVariable("MONGO_URI", $mongoInput, "User")
-        $env:MONGO_URI = $mongoInput
-        Ok "Saved as a persistent User environment variable and set for this session."
-    } else {
-        Warn "Skipped. Set MONGO_URI manually before running start-all.ps1."
-    }
-}
+# --- 6. Local data directory ---
+# No database account, connection string, or cloud cluster needed — all
+# history is stored on this machine. SYSTEM_INFO_DATA_DIR can override the
+# location; otherwise it resolves to %LOCALAPPDATA%\SystemInfo\data (see
+# backend/SystemMonitor.Api/services/AppDataPath.cs).
+Write-Host "Setting up local historical storage..."
+$dataDir = if ($env:SYSTEM_INFO_DATA_DIR) { $env:SYSTEM_INFO_DATA_DIR } else { Join-Path $env:LOCALAPPDATA "SystemInfo\data" }
+New-Item -ItemType Directory -Force -Path (Join-Path $dataDir "snapshots") | Out-Null
+Ok "Local data directory ready: $dataDir"
 
 Write-Host ""
 

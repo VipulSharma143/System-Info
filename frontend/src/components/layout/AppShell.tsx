@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react';
 import type { Theme } from '../../hooks/useTheme';
+import type { ConnectionState } from '../../hooks/useSystemMetrics';
 import Sidebar, { type NavItem } from './Sidebar';
 import TopBar from './TopBar';
 
 interface AppShellProps {
-  isLive: boolean;
+  connection: ConnectionState;
+  lastUpdated: number | null;
   theme: Theme;
   onToggleTheme: () => void;
   navItems: NavItem[];
@@ -19,7 +21,8 @@ interface AppShellProps {
 }
 
 export default function AppShell({
-  isLive,
+  connection,
+  lastUpdated,
   theme,
   onToggleTheme,
   navItems,
@@ -35,7 +38,8 @@ export default function AppShell({
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[var(--bg)] text-[var(--text)]">
       <Sidebar
-        isLive={isLive}
+        connection={connection}
+        lastUpdated={lastUpdated}
         theme={theme}
         onToggleTheme={onToggleTheme}
         items={navItems}
