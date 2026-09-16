@@ -27,7 +27,7 @@
 //! there.
 
 use serde::Serialize;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};

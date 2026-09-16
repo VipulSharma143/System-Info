@@ -33,14 +33,14 @@ pub fn run() {
             // Native X close button (spec section 16 / RULE 8): stop both
             // services before the window actually closes, so Task Manager
             // never shows a leftover SystemMonitor.Api.exe/analytics.exe
-            // after the app is gone. `prevent_default` + manual `close()`
+            // after the app is gone. `prevent_close` + manual `app.exit()`
             // turns the otherwise-immediate close into "clean up, then
             // close" without blocking the UI thread on the whole shutdown.
             if let Some(window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_default();
+                        api.prevent_close();
                         let app_handle = app_handle.clone();
                         std::thread::spawn(move || {
                             let manager = app_handle.state::<ServiceManager>();

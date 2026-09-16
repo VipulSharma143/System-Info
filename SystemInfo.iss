@@ -47,6 +47,7 @@
 
 #define MyAppName "SystemInfo"
 #define MyAppVersion "2.0.0"
+#define MyAppPublisher "Vipul Sharma"
 #define MyAppExeName "SystemInfo.exe"
 #define StagingDir "packaging\app"
 
@@ -54,6 +55,7 @@
 AppId={{A6E1F2B0-7C3D-4E5A-9B1C-000000000000}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=Output

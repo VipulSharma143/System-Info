@@ -34,6 +34,8 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "Vipul Sharma",
+    "copyright": "Copyright © Vipul Sharma",
     "targets": [
       "nsis"
     ],
