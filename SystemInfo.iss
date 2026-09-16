@@ -1,5 +1,21 @@
 ; SystemInfo.iss — Inno Setup script
 ;
+; ============================================================
+; DEPRECATED as of the Tauri 2 migration (2.0.0). The production installer
+; is now built by Tauri's own bundler (`npm run tauri build` in frontend/,
+; target "nsis" in frontend/src-tauri/tauri.conf.json) and CI no longer
+; invokes this script — see .github/workflows/release.yml's build-windows
+; job, which now stages backend/analytics into
+; frontend/src-tauri/resources/ and lets `tauri build` produce both the app
+; and the installer in one step.
+;
+; Kept in the repo per the migration spec's "don't delete working files
+; prematurely" rule, as a rollback reference and because it documents the
+; exact production file layout the old launcher-based build assembled. Not
+; wired into any build path. Delete once the Tauri NSIS installer has been
+; through a few real releases.
+; ============================================================
+;
 ; Compiles into "SystemInfo-Setup.exe".
 ;
 ; IMPORTANT — this no longer packages the repository. It packages ONLY the
@@ -30,7 +46,7 @@
 ;     starts the already-built backend and analytics executables itself.
 
 #define MyAppName "SystemInfo"
-#define MyAppVersion "1.0"
+#define MyAppVersion "2.0.0"
 #define MyAppExeName "SystemInfo.exe"
 #define StagingDir "packaging\app"
 

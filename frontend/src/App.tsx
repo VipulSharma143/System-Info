@@ -17,6 +17,7 @@ import SystemView from './components/views/SystemView';
 
 import { OfflineBanner } from './components/common/States';
 import StatusIndicator from './components/common/StatusIndicator';
+import ServiceControls from './components/layout/ServiceControls';
 
 // Order matters — this is the reading order of the product: what's
 // happening now, what happened over time, then the per-subsystem detail
@@ -75,7 +76,12 @@ function App() {
       onToggleCollapsed={() => setCollapsed((c) => !c)}
       title={TITLES[activeSection].title}
       description={TITLES[activeSection].description}
-      topBarAction={<StatusIndicator connection={connection} lastUpdated={lastUpdated} />}
+      topBarAction={
+        <div className="flex items-center gap-4">
+          <ServiceControls />
+          <StatusIndicator connection={connection} lastUpdated={lastUpdated} />
+        </div>
+      }
     >
       {/*
         The offline banner shows while the last known data stays on screen.

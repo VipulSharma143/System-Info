@@ -1,0 +1,47 @@
+[package]
+name = "system-info"
+version = "2.0.0"
+description = "System Info — native desktop shell"
+authors = ["Vipul Sharma"]
+edition = "2021"
+# Kept in lockstep with the rest of the app (frontend/package.json,
+# tauri.conf.json, Directory.Build.props) — see scripts/sync-version.mjs.
+# Do not bump this by hand; run the sync script instead.
+
+[lib]
+# Allows `cargo build` from this crate to also be exercised by tests/tools
+# without going through the Tauri CLI. Not required for `tauri build`, but
+# harmless and standard for Tauri 2 projects.
+name = "system_info_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Only the bare `tauri` crate — deliberately NOT tauri-plugin-shell. The
+# frontend never gets shell/command-execution capabilities (spec section 23):
+# process spawning happens entirely in Rust (src/process_manager.rs), invoked
+# only through the narrow, purpose-built `start_services`/`stop_services`/
+# `exit_app` commands below. There is nothing for a capabilities file to
+# accidentally over-grant.
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Lightweight synchronous HTTP client for the backend/analytics readiness
+# checks (GET /api/system/info, GET /health). Deliberately not reqwest+tokio:
+# these are short, local, blocking calls made from a background thread, not
+# hot-path async work, so pulling in an async runtime would be pure overhead.
+ureq = { version = "2.12", default-features = false }
+
+[features]
+# This feature is used for production builds where `devPath` points to the
+# static frontend assets instead of the Vite dev server.
+custom-protocol = ["tauri/custom-protocol"]
+
+[target.'cfg(windows)'.dependencies]
+# Safe wrapper around Win32 Job Objects — see src/process.rs's module docs
+# for why this (not just Child::kill()) is what actually closes the orphan-
+# process hole the migration spec calls out (section 21). Widely used for
+# exactly this "guarantee no leaked subprocesses" problem.
+win32job = "2"

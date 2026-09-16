@@ -36,7 +36,14 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
+        policy.WithOrigins(
+                  "http://localhost:5173",   // `npm run dev` (Vite)
+                  "http://tauri.localhost",  // Tauri 2's default Windows WebView2 origin
+                                              // for the bundled production frontend — see
+                                              // frontend/src/lib/apiConfig.ts for why the
+                                              // Tauri build talks to this fixed port instead
+                                              // of a same-origin relative path.
+                  "tauri://localhost")       // non-Windows Tauri targets (custom URI scheme)
               .AllowAnyMethod()
               .AllowAnyHeader();
     });
@@ -60,6 +67,14 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
+
+// Cheap, dependency-free readiness probe for the Tauri process manager
+// (src-tauri/src/process.rs) — deliberately NOT under /api/system so it
+// never touches ISystemInfoProvider or the background sampler. Mirrors
+// analytics_service.py's own /health endpoint, which the same process
+// manager already polls the same way.
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
+   .WithName("HealthCheck");
 
 app.MapSystemEndpoints();
 app.MapNativeEndpoints();

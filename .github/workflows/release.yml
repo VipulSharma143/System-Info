@@ -134,17 +134,34 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build (frontend/src-tauri)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+
+      - name: Sync application version
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Single authoritative version (migration spec sections 34/40/41):
+          # propagates $APP_VERSION (already derived from CHANGELOG.md by
+          # the `version` job) into package.json, tauri.conf.json,
+          # Cargo.toml, Directory.Build.props, and SystemInfo.iss in one
+          # pass, then fails the build loudly if anything still disagrees —
+          # instead of silently shipping a UI that shows the wrong version.
+          node scripts/sync-version.mjs $env:APP_VERSION
+          node scripts/check-version.mjs
+
       - name: Install NASM
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           choco install nasm -y
-
-      - name: Install Inno Setup
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          choco install innosetup -y
 
       - name: Build native C++ engine
         shell: pwsh
@@ -278,127 +295,108 @@ jobs:
             exit 1
           }
 
-      - name: Publish production SystemInfo launcher
+      - name: Stage backend and analytics as Tauri resources
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          if (Test-Path "build/launcher") { Remove-Item -Path "build/launcher" -Recurse -Force }
-          New-Item -ItemType Directory -Path "build/launcher" -Force | Out-Null
+          # Tauri's bundler copies whatever sits under these paths into the
+          # installed app (see frontend/src-tauri/tauri.conf.json's
+          # bundle.resources), the same way "Assemble production
+          # packaging/app" used to stage packaging/app/ for Inno Setup. Not
+          # committed to the repo — see frontend/src-tauri/.gitignore.
+          $backendDest = "frontend/src-tauri/resources/backend"
+          $analyticsDest = "frontend/src-tauri/resources/analytics"
 
-          dotnet publish launcher/SystemInfo.Launcher.csproj `
-            --configuration Release `
-            --runtime win-x64 `
-            --self-contained true `
-            --output build/launcher `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
-            -p:EnableCompressionInSingleFile=true
+          if (Test-Path $backendDest) { Remove-Item -Path $backendDest -Recurse -Force }
+          New-Item -ItemType Directory -Path $backendDest -Force | Out-Null
+          Copy-Item "build/backend/*" $backendDest -Recurse -Force
 
-          if (-not (Test-Path "build/launcher/SystemInfo.exe")) {
-            Write-Error "Production launcher was not created."
-            exit 1
-          }
+          if (Test-Path $analyticsDest) { Remove-Item -Path $analyticsDest -Recurse -Force }
+          New-Item -ItemType Directory -Path $analyticsDest -Force | Out-Null
+          Copy-Item "analytics/dist/analytics.exe" "$analyticsDest/analytics.exe" -Force
 
-      - name: Assemble production packaging/app
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $staging = "packaging/app"
-          if (Test-Path $staging) { Remove-Item -Path $staging -Recurse -Force }
-          New-Item -ItemType Directory -Path $staging -Force | Out-Null
-          New-Item -ItemType Directory -Path "$staging/backend" -Force | Out-Null
-          New-Item -ItemType Directory -Path "$staging/analytics" -Force | Out-Null
-
-          Copy-Item "build/launcher/SystemInfo.exe" "$staging/SystemInfo.exe" -Force
-          Copy-Item "SystemInfo.ico" "$staging/SystemInfo.ico" -Force
-          Copy-Item "build/backend/*" "$staging/backend" -Recurse -Force
-          Copy-Item "analytics/dist/analytics.exe" "$staging/analytics/analytics.exe" -Force
-
-      - name: Validate production staging
+      - name: Validate Tauri resource staging
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           $requiredFiles = @(
-            "packaging/app/SystemInfo.exe",
-            "packaging/app/SystemInfo.ico",
-            "packaging/app/backend/SystemMonitor.Api.exe",
-            "packaging/app/backend/systemmonitor_native.dll",
-            "packaging/app/analytics/analytics.exe"
+            "frontend/src-tauri/resources/backend/SystemMonitor.Api.exe",
+            "frontend/src-tauri/resources/backend/systemmonitor_native.dll",
+            "frontend/src-tauri/resources/analytics/analytics.exe",
+            "frontend/src-tauri/icons/icon.ico"
           )
 
           foreach ($file in $requiredFiles) {
             if (-not (Test-Path $file)) {
-              Write-Error "Required production file is missing: $file"
+              Write-Error "Required Tauri resource is missing: $file"
               exit 1
             }
             if ((Get-Item $file).Length -le 0) {
-              Write-Error "Production file is empty: $file"
+              Write-Error "Tauri resource is empty: $file"
               exit 1
             }
           }
 
-          $wwwroot = "packaging/app/backend/wwwroot"
-          if (-not (Test-Path $wwwroot)) {
-            Write-Error "Production backend wwwroot is missing."
-            exit 1
-          }
-          $frontendFiles = Get-ChildItem -Path $wwwroot -Recurse -File
-          if ($frontendFiles.Count -eq 0) {
-            Write-Error "Production backend wwwroot contains no frontend files."
-            exit 1
-          }
+          Write-Host "Tauri resource staging validated."
 
-          Write-Host "Production staging validated ($($frontendFiles.Count) frontend files)."
-
-      - name: Set installer version
+      - name: Install Tauri CLI
+        working-directory: frontend
         shell: pwsh
-        env:
-          APP_VERSION: ${{ needs.version.outputs.version }}
         run: |
           $ErrorActionPreference = "Stop"
+          # Already a devDependency (package.json), installed by the earlier
+          # `npm ci`/`npm install` — this just confirms it resolved.
+          npx tauri --version
 
-          $iss = Get-Content "SystemInfo.iss" -Raw
-          $updated = $iss -replace '#define MyAppVersion "1\.0"', "#define MyAppVersion `"$env:APP_VERSION`""
+      - name: Build Tauri application and installer
+        working-directory: frontend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Runs beforeBuildCommand (`npm run build`, i.e. `vite build`)
+          # itself, so the frontend/dist produced by the earlier "Install
+          # frontend dependencies and build" step is rebuilt here too — kept
+          # deliberately redundant so that step's own dist/-exists check
+          # still catches a broken frontend build before the much longer
+          # Tauri/Rust compile even starts.
+          npx tauri build
 
-          if ($updated -eq $iss) {
-            Write-Error "Could not find the expected MyAppVersion definition in SystemInfo.iss."
-            exit 1
-          }
-
-          Set-Content -Path "SystemInfo.iss" -Value $updated -Encoding UTF8
-
-      - name: Compile installer with Inno Setup
+      - name: Locate and verify NSIS installer
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
-            Write-Error "Inno Setup compiler was not found: $iscc"
+          $installer = Get-ChildItem -Path "frontend/src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" -Recurse |
+            Select-Object -First 1
+
+          if (-not $installer) {
+            Write-Error "No NSIS installer (*-setup.exe) was produced under frontend/src-tauri/target/release/bundle/nsis."
             exit 1
           }
 
-          & $iscc ".\SystemInfo.iss"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Inno Setup failed with exit code $LASTEXITCODE."
-            exit $LASTEXITCODE
-          }
+          New-Item -ItemType Directory -Path "Output" -Force | Out-Null
+          # Renamed to a stable filename so the release job's artifact
+          # download/upload globs don't need to know the exact
+          # productName_version_arch-setup.exe Tauri generates.
+          Copy-Item $installer.FullName "Output/SystemInfo-Setup.exe" -Force
 
-      - name: Verify installer exists
+          Get-Item "Output/SystemInfo-Setup.exe" | Select-Object FullName, Length
+
+      - name: Verify packaged app has no orphaned dev paths
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
-          $installer = "Output/SystemInfo-Setup.exe"
-          if (-not (Test-Path $installer)) {
-            Write-Error "Output/SystemInfo-Setup.exe was not created."
+          # Guards against the exact failure mode spec section 43 calls
+          # out: a tauri.conf.json resources path (or anything else) baking
+          # in this runner's absolute checkout path.
+          $confPath = "frontend/src-tauri/tauri.conf.json"
+          $conf = Get-Content $confPath -Raw
+          if ($conf -match [regex]::Escape($env:GITHUB_WORKSPACE)) {
+            Write-Error "$confPath contains an absolute runner path — resource paths must stay relative."
             exit 1
           }
-
-          Get-Item $installer | Select-Object FullName, Length
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4

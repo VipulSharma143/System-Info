@@ -14,6 +14,7 @@ import {
 import type { Theme } from '../../hooks/useTheme';
 import type { ConnectionState } from '../../hooks/useSystemMetrics';
 import StatusIndicator from '../common/StatusIndicator';
+import { APP_VERSION } from '../../lib/version';
 
 export interface NavItem {
   id: string;
@@ -64,8 +65,11 @@ export default function Sidebar({
           <Activity className="h-3.5 w-3.5 text-[var(--accent)]" strokeWidth={2.2} />
         </span>
         {!collapsed && (
-          <span className="truncate text-[13px] font-semibold tracking-tight text-[var(--text)]">
-            System Info
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="truncate text-[13px] font-semibold tracking-tight text-[var(--text)]">
+              System Info
+            </span>
+            <span className="shrink-0 text-[10px] text-[var(--text-faint)]">v{APP_VERSION}</span>
           </span>
         )}
       </div>

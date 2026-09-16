@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SystemIdentification } from '../types/system';
-
-const API_BASE = import.meta.env.DEV ? 'http://localhost:5132' : '';
+import { API_BASE } from '../lib/apiConfig';
 
 // Static host/hardware identification. None of this changes while the app
 // is running, so it's fetched exactly once on mount rather than joining the

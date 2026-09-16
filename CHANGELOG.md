@@ -13,10 +13,16 @@ All notable changes to SystemInfo are documented here.
 ### Known Issues
 
 
-## [2.0.0] - 2026-09-15
+## [2.1.0] - 2026-09-15
 
 ### Added
 
+- **Native Windows desktop shell (Tauri 2).** `frontend/src-tauri/` wraps the existing React frontend in a real desktop window — resizable, with working minimize/maximize/restore/close — and takes over starting, health-checking, and stopping the backend (`:5132`) and analytics (`:8001`) as managed child processes. No external browser (Firefox/Chrome/Edge) is opened at any point. See `frontend/src-tauri/src/process.rs` for the startup sequence and `src/lib.rs` for the window-close cleanup path.
+- **Start / Stop / Exit controls** in the top bar (`ServiceControls.tsx`, only rendered inside the Tauri shell): Stop halts both services but keeps the window open; Exit stops them and closes the app; the native `X` button performs the same full shutdown as Exit. Minimizing or maximizing never touches the services.
+- **Orphan-process hardening.** Each spawned child (backend, analytics) is assigned to its own Windows Job Object with `KILL_ON_JOB_CLOSE`, so a PyInstaller onefile bootstrap's extracted child process — which `Child::kill()` alone can miss — is guaranteed to die with it, including on an unexpected crash of SystemInfo itself.
+- **Single authoritative application version.** `scripts/sync-version.mjs`/`scripts/check-version.mjs` propagate one version (sourced from this CHANGELOG, same as CI's release tag) to `frontend/package.json`, `frontend/src-tauri/tauri.conf.json`, `frontend/src-tauri/Cargo.toml`, the new root `Directory.Build.props` (fixes the backend's `appVersion` API field, and therefore the System page, permanently reporting `1.0.0.0`), and `SystemInfo.iss`. CI now fails the build if any of them drift instead of shipping a mismatched version silently.
+- Centralized frontend API base-URL resolution (`src/lib/apiConfig.ts`) covering all three environments the bundle can run in (Vite dev server, Tauri desktop app, legacy browser-hosted launcher) — replaces three separate copies of the same `API_BASE` constant across `useSystemMetrics`/`useAnalytics`/`useSystemInfo`.
+- `GET /health` on the backend, for the Tauri process manager's readiness checks — mirrors `analytics_service.py`'s existing `/health`.
 - Real Windows battery data: `WindowsBatteryInterop.cs` queries the battery class driver directly via `IOCTL_BATTERY_QUERY_TAG`/`IOCTL_BATTERY_QUERY_INFORMATION`/`IOCTL_BATTERY_QUERY_STATUS` (the same interface `powercfg /batteryreport` uses) instead of relying solely on `GetSystemPowerStatus`. Cycle count, designed/full-charge capacity, voltage, and health % are now real values on Windows where the driver exposes them, aggregated across multiple batteries when present. **Not yet verified on real Windows hardware.**
 - Local historical storage: `ISnapshotStore` / `LocalJsonSnapshotStore` write append-only `data/snapshots/{yyyy}/{MM}/{dd}.jsonl` files instead of MongoDB Atlas. `AppDataPath.cs` resolves the writable location (`%LOCALAPPDATA%\SystemInfo\data` on Windows, `~/.local/share/SystemInfo/data` on Linux, `./data` in dev), created automatically at startup.
 - Full frontend redesign: new shared design-system primitives (`Primitives.tsx`), redesigned Overview / Analytics / Processes / Network / Battery, and two new pages — **Storage** and **System** — backed by a new `GET /api/system/info` endpoint (static host/CPU/OS identification, fetched once rather than polled).
@@ -25,6 +31,8 @@ All notable changes to SystemInfo are documented here.
 
 ### Changed
 
+- CI's Windows release job now stages the backend/analytics build output into `frontend/src-tauri/resources/` and runs `tauri build`, which produces both the app and its NSIS installer in one step. Inno Setup (`SystemInfo.iss`) and the C# production launcher (`launcher/Program.cs`) are no longer part of the build — both are kept in the repo, clearly marked deprecated, as a rollback reference (see their file headers) rather than deleted outright.
+- Backend CORS policy now also allows `http://tauri.localhost` (Tauri 2's default Windows WebView2 origin for the bundled production frontend), alongside the existing Vite dev origin.
 - `SnapshotLogger.cs` writes to `ISnapshotStore` instead of MongoDB.
 - `analytics_service.py` reads only the local `.jsonl` files covering the requested date range instead of querying Mongo — malformed lines are logged and skipped rather than crashing the request.
 - `setup.sh`/`setup.ps1`/`build.sh`/`start-all.sh`/`start-all.ps1`/`launcher/Program.cs` no longer reference `MONGO_URI` — they check/create the local data directory instead.

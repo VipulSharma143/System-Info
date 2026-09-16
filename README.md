@@ -220,6 +220,30 @@ uvicorn analytics_service:app --reload --port 8001
 
 Enables `/api/analytics/stats`, `/api/analytics/trend`, and `/api/analytics/bottlenecks` on the backend. The dashboard and core system endpoints work fine without this running — analytics endpoints degrade gracefully to a 503 if it's not up.
 
+### 🖥️ Windows Desktop App (Tauri)
+
+On Windows, the preferred way to run and build System Info is now as a real native desktop app via [Tauri 2](https://v2.tauri.app/) — no browser tab, no juggling three terminals, no leftover processes in Task Manager when you close it.
+
+**Extra prerequisites** beyond the ones above: a Rust toolchain ([rustup.rs](https://rustup.rs)) and the Microsoft C++ Build Tools (Visual Studio 2022's "Desktop development with C++" workload covers both).
+
+```powershell
+cd frontend
+npm install
+npm run tauri dev
+```
+
+This opens the actual application window and, from `frontend/src-tauri/src/process.rs`, automatically starts the backend and analytics service against your local `dotnet build`/PyInstaller output (falls back to whatever's under `backend/SystemMonitor.Api/bin` and `analytics/dist` — build those first if you haven't). The plain `npm run dev` / Vite-only workflow above still works too, for frontend-only iteration in a browser tab.
+
+Production build (native window, bundled backend/analytics, NSIS installer):
+
+```powershell
+npm run tauri build
+```
+
+Expects the backend and analytics executables already staged under `frontend/src-tauri/resources/backend/` and `frontend/src-tauri/resources/analytics/` (the release CI workflow does this automatically — see `.github/workflows/release.yml`'s "Stage backend and analytics as Tauri resources" step for the exact commands if you're doing it by hand). Output lands in `frontend/src-tauri/target/release/bundle/nsis/`.
+
+Frontend-only build (`npm run build`, producing just `frontend/dist/`) continues to work unchanged, independent of Tauri.
+
 ---
 
 ## 📂 Project Structure
@@ -227,10 +251,20 @@ Enables `/api/analytics/stats`, `/api/analytics/trend`, and `/api/analytics/bott
 ```
 system-info/
 ├── frontend/                     # React + TypeScript Web App
-│   └── src/
-│       ├── components/           # Real-time UI widgets & charts
-│       ├── hooks/                # Metric polling & lifecycle hooks
-│       └── types/                # System metric TypeScript interfaces
+│   ├── src/
+│   │   ├── components/           # Real-time UI widgets & charts
+│   │   ├── hooks/                # Metric polling & lifecycle hooks
+│   │   ├── lib/                  # apiConfig/version/tauri — shared frontend config
+│   │   └── types/                # System metric TypeScript interfaces
+│   │
+│   └── src-tauri/                # Tauri 2 native desktop shell (Windows)
+│       ├── src/
+│       │   ├── process.rs        # Starts/health-checks/stops backend & analytics
+│       │   ├── commands.rs       # start_services/stop_services/exit_app commands
+│       │   └── lib.rs            # Window setup, startup sequence, close cleanup
+│       ├── capabilities/         # Tauri 2 permission grants (no shell access)
+│       ├── resources/            # Backend/analytics build output, staged by CI
+│       └── tauri.conf.json
 │
 ├── backend/                      # .NET 10 API Solution
 │   └── SystemMonitor.Api/
@@ -249,9 +283,18 @@ system-info/
 ├── analytics/                    # Python analytics: stats, trend, bottleneck
 │   │                              detection, and the FastAPI service exposing them
 │
+├── scripts/                      # sync-version.mjs / check-version.mjs — the one
+│   │                              place the app's version is set and validated
+│
+├── launcher/                      # DEPRECATED — pre-Tauri browser-launching
+│   │                               production launcher, kept as a rollback
+│   │                               reference (see file header)
+│
+├── Directory.Build.props         # Single .NET version source (backend + launcher)
 ├── setup.sh                      # First-time prerequisite install + local data dir setup
 ├── build.sh                      # Fail-fast full build/validation, then launches start-all.sh
 ├── start-all.sh                  # Starts backend + analytics + frontend together
+├── SystemInfo.iss                # DEPRECATED — pre-Tauri Inno Setup installer script
 │
 └── PROJECT_STATUS.md             # Full engineering build log
 ```

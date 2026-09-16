@@ -1,0 +1,23 @@
+<Project>
+  <!--
+    MSBuild auto-includes this in every .csproj under this directory
+    (backend/SystemMonitor.Api, launcher) with no per-project reference
+    needed. This is what makes `Assembly.GetExecutingAssembly().GetName()
+    .Version` in SystemEndpoints.cs (exposed to the frontend as
+    `appVersion`) resolve to something real instead of the MSBuild default
+    of 1.0.0.0 — which is exactly the "frontend shows v1.0.0" bug the
+    migration spec calls out (section 33).
+
+    This is the SAME version as frontend/package.json, frontend/src-tauri/
+    tauri.conf.json, frontend/src-tauri/Cargo.toml, and SystemInfo.iss.
+    Don't edit any of those by hand for a version bump — run
+    `node scripts/sync-version.mjs <new-version>` from the repo root, which
+    updates all five in one pass, or let CI do it from CHANGELOG.md (see
+    .github/workflows/release.yml's "Set application version" step).
+  -->
+  <PropertyGroup>
+    <Version>2.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+  </PropertyGroup>
+</Project>

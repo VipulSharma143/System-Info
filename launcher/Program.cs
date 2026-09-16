@@ -1,6 +1,26 @@
 // SystemInfo.Launcher — production launcher.
 //
-// This is what SystemInfo.exe actually is after the packaging rework. It
+// ============================================================
+// DEPRECATED as of the Tauri 2 migration (2.0.0). Tauri now owns this
+// entire role — starting/health-checking/stopping the backend and
+// analytics, and owning the application window — from
+// frontend/src-tauri/src/process.rs and lib.rs. The single most important
+// difference: this launcher opens the dashboard in the user's DEFAULT
+// BROWSER (`Process.Start(new ProcessStartInfo(url) { UseShellExecute =
+// true })` below), which is exactly the behavior the migration exists to
+// eliminate (spec RULE 1/RULE 15) — Tauri opens a real native window
+// instead and never touches Firefox/Chrome/Edge.
+//
+// CI no longer builds or packages this launcher (see
+// .github/workflows/release.yml's build-windows job). Kept in the repo per
+// the migration spec's "don't delete working files prematurely" rule and
+// as a reference for the health-check/process-ownership logic it
+// pioneered, which process.rs is a direct Rust port of. Not part of any
+// current build path — safe to delete once Tauri has shipped a few real
+// releases.
+// ============================================================
+//
+// This is what SystemInfo.exe used to be before the packaging rework. It
 // replaces the old start-all.ps1 (ps2exe-compiled) launcher, which ran
 // `dotnet run` / `npm run dev` / `python -m uvicorn` — i.e. it required a
 // full development toolchain on the end user's PC. This launcher only ever

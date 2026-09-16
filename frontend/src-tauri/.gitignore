@@ -1,0 +1,14 @@
+# Rust build output — large, platform-specific, never committed.
+/target/
+
+# Tauri auto-generates JSON schemas here to back capabilities/*.json's
+# "$schema" reference; regenerated on every build, not source.
+/gen/schemas/
+
+# Populated by the CI packaging step (and locally by scripts/stage-tauri-resources.*)
+# from the backend/analytics build output right before `tauri build` runs.
+# Never hand-edited, never committed — see .github/workflows/release.yml.
+resources/backend/*
+resources/analytics/*
+!resources/backend/.gitkeep
+!resources/analytics/.gitkeep
