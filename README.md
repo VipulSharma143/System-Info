@@ -4,18 +4,18 @@
 
 ### A Multi-Language System Performance Monitor
 
-**A from-scratch system profiler built by reading raw kernel interfaces directly — no wrapper libraries, no shell commands, just pure low-level engineering.**
+**A from-scratch system profiler built by reading raw kernel/OS interfaces directly — no wrapper libraries, no shelled-out CLI tools, just first-principles engineering across six languages.**
 
 ![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)
-![React](https://img.shields.io/badge/React-18+-61DAFB?style=for-the-badge&logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
-![C++](https://img.shields.io/badge/C++-20-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![Tauri](https://img.shields.io/badge/Tauri-2-FFC131?style=for-the-badge&logo=tauri&logoColor=white)
+![C++](https://img.shields.io/badge/C++-17-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)
 ![Assembly](https://img.shields.io/badge/Assembly-x86--64-FF6600?style=for-the-badge&logo=assemblyscript&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-FastAPI-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![SQLite](https://img.shields.io/badge/Storage-Local%20JSONL-47A248?style=for-the-badge&logo=jsonwebtokens&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)
 
-**[🎯 What is this?](#-what-is-this) · [💡 Why build this?](#-why-build-this) · [✨ Features](#-features) · [🏗️ Architecture](#%EF%B8%8F-architecture) · [🧰 Tech Stack](#-tech-stack) · [🚀 Getting Started](#-getting-started) · [📂 Project Structure](#-project-structure) · [📍 Project Status](#-project-status)**
+**[🎯 What is this?](#-what-is-this) · [✨ Features](#-features) · [🏗️ Architecture](#%EF%B8%8F-architecture) · [🧰 Tech Stack](#-tech-stack) · [🚀 Getting Started](#-getting-started) · [📂 Project Structure](#-project-structure) · [📜 Project Evolution](#-project-evolution) · [⚠️ Known Limitations](#%EF%B8%8F-known-limitations) · [📍 Project Status](#-project-status)**
 
 </div>
 
@@ -23,7 +23,7 @@
 
 ## 🎯 What is this?
 
-A full-stack system monitor where **every layer does real, non-trivial work** — CPU, memory, disk, network, and process data read directly from Linux `/proc` and `/sys`, a native C++ engine for hardware sensors, hand-optimized x86-64 Assembly for CPU benchmarking, a Python analytics engine for trend and bottleneck detection, and persistent historical storage in local JSON Lines files — no database, no cloud account, no internet connection required.
+A full-stack system monitor where **every layer does real, non-trivial work**: CPU, memory, disk, network, process, and battery data read directly from OS kernel interfaces, a native C++ engine for hardware sensors, hand-optimized x86-64 Assembly for CPU benchmarking, a Python analytics engine for trend and bottleneck detection, and persistent historical storage in local JSON Lines files — no database, no cloud account, no internet connection required.
 
 ```
 React (TS) ──► .NET 10 (C#) ──► C++ (CMake) ──► x86-64 Assembly (NASM)
@@ -33,51 +33,36 @@ React (TS) ──► .NET 10 (C#) ──► C++ (CMake) ──► x86-64 Assembl
                     └──► Python (FastAPI) ──► reads local JSONL directly
 ```
 
-> **This is not a wrapper.** Most system monitors shell out to existing CLI tools or import high-level metrics libraries. This project deliberately avoids that: every data point is sourced directly from kernel interfaces, first-principles native code, or hand-written analysis logic.
+The application runs **cross-platform** — Linux (`/proc`, `/sys`) and Windows (WMI, `PerformanceCounter`, the battery class driver) — behind one `ISystemInfoProvider` abstraction, with a packaged desktop experience on each:
 
----
+- **Windows** ships as a native desktop app: a [Tauri 2](https://v2.tauri.app/) shell wraps the React frontend in a real window and manages the backend + analytics service as child processes, distributed via an NSIS installer.
+- **Linux** ships as an AppImage or `.deb`: `start-all.sh` launches the backend, analytics service, and Vite-built frontend together and opens them in the default browser — the pre-Tauri distribution model, still the current one for this platform (see [Known Limitations](#%EF%B8%8F-known-limitations)).
 
-## 💡 Why build this?
-
-| Typical Monitor | System Info |
-|---|---|
-| Wraps `psutil` or shells out to `top` | Reads `/proc/stat`, `/proc/meminfo`, `/sys/class/hwmon` directly |
-| Monolithic / single-language | Six-piece pipeline with real managed-to-native FFI and a service boundary |
-| CPU metrics from an opaque API call | Hand-written Assembly benchmark with SIMD optimization proof |
-| Single-platform or platform-coupled | Clean `ISystemInfoProvider` decoupling Linux & Windows |
-| Live numbers only, no history | Background snapshot logging + trend/bottleneck detection over time |
-| Crashes on missing hardware | Graceful degradation with honest status reporting, end to end |
+> **This is not a wrapper.** Most system monitors shell out to existing CLI tools or import high-level metrics libraries. This project deliberately avoids that: every data point is sourced directly from OS interfaces, first-principles native code, or hand-written analysis logic.
 
 ---
 
 ## ✨ Features
 
-### 📊 Live System Dashboard
-Real-time CPU load %, RAM breakdown, disk throughput, network I/O, and an active process explorer — polled and refreshed every 2 seconds via a single consolidated endpoint.
-
-### 🐧 Cross-Platform Backend Abstraction
-A clean `ISystemInfoProvider` interface with independent implementations — Linux via direct `/proc`/`/sys` parsing, Windows via WMI and `PerformanceCounter`.
-
-### ⚙️ Native C++ Engine
-Hardware-level reads — CPU model extraction, thermal zone monitoring, GPU vendor resolution — exposed to C# via P/Invoke.
-
-### 🎮 Vendor-Aware GPU Detection
-Dynamically traverses `/sys/class/drm`, dispatching vendor-specific logic (NVIDIA, AMD, Intel) while failing gracefully on unsupported devices.
-
-### 🧮 Hand-Crafted x86-64 Assembly
-A real CPU benchmark loop written directly in NASM, with a companion SIMD (SSE2) implementation measuring real scalar-vs-vector speedup (3.94–3.95×).
-
-### 📈 Python Analytics Service
-A background service logs CPU/network snapshots to local, append-only JSON Lines files on disk. A FastAPI service reads only the date-range it needs from those files and computes rolling stats, linear trend detection (climbing/dropping/flat), and bottleneck detection — sustained high-load episodes and isolated spikes, classified as CPU-bound or combined CPU+network load.
-
-### 🗄️ Persistent Historical Storage
-Every snapshot is appended to a local `data/snapshots/{yyyy}/{MM}/{dd}.jsonl` file (one file per day), read directly by the analytics service — no database, no account, no network dependency. Only the days a request actually needs are opened, so history can grow for months without slowing anything down.
-
-### 🔋 Battery Health
-Real charge/discharge status, capacity-fade (design capacity vs current full-charge capacity), and cycle count read directly from `/sys/class/power_supply/BAT*`, dynamically discovered (not hardcoded to `BAT0`) the same way GPU vendor detection scans `/sys/class/drm`. Live on the Overview dashboard as charge and health cards, plus a dedicated Battery tab with full capacity/voltage/device detail. Same honest "unavailable" fallback as every other sensor on a desktop with no battery. On Windows, real cycle count, designed/full-charge capacity, and health now come from the battery class driver via `IOCTL_BATTERY_QUERY_INFORMATION`/`IOCTL_BATTERY_QUERY_STATUS`, not just `GetSystemPowerStatus`. Drain-trend analysis exists in `trend_analysis.py`, reusing the Phase 7 rolling-mean/slope functions.
-
-### 🛡️ Graceful Degradation Throughout
-Missing sensors, an unreachable analytics service, or a dropped database connection all report `"unavailable"`/`"degraded"` honestly rather than faking data or crashing.
+| Feature | Status | Notes |
+|---|:-:|---|
+| CPU, RAM, disk, network, process monitoring | ✅ | Linux via `/proc`/`/sys`, Windows via WMI/`PerformanceCounter`/native DXGI, behind `ISystemInfoProvider` |
+| CPU/network background sampling & caching | ✅ | `SystemMonitorBackgroundService` samples continuously (after a 3s JIT/Kestrel startup delay); endpoints read the cache, frontend polls every 2s |
+| Native C++ hardware reads (CPU model, thermal zone, GPU vendor) | ✅ | `native/` (CMake), exposed to C# via P/Invoke |
+| GPU vendor detection | ✅ Linux (NVIDIA tested, AMD path written but unverified on real hardware) · ⚠️ Windows (DXGI-linked, not hardware-verified) | Dynamic `/sys/class/drm` scan on Linux; unsupported vendors report `"unavailable"` honestly |
+| Fan RPM | ⚠️ Hardware/driver dependent | Reads `"unavailable"` correctly on hardware with no exposed sensor |
+| x86-64 Assembly CPU benchmark (scalar + SIMD) | ✅ | NASM via CMake's `ASM_NASM`; SIMD (SSE2) measured at 3.94–3.95× over scalar |
+| Battery: charge %, charging state | ✅ Linux · ✅ Windows | Windows via `GetSystemPowerStatus` |
+| Battery: capacity, voltage, health %, cycle count | ✅ Linux (verified, `/sys/class/power_supply`) · ⚠️ Windows (implemented via `IOCTL_BATTERY_QUERY_INFORMATION`/`IOCTL_BATTERY_QUERY_STATUS`, **not yet verified on real Windows hardware**) | Falls back to an honest partial-data note on Windows if the driver doesn't answer the detailed query |
+| Speed test (download/upload/ping) | ✅ | `GET /api/speed-test` |
+| Local historical snapshots | ✅ | Append-only `data/snapshots/{yyyy}/{MM}/{dd}.jsonl`, no database |
+| Trend analysis (CPU/network climbing/dropping/flat) | ✅ via API | `analytics_service.py`, proxied through the backend with graceful 503 degradation |
+| Bottleneck detection (sustained load vs. spikes, `cpu_bound`/`combined_load`) | ✅ via API | Same analytics service |
+| Battery trend / time-to-empty analysis | 🚧 Written, not wired up | `trend_analysis.py` still reads a standalone `--file snapshots.jsonl` CLI argument that hasn't existed since the move off MongoDB — not yet reachable from `analytics_service.py` or the dashboard |
+| Dashboard (Overview, Analytics, Processes, Storage, Network, Battery, System) | ✅ | Shared design-system primitives (`Primitives.tsx`); live-freshness indicator (`Live` → `Reconnecting` → `Offline`) |
+| Desktop packaging | ✅ Windows (Tauri, NSIS) · ✅ Linux (AppImage, `.deb`) | See [Architecture](#%EF%B8%8F-architecture) |
+| Automated tests | ❌ | `tests/` exists but is empty — everything has been verified manually so far |
+| Full SMART storage health | 📌 Planned | Needs root; only basic disk info implemented today |
 
 ---
 
@@ -85,13 +70,18 @@ Missing sensors, an unreachable analytics service, or a dropped database connect
 
 ```mermaid
 flowchart TB
-    U((User)) --> FE[React + TypeScript<br/>Frontend]
+    U((User)) --> Shell{Platform}
+    Shell -- Windows --> TAURI[Tauri 2 Desktop Shell<br/>native window]
+    Shell -- Linux --> BROWSER[Browser tab<br/>launched by start-all.sh]
+
+    TAURI --> FE[React + TypeScript Frontend]
+    BROWSER --> FE
     FE -- HTTP/JSON --> API[.NET 10 Web API]
 
     subgraph Providers["ISystemInfoProvider"]
         direction LR
         LIN["Linux<br/>(/proc, /sys)"]
-        WIN["Windows<br/>(WMI)"]
+        WIN["Windows<br/>(WMI, PerformanceCounter,<br/>battery IOCTL)"]
     end
 
     API --> Providers
@@ -101,8 +91,30 @@ flowchart TB
     API -- HTTP proxy<br/>graceful 503 on failure --> PY[Python Analytics<br/>FastAPI]
     PY -- stats / trend / bottlenecks --> API
     PY -- reads --> DB[(Local JSONL files)]
-    API -- write snapshots --> DB
+    API -- appends snapshots --> DB
 ```
+
+On Windows, `frontend/src-tauri/src/process.rs` owns the lifecycle of the backend (`:5132`) and analytics service (`:8001`): it starts both as child processes, polls each `/health` endpoint until ready, and — on Stop, Exit, the window's native close button, or an unexpected crash of the app itself — tears both down via a per-process **Windows Job Object** (`KILL_ON_JOB_CLOSE`), so a PyInstaller `--onefile` bootstrap's extracted interpreter child can't survive as an orphan. This Job Object hardening is Windows-only; on Linux (the dev-only platform for the Tauri shell) it collapses to a plain process kill. The backend's CORS policy allows the Vite dev origin (`http://localhost:5173`) and Tauri 2's WebView2 production origins (`http://tauri.localhost`, `tauri://localhost`).
+
+### Data flow
+
+```
+Hardware / OS
+     ↓
+Platform Provider (Linux /proc·/sys or Windows WMI/IOCTL)
+     ↓
+SystemMonitorBackgroundService (continuous CPU/network sampling, in-memory cache)
+     ↓                                   ↓
+ASP.NET Core API                  SnapshotLogger → LocalJsonSnapshotStore
+     ↓                                   ↓
+React frontend (2s poll)          data/snapshots/{yyyy}/{MM}/{dd}.jsonl
+                                          ↓
+                                   analytics_service.py (FastAPI)
+                                          ↓
+                                   /api/analytics/{stats,trend,bottlenecks}
+```
+
+CPU and network are read once in the background and cached — direct on-request reads were measured at ~200ms/~500ms and dropped to 21ms/28ms after this change (see [Project Status](#-project-status)). Disk and process reads happen per-request (`Task.WhenAll`-parallelized for processes). The frontend consolidates all of this into one poll against `GET /api/system/all` every 2 seconds, rather than one request per metric.
 
 ---
 
@@ -110,12 +122,16 @@ flowchart TB
 
 | Layer | Technology | Responsibility |
 |:---|:---|:---|
-| **Frontend** | React 18, TypeScript, Vite | Responsive UI, state polling, metrics visualization |
-| **Backend** | C#, .NET 10 Web API | REST endpoints, system orchestration, platform dispatch |
-| **Native Engine** | C++20, CMake | Kernel file descriptor reads, hardware identification |
-| **Performance** | x86-64 Assembly (NASM) | Scalar & SIMD instruction benchmarking |
-| **Analytics** | Python, FastAPI | Bottleneck detection, trend analysis, HTTP analytics service |
-| **Storage** | Local JSON Lines files | Historical snapshot persistence, read directly by the analytics service — no database |
+| **Frontend** | React 19, TypeScript, Vite 8 | Dashboard UI, metric polling, visualization |
+| **Desktop Shell (Windows)** | Tauri 2, Rust (`win32job`) | Native window, service lifecycle, orphan-process prevention |
+| **Backend** | C#, .NET 10 Web API (Minimal APIs) | REST endpoints, platform provider dispatch, snapshot writes, analytics proxy |
+| **Native Engine** | C++17, CMake | Kernel/OS-level hardware reads, exposed via P/Invoke |
+| **Performance** | x86-64 Assembly (NASM) | Scalar & SIMD (SSE2) CPU benchmarking |
+| **Analytics** | Python, FastAPI | Stats, linear-trend, and bottleneck-detection HTTP service |
+| **Storage** | Local JSON Lines files | Historical snapshot persistence — no database, no account, no network dependency |
+| **Build / Release** | GitHub Actions, Inno Setup *(deprecated)*, Tauri NSIS bundler, `appimagetool`, `dpkg-deb` | Windows + Linux CI builds, installer generation |
+
+All five version-bearing files (`frontend/package.json`, `frontend/src-tauri/tauri.conf.json`, `frontend/src-tauri/Cargo.toml`, `Directory.Build.props`, `SystemInfo.iss`) are kept in sync from a single source — `CHANGELOG.md`'s top entry — via `scripts/sync-version.mjs`, with `scripts/check-version.mjs` failing CI if any of them drift.
 
 ---
 
@@ -125,106 +141,65 @@ flowchart TB
 
 - **.NET SDK:** 10.0+
 - **Node.js:** 20.x or higher
-- **Python:** 3.10+ (for the analytics service)
-- **Build Tools:** CMake 3.20+, NASM 2.15+
-- **Compiler:** GCC/G++ 12+ (Linux) or MSVC / Visual Studio 2022+ (Windows)
+- **Python:** 3.10+ (analytics service)
+- **Build Tools:** CMake 3.10+, NASM
+- **Compiler:** GCC/G++ (Linux) or MSVC / Visual Studio 2022+ (Windows)
+- **Windows only (for the desktop app):** a Rust toolchain ([rustup.rs](https://rustup.rs)) and the Microsoft C++ Build Tools (Visual Studio 2022's "Desktop development with C++" workload covers both)
 
-### ⚡ Quick Start (recommended)
-
-**First time on a fresh machine** — install everything:
-
-```bash
-./setup.sh
-```
-
-Checks every prerequisite, installs anything missing, builds the native engine, installs frontend/analytics dependencies, and creates the local data directory — then offers to launch everything immediately. No database account needed. Safe to re-run any time.
-
-**Before every real run** (first time, or after pulling new changes) — validate the whole project builds cleanly, then launch:
+### ⚡ Quick Start (Linux, recommended)
 
 ```bash
-./build.sh
+./setup.sh    # first time on a fresh machine — installs prerequisites, builds
+              # the native engine, installs deps, creates the local data dir
+./build.sh    # 8-stage fail-fast build/validation pipeline; on full success
+              # it execs ./start-all.sh automatically
+./start-all.sh  # already built? starts backend + analytics + frontend together
 ```
 
-An 8-stage, fail-fast pipeline — nothing starts until every stage passes:
-
-1. **Project structure** — confirms `backend/`, `frontend/`, `native/`, `analytics/`, and the key files inside each (`.csproj`, `Program.cs`, `package.json`, `vite.config.ts`, `analytics_service.py`, `native/build.sh`, `setup.sh`, `start-all.sh`) actually exist
-2. **Build commands** — checks `dotnet`, `node`, `npm`, `python3`, `cmake`, `gcc`, `g++`, `make` are all on `PATH` (unlike `setup.sh`, it does **not** install anything missing — it just fails immediately with a clear "not installed" error, so run `setup.sh` first on a truly fresh machine)
-3. **Environment** — logs installed versions of Node/npm/.NET/Python; checks the local data directory is writable
-4. **Native C++ engine** — runs `native/build.sh`, then confirms `libsystemmonitor_native.so` actually landed in `backend/SystemMonitor.Api/`
-5. **.NET backend** — `dotnet restore` + `dotnet build --configuration Release`, then greps `Program.cs` to confirm both `MapSystemEndpoints` and `MapSpeedTestEndpoints` are registered
-6. **Frontend** — `npm install` if `node_modules` is missing, then a real production build (`npm run build`), confirms `frontend/dist` was generated, and checks a set of speed-test frontend files exist (`types/speedtest.ts`, `hooks/useSpeedTest.ts`, `components/SpeedTestCard.tsx`)
-7. **Python analytics** — `py_compile`s `analytics_service.py`, confirms `fastapi`/`uvicorn` are importable (prints installed versions), and confirms the FastAPI `app` object itself imports without error
-8. **Final validation** — makes `setup.sh`/`start-all.sh` executable if they aren't, then runs `bash -n` syntax checks on `setup.sh`, `start-all.sh`, and `build.sh` itself
-
-Every step's full output goes to `logs/build.log` (overwritten each run) as well as the console, so a failure points you straight at the real error instead of a vague "something broke." **If every stage passes, `build.sh` automatically execs `./start-all.sh` for you** — one command from a clean clone (or a fresh pull) all the way to a running app.
-
-**Already built and just want to start the three services?**
-
-```bash
-./start-all.sh
-```
-
-Starts the backend, analytics service, and frontend together — waits for each to actually be ready before starting the next, and fails loudly with the real error log if something doesn't come up correctly. One command, no juggling terminals.
+`build.sh` validates project structure, checks required build tools are on `PATH`, builds the native engine and confirms `libsystemmonitor_native.so` landed in place, builds the backend and greps `Program.cs` for expected endpoint registrations, runs a real frontend production build, validates the Python analytics service, and syntax-checks all three root scripts — logging every stage to `logs/build.log`. `start-all.sh` waits for each service to actually be ready (polling, not a fixed delay) before starting the next.
 
 ### 🔧 Manual Setup
 
-If you'd rather run each piece yourself, or `setup.sh` doesn't fit your environment:
-
-**1. Build the Native Engine & Assembly Layer**
+**1. Build the native engine**
 
 ```bash
-cd native
-mkdir -p build && cd build
-cmake ..
-make
+cd native && mkdir -p build && cd build
+cmake .. && make
 cp libsystemmonitor_native.so ../../backend/SystemMonitor.Api/
 ```
 
-**2. Set the database connection string**
+**2. (Optional) Override where local history is stored**
 
 ```bash
-# No database setup needed — historical data is stored locally.
-# Optional override for where local history is stored (defaults to
-# %LOCALAPPDATA%\SystemInfo\data on Windows, ~/.local/share/SystemInfo/data on Linux):
+# Defaults: %LOCALAPPDATA%\SystemInfo\data on Windows,
+# ~/.local/share/SystemInfo/data on Linux, ./data in dev.
 export SYSTEM_INFO_DATA_DIR="$HOME/.local/share/SystemInfo/data"
 ```
 
-Required by both the backend (`SnapshotLogger.cs`) and the analytics service — set it once in your shell profile (`~/.bashrc`) so every terminal has it.
-
-**3. Start the .NET Backend API**
+**3. Start the backend**
 
 ```bash
-cd backend/SystemMonitor.Api
-dotnet run
+cd backend/SystemMonitor.Api && dotnet run
 ```
 
-API listens on `http://localhost:XXXX`.
-
-**4. Launch the Frontend**
+**4. Start the frontend**
 
 ```bash
-cd frontend
-npm install
-npm run dev
+cd frontend && npm install && npm run dev
 ```
 
-Dashboard available at `http://localhost:5173`.
+Dashboard at `http://localhost:5173`.
 
-**5. Start the Analytics Service**
+**5. Start the analytics service**
 
 ```bash
-pip install fastapi uvicorn
-cd analytics
+cd analytics && pip install -r requirements.txt
 uvicorn analytics_service:app --reload --port 8001
 ```
 
-Enables `/api/analytics/stats`, `/api/analytics/trend`, and `/api/analytics/bottlenecks` on the backend. The dashboard and core system endpoints work fine without this running — analytics endpoints degrade gracefully to a 503 if it's not up.
+Enables `/api/analytics/stats`, `/trend`, `/bottlenecks`. Core dashboard metrics work fine without this running — analytics endpoints degrade to a 503 if it's down.
 
 ### 🖥️ Windows Desktop App (Tauri)
-
-On Windows, the preferred way to run and build System Info is now as a real native desktop app via [Tauri 2](https://v2.tauri.app/) — no browser tab, no juggling three terminals, no leftover processes in Task Manager when you close it.
-
-**Extra prerequisites** beyond the ones above: a Rust toolchain ([rustup.rs](https://rustup.rs)) and the Microsoft C++ Build Tools (Visual Studio 2022's "Desktop development with C++" workload covers both).
 
 ```powershell
 cd frontend
@@ -232,7 +207,7 @@ npm install
 npm run tauri dev
 ```
 
-This opens the actual application window and, from `frontend/src-tauri/src/process.rs`, automatically starts the backend and analytics service against your local `dotnet build`/PyInstaller output (falls back to whatever's under `backend/SystemMonitor.Api/bin` and `analytics/dist` — build those first if you haven't). The plain `npm run dev` / Vite-only workflow above still works too, for frontend-only iteration in a browser tab.
+Opens the actual application window; `frontend/src-tauri/src/process.rs` starts the backend and analytics service automatically against your local `dotnet build`/PyInstaller output (falls back to `backend/SystemMonitor.Api/bin` and `analytics/dist` — build those first if you haven't).
 
 Production build (native window, bundled backend/analytics, NSIS installer):
 
@@ -240,64 +215,118 @@ Production build (native window, bundled backend/analytics, NSIS installer):
 npm run tauri build
 ```
 
-Expects the backend and analytics executables already staged under `frontend/src-tauri/resources/backend/` and `frontend/src-tauri/resources/analytics/` (the release CI workflow does this automatically — see `.github/workflows/release.yml`'s "Stage backend and analytics as Tauri resources" step for the exact commands if you're doing it by hand). Output lands in `frontend/src-tauri/target/release/bundle/nsis/`.
+Expects the backend and analytics executables already staged under `frontend/src-tauri/resources/backend/` and `frontend/src-tauri/resources/analytics/` (the release CI workflow does this automatically). Output lands in `frontend/src-tauri/target/release/bundle/nsis/`.
 
-Frontend-only build (`npm run build`, producing just `frontend/dist/`) continues to work unchanged, independent of Tauri.
+### 🐧 Linux Packaging
+
+The current Linux release path does **not** use Tauri — CI's `build-linux` job stages `backend/`, `frontend/`, `native/`, `analytics/`, `assembly/`, and the root scripts into an AppImage and a `.deb`, both of which run `start-all.sh` (the browser-launch model, not a native window).
 
 ---
 
 ## 📂 Project Structure
 
 ```
-system-info/
+System Info/
 ├── frontend/                     # React + TypeScript Web App
 │   ├── src/
 │   │   ├── components/           # Real-time UI widgets & charts
+│   │   │   ├── views/            # Overview / Analytics / Processes / Storage /
+│   │   │   │                     # Network / Battery / System — the 7 dashboard pages
+│   │   │   ├── layout/           # AppShell, Sidebar, TopBar, ServiceControls
+│   │   │   └── common/           # Primitives.tsx (shared design system), Table,
+│   │   │                         # Sparkline, UsageBar, StatusIndicator, States
 │   │   ├── hooks/                # Metric polling & lifecycle hooks
-│   │   ├── lib/                  # apiConfig/version/tauri — shared frontend config
-│   │   └── types/                # System metric TypeScript interfaces
+│   │   ├── lib/                  # apiConfig / version / tauri — shared frontend config
+│   │   └── types/                # System / analytics / speedtest TypeScript interfaces
 │   │
 │   └── src-tauri/                # Tauri 2 native desktop shell (Windows)
 │       ├── src/
 │       │   ├── process.rs        # Starts/health-checks/stops backend & analytics
-│       │   ├── commands.rs       # start_services/stop_services/exit_app commands
+│       │   ├── commands.rs       # start_services / stop_services / exit_app
 │       │   └── lib.rs            # Window setup, startup sequence, close cleanup
 │       ├── capabilities/         # Tauri 2 permission grants (no shell access)
 │       ├── resources/            # Backend/analytics build output, staged by CI
 │       └── tauri.conf.json
 │
-├── backend/                      # .NET 10 API Solution
+├── backend/                      # .NET 10 API
 │   └── SystemMonitor.Api/
-│       ├── Endpoints/             # System, native & analytics HTTP endpoints
-│       ├── interface/             # ISystemInfoProvider contract & DTOs
+│       ├── Endpoints/             # System, Native, Analytics, SpeedTest endpoints
+│       ├── interface/             # ISystemInfoProvider, ISnapshotStore contracts
 │       ├── Native/                # P/Invoke bridge bindings
-│       └── services/              # Providers, background sampler, snapshot logger
+│       └── services/              # Providers, background sampler, snapshot logger,
+│                                   # local JSONL store, Windows battery IOCTL interop
 │
-├── native/                       # Low-level Native Engine
-│   ├── include/                  # C++ header declarations
-│   ├── src/                      # Hardware & thermal sensor implementations
+├── native/                       # Low-level C++ engine
+│   ├── include/                  # native_engine.h
+│   ├── src/                      # common.cpp, linux_provider.cpp, windows_provider.cpp
 │   └── CMakeLists.txt
 │
 ├── assembly/                     # x86-64 Assembly workloads (NASM)
 │
-├── analytics/                    # Python analytics: stats, trend, bottleneck
-│   │                              detection, and the FastAPI service exposing them
+├── analytics/                    # Python: stats, trend, bottleneck detection,
+│                                  # and the FastAPI service exposing them
 │
 ├── scripts/                      # sync-version.mjs / check-version.mjs — the one
-│   │                              place the app's version is set and validated
+│                                  # place the app's version is set and validated
+│
+├── packaging/linux/               # AppImage/.deb desktop file, icon, AppRun
 │
 ├── launcher/                      # DEPRECATED — pre-Tauri browser-launching
-│   │                               production launcher, kept as a rollback
-│   │                               reference (see file header)
+│                                   # production launcher, kept as a rollback
+│                                   # reference (see file header)
 │
 ├── Directory.Build.props         # Single .NET version source (backend + launcher)
-├── setup.sh                      # First-time prerequisite install + local data dir setup
+├── setup.sh / setup.ps1          # First-time prerequisite install + local data dir setup
 ├── build.sh                      # Fail-fast full build/validation, then launches start-all.sh
-├── start-all.sh                  # Starts backend + analytics + frontend together
+├── start-all.sh / start-all.ps1  # Starts backend + analytics + frontend together
 ├── SystemInfo.iss                # DEPRECATED — pre-Tauri Inno Setup installer script
+├── CHANGELOG.md                  # Version history and the source of truth for the
+│                                  # app version (see Tech Stack above)
 │
 └── PROJECT_STATUS.md             # Full engineering build log
 ```
+
+---
+
+## 📜 Project Evolution
+
+```
+Phase 3–6: Linux-only, single-language-per-layer proof-of-concept
+        ↓
+Cross-platform refactor — ISystemInfoProvider (Linux + Windows)
+        ↓
+Phase 8: MongoDB Atlas for historical storage
+        ↓
+Local JSON Lines snapshot storage replaces MongoDB entirely (no DB, no account)
+        ↓
+Windows packaging v1: whole-repo installer requiring Node/Python/.NET SDK on
+the end-user machine → self-contained publish + a C# console launcher
+(launcher/Program.cs) that opened a browser tab
+        ↓
+CI hardening: 4-workflow release chain (workflow_run-linked) → replaced with
+one job-dependency-based release.yml
+        ↓
+Tauri 2 desktop migration (current): the C# launcher's "start processes,
+open a browser tab" model is replaced, on Windows, by a real native window
+with managed service lifecycle. The Linux release path was not migrated —
+it still uses the pre-Tauri browser-launch model via start-all.sh.
+```
+
+**Historical / removed technologies** (documented here, not in the current setup instructions above): MongoDB Atlas and its `MONGO_URI` connection string (Phase 8, fully removed as of the local-storage migration); the 4-workflow `workflow_run`-chained release pipeline (replaced by a single `release.yml`); the C# production launcher and Inno Setup installer (`launcher/Program.cs`, `SystemInfo.iss`) for Windows — both files remain in the repository, explicitly marked deprecated in their own headers, kept only as a rollback reference. PostgreSQL was the originally-planned Phase 8 database but was never implemented — the project went to MongoDB directly, then to local files.
+
+---
+
+## ⚠️ Known Limitations
+
+- **Windows battery detail is implemented but not hardware-verified.** Cycle count, designed/full-charge capacity, voltage, and health % are read via `IOCTL_BATTERY_QUERY_INFORMATION`/`IOCTL_BATTERY_QUERY_STATUS`, the same interface `powercfg /batteryreport` uses — but this has not yet been run against a real Windows laptop. Charge % and charging state (via `GetSystemPowerStatus`) are the verified fallback if the detailed query doesn't respond.
+- **AMD GPU usage and fan RPM are hardware/driver dependent and largely unverified.** The NVIDIA path on Linux is implemented and tested; the AMD sysfs path is written but unverified on real hardware; unsupported vendors report `"unavailable"` rather than guessing. Fan RPM correctly reports unavailable on hardware with no exposed hwmon sensor — this is a sensor-availability limitation, not a bug.
+- **Cycle count is not a guaranteed metric on any platform.** Some hardware firmware reports `0` rather than a real lifetime count; the UI surfaces this with an explicit note instead of presenting a suspicious zero as fact.
+- **Linux desktop packaging does not use Tauri.** The AppImage/`.deb` builds still launch via `start-all.sh` and a browser tab, not a native window — the Tauri migration currently covers Windows only.
+- **Battery trend analysis is written but not reachable.** `trend_analysis.py` still expects a `--file snapshots.jsonl` CLI argument from before the MongoDB removal; it has not been ported into `analytics_service.py`, so battery (and the equivalent CPU/network) trend logic isn't exposed through the API yet.
+- **Local snapshot storage has no retention policy.** `data/snapshots/` grows unbounded — a deliberate, documented trade-off rather than a bug, since only the days a request actually needs are opened.
+- **Full SMART storage health is not implemented** — it needs root privileges; only basic disk capacity/usage is read today.
+- **No automated tests.** `tests/` exists in the repository but is empty; the project has been verified manually, phase by phase (see [Project Status](./PROJECT_STATUS.md)).
+- **`CHANGELOG.md`'s top entry and the synced version files currently disagree.** `CHANGELOG.md` lists `2.1.0` as the latest entry, but `frontend/package.json`, `tauri.conf.json`, `Cargo.toml`, `Directory.Build.props`, and `SystemInfo.iss` all still read `2.0.0` (matching the latest pushed git tag, `2.0.0`) — `scripts/check-version.mjs` would fail against this state until `scripts/sync-version.mjs` is run, which happens automatically the next time `release.yml` runs against this `CHANGELOG.md` entry.
 
 ---
 
@@ -313,11 +342,12 @@ system-info/
 | 6 | Assembly | NASM x86-64 | ✅ Done |
 | — | Cross-Platform Refactor | C# + C++ | ✅ Done |
 | — | Optimization Pass | C# | ✅ Done |
-| 7 | Python Analytics (trend + bottleneck detection) | Python / FastAPI | ✅ Done |
+| 7 | Python Analytics | Python / FastAPI | ✅ Done |
 | 8 | Historical Storage | Local JSON Lines files | ✅ Done |
-| 9 | Battery Health (charge/discharge, health %, cycle count) | C++ / sysfs / React | ✅ Done |
-| 10 | Advanced Dashboard UI | React | 🔶 In Progress — layout & UI being remade |
-| 11 | Maintenance & Extensibility | Cross-cutting | ⬜ Planned |
+| 9 | Battery Health | C++ / sysfs / Win32 / React | ✅ Linux (verified) · ⚠️ Windows (implemented, unverified) |
+| 10 | Advanced Dashboard UI (7-section redesign) | React | ✅ Done |
+| 11 | Desktop Packaging (Tauri, Windows) | Rust / Tauri 2 | ✅ Done (Windows) · ⬜ Not started (Linux) |
+| 12 | Maintenance & Extensibility | Cross-cutting | 🔶 In Progress |
 
 > Full phase-by-phase engineering log, verification steps, bugs found & fixed, and performance metrics live in [`PROJECT_STATUS.md`](./PROJECT_STATUS.md).
 
