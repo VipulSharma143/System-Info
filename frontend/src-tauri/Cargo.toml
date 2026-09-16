@@ -1,6 +1,6 @@
 [package]
 name = "system-info"
-version = "2.0.0"
+version = "2.1.1"
 description = "System Info — native desktop shell"
 authors = ["Vipul Sharma"]
 edition = "2021"

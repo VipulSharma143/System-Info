@@ -35,12 +35,25 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
+// Needed for `.creation_flags(CREATE_NO_WINDOW)` below — Windows-only,
+// since `Command` has no such method on other platforms.
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 const BACKEND_PORT: u16 = 5132;
 const ANALYTICS_PORT: u16 = 8001;
 const BACKEND_URL: &str = "http://127.0.0.1:5132";
 const ANALYTICS_URL: &str = "http://127.0.0.1:8001";
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(400);
+
+// Windows API constant (winbase.h): tells CreateProcess not to allocate a
+// console for a console-subsystem child. Without this, spawning
+// SystemMonitor.Api.exe / analytics.exe — both console-subsystem builds —
+// from this GUI-subsystem app pops up a visible (empty, since stdout/stderr
+// are already redirected to log files below) console window per process.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -245,6 +258,8 @@ fn spawn_backend(app: &AppHandle, log_dir: &Path) -> io::Result<Guarded> {
     std::fs::create_dir_all(&data_dir)?;
 
     let mut cmd = Command::new(&exe);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);
     }
@@ -263,6 +278,8 @@ fn spawn_analytics(app: &AppHandle, log_dir: &Path) -> io::Result<Guarded> {
     std::fs::create_dir_all(&data_dir)?;
 
     let mut cmd = Command::new(&exe);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);
     }

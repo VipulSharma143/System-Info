@@ -46,7 +46,7 @@
 ;     starts the already-built backend and analytics executables itself.
 
 #define MyAppName "SystemInfo"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.1.1"
 #define MyAppPublisher "Vipul Sharma"
 #define MyAppExeName "SystemInfo.exe"
 #define StagingDir "packaging\app"
