@@ -12,41 +12,24 @@
 
 ## 📑 Contents
 
-1. [Current State](#current-state)
-2. [Current Architecture](#current-architecture)
-3. [Backend Status](#backend-status)
-4. [Frontend Status](#frontend-status)
-5. [Windows Desktop Integration](#windows-desktop-integration)
-6. [Hardware, GPU & Battery Monitoring](#hardware-gpu--battery-monitoring)
-7. [Storage](#storage)
-8. [API Surface](#api-surface)
-9. [Speed Test](#speed-test)
-10. [Language Breakdown](#language-breakdown)
-11. [Build & Packaging](#build--packaging)
-12. [Release Pipeline](#release-pipeline)
-13. [Version & Changelog Management](#version--changelog-management)
-14. [Testing / Validation](#testing--validation)
-15. [Known Limitations](#known-limitations)
-16. [Historical Architecture](#historical-architecture)
-17. [Phase Log](#phase-log)
-18. [Performance Metrics](#performance-metrics)
-19. [Remaining Work](#remaining-work)
-
----
-
-## Current State
-
-System Info is a cross-platform (Linux + Windows) system-monitoring application: a React/TypeScript dashboard backed by a .NET 10 API, a C++/Assembly native engine for hardware reads, and a Python/FastAPI analytics service, with all historical data stored in local JSON Lines files — no database of any kind is required to run the application today.
-
-Distribution differs by platform:
-- **Windows** — a native desktop app via Tauri 2 (`frontend/src-tauri/`), which wraps the frontend in a real window and manages the backend/analytics processes directly, packaged as an NSIS installer by CI.
-- **Linux** — an AppImage or `.deb`, both of which still run the pre-Tauri model: `start-all.sh` starts the three services and the app is used from a browser tab.
-
-The current release is **`2.1.2`** (`CHANGELOG.md`'s top entry, verified in sync with all five version-bearing files via `scripts/check-version.mjs`). The most recent substantive engineering pass added:
-- **Windows GPU support** — `Win32_VideoController` (static adapter info) + the `GPU Engine` performance-counter category (live, per-engine utilization), surfaced through a new `GET /api/system/gpu` endpoint and a dedicated System-tab panel. GPU support did not exist on Windows at all before this pass.
-- **Extended System Identity** — manufacturer, model, BIOS version, Windows edition/build, and uptime, added to `ISystemInfoProvider.GetSystemIdentity()` on both platforms.
-- **A startup-race fix** on the System tab: `useSystemInfo` previously fired one request the instant the tab mounted and, if the backend wasn't listening yet, showed "Failed to fetch" **permanently** — even once the backend came up a moment later. It now retries on a bounded backoff (300ms → 2000ms) before surfacing a real error.
-- **`CHANGELOG.md` split into recent-history + archive** — `scripts/archive-changelog.mjs` moves released versions older than the two most recent into `CHANGELOG_ARCHIVE.md`, verbatim, keeping the main file short without losing any history.
+1. [Current Architecture](#current-architecture)
+2. [Backend Status](#backend-status)
+3. [Frontend Status](#frontend-status)
+4. [Windows Desktop Integration](#windows-desktop-integration)
+5. [Hardware, GPU & Battery Monitoring](#hardware-gpu--battery-monitoring)
+6. [Storage](#storage)
+7. [API Surface](#api-surface)
+8. [Speed Test](#speed-test)
+9. [Languages Used](#languages-used)
+10. [Build & Packaging](#build--packaging)
+11. [Release Pipeline](#release-pipeline)
+12. [Version & Changelog Management](#version--changelog-management)
+13. [Testing / Validation](#testing--validation)
+14. [Known Limitations](#known-limitations)
+15. [Historical Architecture](#historical-architecture)
+16. [Phase Log](#phase-log)
+17. [Performance Metrics](#performance-metrics)
+18. [Remaining Work](#remaining-work)
 
 ---
 
@@ -183,32 +166,18 @@ No retention/TTL policy exists yet — `data/snapshots/` grows unbounded (docume
 
 ---
 
-## Language Breakdown
+## Languages Used
 
-Determined with `cloc` against the actual repository contents — `node_modules/`, `dist/`, `bin/`, `obj/`, `.git/`, `__pycache__/`, lockfiles, and binary assets excluded. **Application/source code only** (config, docs, and data files excluded from this table):
+Application/source languages present in the repository, by area:
 
-| Language | Lines | Share |
-|---|--:|--:|
-| TypeScript | 3,263 | 37.6% |
-| C# | 1,938 | 22.3% |
-| Bourne Shell | 946 | 10.9% |
-| PowerShell | 716 | 8.2% |
-| Python | 661 | 7.6% |
-| Rust | 395 | 4.6% |
-| C++ | 322 | 3.7% |
-| JavaScript | 182 | 2.1% |
-| CSS | 129 | 1.5% |
-| x86-64 Assembly (NASM) | 76 | 0.9% |
-| CMake | 25 | 0.3% |
-| C/C++ Header | 17 | 0.2% |
-| HTML | 13 | 0.1% |
-| **Total** | **8,683** | **100%** |
-
-Shell/PowerShell's combined ~19% reflects genuinely large automation scripts (`setup.sh`, `start-all.sh`, `build.sh`, `clean.sh`, `setup.ps1`, `start-all.ps1` — each hundreds of lines with readiness checks and fail-fast validation), not stray tooling.
-
-Including configuration, CI workflow, and documentation files, the full repository also contains: JSON 1,048 lines (9.4% of 11,104 total), Markdown 805 (7.2%), YAML 495 (4.5%, almost entirely `release.yml`), MSBuild XML 37, plain TOML 20, XML 10. These are excluded from the table above as they aren't application source code.
-
-*Reproduce with:* `cloc . --exclude-dir=node_modules,dist,bin,obj,.git,__pycache__,.vscode,packaging --exclude-ext=lock,svg,ico,png,jpg`
+| Area | Languages |
+|---|---|
+| Frontend | TypeScript, JavaScript, CSS, HTML |
+| Backend API | C# |
+| Desktop shell (Tauri) | Rust |
+| Native hardware engine | C++, x86-64 Assembly (NASM), CMake |
+| Analytics service | Python |
+| Automation / dev scripts | Bourne Shell, PowerShell |
 
 ---
 
@@ -362,7 +331,6 @@ Technologies that are **historical only** and must not appear in current setup i
 | Dashboard navigation extra fetches | 0 across 14 tab switches (pre-GPU-panel baseline; not re-measured since) |
 | Languages in the pipeline | 7 (TypeScript, Rust for the Tauri shell, C#, C++, x86-64 Assembly, Python, plus Shell/PowerShell automation) |
 | Historical storage verified against | 727+ real snapshots (originally MongoDB Atlas; storage layer has since moved to local JSONL) |
-| Source lines of code (cloc, application code only) | 8,683 across 13 languages — see [Language Breakdown](#language-breakdown) |
 
 ---
 
