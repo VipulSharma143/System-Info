@@ -29,6 +29,45 @@ public record BatteryInfo(
     string? CapacityUnit = "mAh"
 );
 
+// One sample of a single GPU engine's utilization (spec §12: "GPU Engine"
+// exposes many engines — 3D, Copy, VideoDecode, etc. — and blindly summing
+// them isn't a defensible "GPU usage" number, so each active engine is
+// reported individually instead).
+public record GpuEngineUsage(string InstanceName, double UsagePercent);
+
+// One detected display adapter (spec §11: a laptop may report more than
+// one — integrated + discrete — so this is always returned as a list,
+// never assumed singular). Every field is nullable: absent/zero values
+// from the underlying query become null rather than a fabricated 0.
+public record GpuInfo(
+    string? Name,
+    string? VideoProcessor,
+    long? AdapterMemoryBytes,
+    string? DriverVersion,
+    string? DriverDate,
+    string? Status,
+    int? ResolutionWidth,
+    int? ResolutionHeight,
+    int? RefreshRateHz,
+    List<GpuEngineUsage>? EngineUsage,
+    string? Note
+);
+
+// Static host identity (spec §6-§8): manufacturer/model/BIOS come from
+// Win32_ComputerSystem/Win32_BIOS on Windows. This changes only across a
+// reboot, so the frontend fetches it once rather than polling it.
+public record SystemIdentity(
+    string? ComputerName,
+    string? Manufacturer,
+    string? Model,
+    string? BiosVersion,
+    string? WindowsEdition,
+    string? WindowsBuild,
+    string? Architecture,
+    DateTime? LastBootTime,
+    double? UptimeSeconds
+);
+
 public interface ISystemInfoProvider
 {
 Task<RamInfo> GetRamAsync();
@@ -37,4 +76,6 @@ Task<List<ProcessInfo>> GetProcessesAsync();
 List<DiskInfo> GetDisks();
 Task<List<NetworkInfo>> GetNetworkAsync();
 BatteryInfo GetBattery();
+List<GpuInfo> GetGpus();
+SystemIdentity GetSystemIdentity();
 }

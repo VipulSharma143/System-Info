@@ -68,6 +68,41 @@ export interface SystemIdentification {
   coreCount: number | null;
   logicalProcessors: number;
   appVersion: string;
+  // Extended identity (Win32_ComputerSystem/Win32_BIOS/Win32_OperatingSystem
+  // on Windows). Null wherever the underlying query is unavailable — show
+  // "Unavailable" in the UI, never a fabricated value.
+  manufacturer: string | null;
+  model: string | null;
+  biosVersion: string | null;
+  windowsEdition: string | null;
+  windowsBuild: string | null;
+  lastBootTime: string | null;
+  uptimeSeconds: number | null;
+}
+
+// One sample of a single GPU engine's utilization. Engines are reported
+// individually (3D, Copy, VideoDecode, ...) rather than summed into one
+// number — see the backend's GpuInfo doc comment for why.
+export interface GpuEngineUsage {
+  instanceName: string;
+  usagePercent: number;
+}
+
+// One detected display adapter — a laptop can report more than one
+// (integrated + discrete), so this is always an array. Every field is
+// nullable; a null field means "Windows didn't expose this", not zero.
+export interface GpuInfo {
+  name: string | null;
+  videoProcessor: string | null;
+  adapterMemoryBytes: number | null;
+  driverVersion: string | null;
+  driverDate: string | null;
+  status: string | null;
+  resolutionWidth: number | null;
+  resolutionHeight: number | null;
+  refreshRateHz: number | null;
+  engineUsage: GpuEngineUsage[] | null;
+  note: string | null;
 }
 
 // Shape returned by /api/system/all

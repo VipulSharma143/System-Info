@@ -16,9 +16,9 @@
     .github/workflows/release.yml's "Set application version" step).
   -->
   <PropertyGroup>
-    <Version>2.1.1</Version>
-    <AssemblyVersion>2.1.1.0</AssemblyVersion>
-    <FileVersion>2.1.1.0</FileVersion>
+    <Version>2.1.2</Version>
+    <AssemblyVersion>2.1.2.0</AssemblyVersion>
+    <FileVersion>2.1.2.0</FileVersion>
     <Authors>Vipul Sharma</Authors>
     <Company>Vipul Sharma</Company>
     <Product>SystemInfo</Product>

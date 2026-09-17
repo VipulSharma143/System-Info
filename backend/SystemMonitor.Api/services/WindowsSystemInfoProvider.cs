@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Management;
+using System.Threading;
 using SystemMonitor.Api.Interface;
 
 namespace SystemMonitor.Api.Services;
@@ -310,5 +311,285 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
     {
         var present = values.Where(v => v != null).Select(v => v!.Value).ToList();
         return present.Count > 0 ? present.Sum() : null;
+    }
+
+    // System Identity (spec §6-§8). Deliberately three independent CIM
+    // queries in separate try/catch blocks rather than one combined query —
+    // spec §23: one optional field failing must not take the others down
+    // with it.
+    public SystemIdentity GetSystemIdentity()
+    {
+        string? computerName = null, manufacturer = null, model = null;
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT Name, Manufacturer, Model FROM Win32_ComputerSystem");
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                computerName = obj["Name"]?.ToString();
+                manufacturer = obj["Manufacturer"]?.ToString();
+                model = obj["Model"]?.ToString();
+            }
+        }
+        catch
+        {
+            // Win32_ComputerSystem unavailable — leave these fields null.
+        }
+
+        string? biosVersion = null;
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT SMBIOSBIOSVersion FROM Win32_BIOS");
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                biosVersion = obj["SMBIOSBIOSVersion"]?.ToString();
+            }
+        }
+        catch
+        {
+            // Win32_BIOS unavailable — leave null.
+        }
+
+        string? windowsEdition = null, windowsBuild = null, architecture = null;
+        DateTime? lastBoot = null;
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT Caption, BuildNumber, OSArchitecture, LastBootUpTime FROM Win32_OperatingSystem");
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                windowsEdition = obj["Caption"]?.ToString()?.Trim();
+                windowsBuild = obj["BuildNumber"]?.ToString();
+                architecture = obj["OSArchitecture"]?.ToString();
+
+                var rawBootTime = obj["LastBootUpTime"]?.ToString();
+                if (!string.IsNullOrEmpty(rawBootTime))
+                {
+                    try
+                    {
+                        lastBoot = ManagementDateTimeConverter.ToDateTime(rawBootTime);
+                    }
+                    catch
+                    {
+                        // Malformed CIM datetime — leave unavailable rather than guessing.
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Win32_OperatingSystem unavailable — leave these fields null.
+        }
+
+        double? uptimeSeconds = lastBoot.HasValue
+            ? Math.Max(0, (DateTime.Now - lastBoot.Value).TotalSeconds)
+            : null;
+
+        return new SystemIdentity(
+            ComputerName: string.IsNullOrWhiteSpace(computerName) ? null : computerName,
+            Manufacturer: string.IsNullOrWhiteSpace(manufacturer) ? null : manufacturer,
+            Model: string.IsNullOrWhiteSpace(model) ? null : model,
+            BiosVersion: string.IsNullOrWhiteSpace(biosVersion) ? null : biosVersion,
+            WindowsEdition: string.IsNullOrWhiteSpace(windowsEdition) ? null : windowsEdition,
+            WindowsBuild: string.IsNullOrWhiteSpace(windowsBuild) ? null : windowsBuild,
+            Architecture: string.IsNullOrWhiteSpace(architecture) ? null : architecture,
+            LastBootTime: lastBoot,
+            UptimeSeconds: uptimeSeconds
+        );
+    }
+
+    // GPU (spec §11-§13). Static adapter info comes from Win32_VideoController;
+    // live per-engine utilization comes from the "GPU Engine" performance
+    // counter category, which is only enumerated/attached when present —
+    // it doesn't exist on every Windows build/driver combination.
+    public List<GpuInfo> GetGpus()
+    {
+        var gpus = new List<GpuInfo>();
+
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT Name, VideoProcessor, AdapterRAM, DriverVersion, DriverDate, Status, " +
+                "CurrentHorizontalResolution, CurrentVerticalResolution, CurrentRefreshRate " +
+                "FROM Win32_VideoController");
+
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                string? name = obj["Name"]?.ToString();
+                string? videoProcessor = obj["VideoProcessor"]?.ToString();
+
+                // Win32_VideoController.AdapterRAM is a 32-bit field and overflows
+                // (reports as a small/negative garbage value) for adapters with
+                // 4GB+ VRAM — a known WMI limitation, not a bug here. Treat an
+                // obviously-bogus result as unavailable instead of showing it.
+                long? adapterRam = null;
+                if (obj["AdapterRAM"] is { } ramVal)
+                {
+                    try
+                    {
+                        var raw = Convert.ToInt64(ramVal);
+                        adapterRam = raw > 0 ? raw : null;
+                    }
+                    catch
+                    {
+                        adapterRam = null;
+                    }
+                }
+
+                string? driverVersion = obj["DriverVersion"]?.ToString();
+
+                string? driverDate = null;
+                if (obj["DriverDate"] is { } dateVal)
+                {
+                    try
+                    {
+                        driverDate = ManagementDateTimeConverter
+                            .ToDateTime(dateVal.ToString()!)
+                            .ToString("yyyy-MM-dd");
+                    }
+                    catch
+                    {
+                        driverDate = null;
+                    }
+                }
+
+                string? status = obj["Status"]?.ToString();
+
+                int? ToPositiveInt(object? value)
+                {
+                    if (value == null) return null;
+                    try
+                    {
+                        var n = Convert.ToInt32(value);
+                        return n > 0 ? n : (int?)null;
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                }
+
+                gpus.Add(new GpuInfo(
+                    Name: string.IsNullOrWhiteSpace(name) ? null : name,
+                    VideoProcessor: string.IsNullOrWhiteSpace(videoProcessor) ? null : videoProcessor,
+                    AdapterMemoryBytes: adapterRam,
+                    DriverVersion: string.IsNullOrWhiteSpace(driverVersion) ? null : driverVersion,
+                    DriverDate: driverDate,
+                    Status: string.IsNullOrWhiteSpace(status) ? null : status,
+                    ResolutionWidth: ToPositiveInt(obj["CurrentHorizontalResolution"]),
+                    ResolutionHeight: ToPositiveInt(obj["CurrentVerticalResolution"]),
+                    RefreshRateHz: ToPositiveInt(obj["CurrentRefreshRate"]),
+                    EngineUsage: null,
+                    Note: null
+                ));
+            }
+        }
+        catch
+        {
+            // Win32_VideoController unavailable — return whatever we already
+            // have (possibly nothing) rather than fabricating an adapter.
+        }
+
+        List<GpuEngineUsage> engineUsage;
+        try
+        {
+            engineUsage = ReadGpuEngineUsage();
+        }
+        catch
+        {
+            engineUsage = new List<GpuEngineUsage>();
+        }
+
+        if (gpus.Count == 1 && engineUsage.Count > 0)
+        {
+            // Only one adapter — every sampled engine belongs to it.
+            gpus[0] = gpus[0] with { EngineUsage = engineUsage };
+        }
+        else if (gpus.Count > 1 && engineUsage.Count > 0)
+        {
+            // GPU Engine instance names look like
+            // "pid_1234_luid_0x...._phys_0_eng_0_engtype_3D" — the "_phys_N_"
+            // segment maps to the Nth adapter Win32_VideoController enumerated.
+            // Attribute by that when present; otherwise leave that adapter's
+            // engine usage unavailable rather than guessing which one it belongs to.
+            for (int i = 0; i < gpus.Count; i++)
+            {
+                var matching = engineUsage
+                    .Where(e => e.InstanceName.Contains($"_phys_{i}_", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (matching.Count > 0)
+                {
+                    gpus[i] = gpus[i] with { EngineUsage = matching };
+                }
+            }
+        }
+
+        return gpus;
+    }
+
+    // Samples every "GPU Engine" performance-counter instance twice, 200ms
+    // apart (rate counters read 0 on their first sample — same reasoning as
+    // the CPU counter's warm-up above). Only engines with non-trivial
+    // utilization are returned; an idle engine isn't reported as "0% GPU",
+    // it's simply absent (spec §12).
+    private static List<GpuEngineUsage> ReadGpuEngineUsage()
+    {
+        var result = new List<GpuEngineUsage>();
+
+        if (!PerformanceCounterCategory.Exists("GPU Engine"))
+            return result;
+
+        string[] instanceNames;
+        try
+        {
+            instanceNames = new PerformanceCounterCategory("GPU Engine").GetInstanceNames();
+        }
+        catch
+        {
+            return result;
+        }
+
+        var counters = new List<PerformanceCounter>();
+        try
+        {
+            foreach (var name in instanceNames)
+            {
+                try
+                {
+                    var counter = new PerformanceCounter("GPU Engine", "Utilization Percentage", name, readOnly: true);
+                    counter.NextValue(); // baseline read, always 0
+                    counters.Add(counter);
+                }
+                catch
+                {
+                    // Instance vanished between enumeration and open — skip it.
+                }
+            }
+
+            Thread.Sleep(200);
+
+            foreach (var counter in counters)
+            {
+                try
+                {
+                    float value = counter.NextValue();
+                    if (value > 0.1f)
+                    {
+                        result.Add(new GpuEngineUsage(counter.InstanceName, Math.Round(value, 2)));
+                    }
+                }
+                catch
+                {
+                    // skip
+                }
+            }
+        }
+        finally
+        {
+            foreach (var c in counters) c.Dispose();
+        }
+
+        return result.OrderByDescending(e => e.UsagePercent).Take(20).ToList();
     }
 }

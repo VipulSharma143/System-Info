@@ -215,4 +215,85 @@ public async Task<List<ProcessInfo>> GetProcessesAsync()
             Note: null
         );
     }
+
+    // GPU telemetry on Linux already flows through the native engine via
+    // /api/native/gpu (vendor-conditional AMD sysfs / Intel debugfs reads —
+    // see NativeEndpoints.cs). This interface method exists for parity with
+    // WindowsSystemInfoProvider so /api/system/gpu doesn't 404 on Linux, but
+    // isn't the primary Linux GPU path, so it returns an empty list rather
+    // than duplicating that vendor-detection logic here.
+    public List<GpuInfo> GetGpus()
+    {
+        return new List<GpuInfo>();
+    }
+
+    // System Identity (spec §6-§8 equivalent for Linux): DMI sysfs files and
+    // /etc/os-release. Each read is independent and best-effort — a missing
+    // file (common in containers/VMs where DMI isn't exposed) leaves that
+    // field null rather than failing the whole response.
+    public SystemIdentity GetSystemIdentity()
+    {
+        string? ReadDmi(string file)
+        {
+            try
+            {
+                var path = $"/sys/class/dmi/id/{file}";
+                return File.Exists(path) ? File.ReadAllText(path).Trim() : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        string? manufacturer = ReadDmi("sys_vendor");
+        string? model = ReadDmi("product_name");
+        string? biosVersion = ReadDmi("bios_version");
+
+        string? prettyName = null;
+        try
+        {
+            if (File.Exists("/etc/os-release"))
+            {
+                var line = File.ReadAllLines("/etc/os-release")
+                    .FirstOrDefault(l => l.StartsWith("PRETTY_NAME="));
+                if (line != null)
+                {
+                    prettyName = line.Split('=', 2)[1].Trim().Trim('"');
+                }
+            }
+        }
+        catch
+        {
+            // /etc/os-release unavailable — leave null.
+        }
+
+        DateTime? lastBoot = null;
+        double? uptimeSeconds = null;
+        try
+        {
+            var uptimeText = File.ReadAllText("/proc/uptime").Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+            if (double.TryParse(uptimeText, out var seconds))
+            {
+                uptimeSeconds = seconds;
+                lastBoot = DateTime.Now.AddSeconds(-seconds);
+            }
+        }
+        catch
+        {
+            // /proc/uptime unavailable — leave null.
+        }
+
+        return new SystemIdentity(
+            ComputerName: Environment.MachineName,
+            Manufacturer: string.IsNullOrWhiteSpace(manufacturer) ? null : manufacturer,
+            Model: string.IsNullOrWhiteSpace(model) ? null : model,
+            BiosVersion: string.IsNullOrWhiteSpace(biosVersion) ? null : biosVersion,
+            WindowsEdition: prettyName,
+            WindowsBuild: null,
+            Architecture: System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
+            LastBootTime: lastBoot,
+            UptimeSeconds: uptimeSeconds
+        );
+    }
 }

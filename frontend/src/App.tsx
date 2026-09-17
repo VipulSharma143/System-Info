@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 
 import { useSystemMetrics } from './hooks/useSystemMetrics';
 import { useSystemInfo } from './hooks/useSystemInfo';
+import { useSystemGpu } from './hooks/useSystemGpu';
 import { useTheme } from './hooks/useTheme';
 import { useProcessHistory } from './hooks/useProcessHistory';
 
@@ -46,7 +47,8 @@ const TITLES: Record<SectionId, { title: string; description: string }> = {
 
 function App() {
   const { data, error, connection, lastUpdated } = useSystemMetrics();
-  const { info, error: infoError } = useSystemInfo();
+  const { info, error: infoError, retry: retryInfo } = useSystemInfo();
+  const { gpus, error: gpuError } = useSystemGpu();
   const { theme, toggle } = useTheme();
   const { findNearest } = useProcessHistory(data?.cpu.usedPercent, data?.processes);
 
@@ -134,7 +136,14 @@ function App() {
         <AnalyticsView findNearest={findNearest} />
       </div>
       <div className={activeSection === 'system' ? 'block' : 'hidden'}>
-        <SystemView info={info} infoError={infoError} data={data} />
+        <SystemView
+          info={info}
+          infoError={infoError}
+          onRetryInfo={retryInfo}
+          data={data}
+          gpus={gpus}
+          gpuError={gpuError}
+        />
       </div>
     </AppShell>
   );
