@@ -131,7 +131,7 @@ CPU and network are read once in the background and cached — direct on-request
 | **Storage** | Local JSON Lines files | Historical snapshot persistence — no database, no account, no network dependency |
 | **Build / Release** | GitHub Actions, Inno Setup *(deprecated)*, Tauri NSIS bundler, `appimagetool`, `dpkg-deb` | Windows + Linux CI builds, installer generation |
 
-All five version-bearing files (`frontend/package.json`, `frontend/src-tauri/tauri.conf.json`, `frontend/src-tauri/Cargo.toml`, `Directory.Build.props`, `SystemInfo.iss`) are kept in sync from a single source — `CHANGELOG.md`'s top entry — via `scripts/sync-version.mjs`, with `scripts/check-version.mjs` failing CI if any of them drift.
+All five version-bearing files (`frontend/package.json`, `frontend/src-tauri/tauri.conf.json`, `frontend/src-tauri/Cargo.toml`, `Directory.Build.props`, `SystemInfo.iss`) are kept in sync from a single source — `CHANGELOG.md`'s top entry — via `scripts/sync-version.mjs`, with `scripts/check-version.mjs` failing CI if any of them drift. `CHANGELOG.md` itself is kept short (`[Unreleased]` + the 2 most recent releases) by running `scripts/archive-changelog.mjs` after cutting a release, which moves older entries into `CHANGELOG_ARCHIVE.md` verbatim — nothing is deleted or summarized, just relocated, and CI's version detection always reads `CHANGELOG.md`'s top entry so this never affects a release.
 
 ---
 
@@ -280,8 +280,11 @@ System Info/
 ├── build.sh                      # Fail-fast full build/validation, then launches start-all.sh
 ├── start-all.sh / start-all.ps1  # Starts backend + analytics + frontend together
 ├── SystemInfo.iss                # DEPRECATED — pre-Tauri Inno Setup installer script
-├── CHANGELOG.md                  # Version history and the source of truth for the
-│                                  # app version (see Tech Stack above)
+├── CHANGELOG.md                  # Recent version history (Unreleased + the 2 latest
+│                                  # releases) and the source of truth for the app
+│                                  # version (see Tech Stack above)
+├── CHANGELOG_ARCHIVE.md          # Everything older, split out by scripts/archive-
+│                                  # changelog.mjs so CHANGELOG.md stays short
 │
 └── PROJECT_STATUS.md             # Full engineering build log
 ```
