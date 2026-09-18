@@ -62,25 +62,31 @@ return new { ram, cpu, processes, disks, network, battery };
 // so the frontend fetches it once instead of re-polling it every 2s.
 app.MapGet("/api/system/info", (ISystemInfoProvider provider) =>
 {
+    // Only cpuModel comes from the native engine now — the previous
+    // "coreCount" return value from get_cpu_info() was actually a logical
+    // processor/thread count (GetSystemInfo().dwNumberOfProcessors on
+    // Windows, a count of "processor" lines in /proc/cpuinfo on Linux), not
+    // physical cores, and it duplicated logicalProcessors below under a
+    // misleading name. True physical core count now comes from
+    // identity.PhysicalCores (Win32_Processor on Windows, /proc/cpuinfo
+    // grouped by socket on Linux — see the provider implementations).
     string cpuModel;
-    int coreCount;
     try
     {
         var buffer = new System.Text.StringBuilder(256);
-        coreCount = Native.NativeInterop.GetCpuInfo(buffer, buffer.Capacity);
+        Native.NativeInterop.GetCpuInfo(buffer, buffer.Capacity);
         cpuModel = buffer.ToString();
     }
     catch
     {
         // Native engine unavailable — report honestly rather than guessing.
         cpuModel = "";
-        coreCount = 0;
     }
 
-    // Win32_ComputerSystem/Win32_BIOS/Win32_OperatingSystem on Windows (spec
-    // §6-§8); best-effort DMI/os-release reads on Linux. One optional field
-    // failing here (see provider implementations) never blanks the rest —
-    // each is independently null-safe.
+    // Win32_ComputerSystem/Win32_BIOS/Win32_OperatingSystem/Win32_Processor on
+    // Windows (spec §6-§8); best-effort DMI/os-release/proc reads on Linux.
+    // One optional field failing here (see provider implementations) never
+    // blanks the rest — each is independently null-safe.
     var identity = provider.GetSystemIdentity();
 
     return new
@@ -91,7 +97,7 @@ app.MapGet("/api/system/info", (ISystemInfoProvider provider) =>
         frameworkDescription = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
         machineName = Environment.MachineName,
         cpuModel = string.IsNullOrWhiteSpace(cpuModel) ? null : cpuModel,
-        coreCount = coreCount > 0 ? coreCount : (int?)null,
+        physicalCores = identity.PhysicalCores,
         logicalProcessors = Environment.ProcessorCount,
         appVersion = System.Reflection.Assembly.GetExecutingAssembly()
             .GetName().Version?.ToString() ?? "unknown",

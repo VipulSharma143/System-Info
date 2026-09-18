@@ -7,6 +7,24 @@ exact text that used to live in CHANGELOG.md before it aged out.
 
 See CHANGELOG.md for the current and most recent releases.
 
+## [2.1.1] - 2026-09-16
+
+### Added
+
+### Changed
+
+### Fixed
+
+* **Windows child-process console windows.** Fixed the Tauri process manager spawning the backend and analytics services with visible console windows on Windows. The Windows `CREATE_NO_WINDOW` process creation flag is now applied to both managed child processes, keeping the packaged SystemInfo desktop application clean and fully windowed without opening separate command prompt windows.
+* **Tauri Windows process spawning.** Added the Windows-specific `CommandExt` integration required to apply native process creation flags while keeping the existing cross-platform process-management implementation unchanged.
+
+### Known Issues
+
+* Windows battery IOCTL support has not been hardware-tested on a real Windows machine — cycle count, designed/full-charge capacity, voltage, and battery health depend on what the installed battery driver exposes.
+* Local storage has no retention/TTL policy yet — `data/snapshots/` grows over time.
+* Code signing is not yet configured for the installer or application binaries.
+
+
 ## [2.1.0] - 2026-09-15
 
 ### Added

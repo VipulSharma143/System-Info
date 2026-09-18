@@ -3,11 +3,14 @@ import { useMemo, useState } from 'react';
 import { useSystemMetrics } from './hooks/useSystemMetrics';
 import { useSystemInfo } from './hooks/useSystemInfo';
 import { useSystemGpu } from './hooks/useSystemGpu';
+import { useServiceControl } from './hooks/useServiceControl';
 import { useTheme } from './hooks/useTheme';
 import { useProcessHistory } from './hooks/useProcessHistory';
+import { isTauri } from './lib/tauri';
 
 import AppShell from './components/layout/AppShell';
 import type { NavItem } from './components/layout/Sidebar';
+import StartupScreen, { buildStartupSteps } from './components/layout/StartupScreen';
 import OverviewView from './components/views/OverviewView';
 import AnalyticsView from './components/views/AnalyticsView';
 import ProcessesView from './components/views/ProcessesView';
@@ -45,10 +48,29 @@ const TITLES: Record<SectionId, { title: string; description: string }> = {
   system: { title: 'System', description: 'Hardware and operating system information' },
 };
 
+// Top-level wrapper only exists to own the "retry after a genuine startup
+// failure" mechanism. useSystemMetrics/useSystemGpu don't expose their own
+// retry() the way useSystemInfo does — they just poll on a fixed interval —
+// so the simplest, most honest way to give them a fresh STARTUP_GRACE_MS
+// window on Retry is a full remount: bumping `startupAttempt` changes
+// AppContent's key, which discards and re-mounts every hook inside it,
+// including a fresh `startedAt` in the two polling hooks.
 function App() {
-  const { data, error, connection, lastUpdated } = useSystemMetrics();
+  const [startupAttempt, setStartupAttempt] = useState(0);
+  return <AppContent key={startupAttempt} onRetryStartup={() => setStartupAttempt((a) => a + 1)} />;
+}
+
+function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
+  const {
+    data,
+    error,
+    connection,
+    lastUpdated,
+    startupError: metricsStartupError,
+  } = useSystemMetrics();
   const { info, error: infoError, retry: retryInfo } = useSystemInfo();
-  const { gpus, error: gpuError } = useSystemGpu();
+  const { gpus, error: gpuError, startupError: gpuStartupError } = useSystemGpu();
+  const { status: serviceStatus } = useServiceControl();
   const { theme, toggle } = useTheme();
   const { findNearest } = useProcessHistory(data?.cpu.usedPercent, data?.processes);
 
@@ -64,6 +86,39 @@ function App() {
       ),
     [data?.processes]
   );
+
+  // "Services starting" only means something inside the Tauri desktop
+  // shell, where the backend/analytics processes are spawned by this app
+  // and their readiness is reported via the real services-status event
+  // (useServiceControl). On the Linux browser-tab path, start-all.sh
+  // already started all three processes before the page even loaded, so
+  // there's no separate "starting services" phase to represent here —
+  // treat it as instantly satisfied rather than faking a check.
+  const servicesReady = !isTauri() || serviceStatus.backend === 'running';
+  const infoLoaded = info !== null;
+  const metricsLoaded = data !== null;
+  const gpuLoaded = gpus !== null;
+  const initialLoadComplete = infoLoaded && metricsLoaded && gpuLoaded;
+
+  // A genuine startup failure only exists before the first successful
+  // load — these *StartupError fields are only ever set once
+  // STARTUP_GRACE_MS has elapsed with zero success (see the hooks). Once
+  // any source has loaded once, a later disconnect is steady-state
+  // territory (OfflineBanner / SystemView's own error panels), not this.
+  const startupFailed = !initialLoadComplete && Boolean(metricsStartupError || gpuStartupError || infoError);
+  const startupErrorMessage = metricsStartupError ?? gpuStartupError ?? infoError ?? undefined;
+
+  if (!initialLoadComplete || !data || !info || !gpus) {
+    const steps = buildStartupSteps({ servicesReady, infoLoaded, metricsLoaded, gpuLoaded });
+    return (
+      <StartupScreen
+        steps={steps}
+        failed={startupFailed}
+        errorMessage={startupErrorMessage}
+        onRetry={onRetryStartup}
+      />
+    );
+  }
 
   return (
     <AppShell
@@ -89,17 +144,13 @@ function App() {
         The offline banner shows while the last known data stays on screen.
         Blanking the dashboard on a dropped poll would be worse than showing
         stale numbers clearly labelled as stale — which the header's
-        "updated Ns ago" counter does.
+        "updated Ns ago" counter does. `error` here is exclusively the
+        post-first-load, steady-state signal (see useSystemMetrics) — it can
+        no longer fire during the startup window this component gates above.
       */}
       {error && connection === 'offline' && (
         <div className="px-4 pt-4">
           <OfflineBanner message={error} />
-        </div>
-      )}
-
-      {!data && !error && (
-        <div className="flex h-full items-center justify-center text-[13px] text-[var(--text-muted)]">
-          Connecting to backend…
         </div>
       )}
 
@@ -110,28 +161,22 @@ function App() {
         history) alive across navigation instead of tearing hooks down and
         re-fetching on every tab change. Switching tabs costs zero requests.
       */}
-      {data && (
-        <>
-          <div className={activeSection === 'overview' ? 'block' : 'hidden'}>
-            <OverviewView data={data} />
-          </div>
-          <div className={activeSection === 'processes' ? 'block' : 'hidden'}>
-            <ProcessesView processes={data.processes} />
-          </div>
-          <div className={activeSection === 'storage' ? 'block' : 'hidden'}>
-            <StorageView disks={data.disks} />
-          </div>
-          <div className={activeSection === 'network' ? 'block' : 'hidden'}>
-            <NetworkView network={data.network} />
-          </div>
-          <div className={activeSection === 'battery' ? 'block' : 'hidden'}>
-            <BatteryView battery={data.battery} />
-          </div>
-        </>
-      )}
+      <div className={activeSection === 'overview' ? 'block' : 'hidden'}>
+        <OverviewView data={data} />
+      </div>
+      <div className={activeSection === 'processes' ? 'block' : 'hidden'}>
+        <ProcessesView processes={data.processes} />
+      </div>
+      <div className={activeSection === 'storage' ? 'block' : 'hidden'}>
+        <StorageView disks={data.disks} />
+      </div>
+      <div className={activeSection === 'network' ? 'block' : 'hidden'}>
+        <NetworkView network={data.network} />
+      </div>
+      <div className={activeSection === 'battery' ? 'block' : 'hidden'}>
+        <BatteryView battery={data.battery} />
+      </div>
 
-      {/* Analytics and System own their own data sources, so they mount
-          regardless of whether the live snapshot has arrived yet. */}
       <div className={activeSection === 'analytics' ? 'block' : 'hidden'}>
         <AnalyticsView findNearest={findNearest} />
       </div>

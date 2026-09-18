@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GpuInfo } from '../types/system';
-import { API_BASE } from '../lib/apiConfig';
+import { API_BASE, STARTUP_GRACE_MS } from '../lib/apiConfig';
 
 // GPU gets its own polling cadence (spec §26/§27), separate from the 1s
 // CPU/RAM loop — sampling "GPU Engine" performance counters takes its own
@@ -8,13 +8,24 @@ import { API_BASE } from '../lib/apiConfig';
 // rather than being folded into /api/system/all.
 const POLL_INTERVAL_MS = 2000;
 
+// Steady-state behavior (after at least one successful load): how many
+// consecutive failed polls before treating a GPU read as genuinely broken.
+const OFFLINE_AFTER_FAILURES = 3;
+
 export function useSystemGpu() {
   const [gpus, setGpus] = useState<GpuInfo[] | null>(null);
+  // A real failure, only ever set AFTER at least one successful load.
   const [error, setError] = useState<string | null>(null);
+  // Set only if the backend never returns a GPU list within
+  // STARTUP_GRACE_MS of the first attempt — the "startup genuinely
+  // failed" signal, distinct from "still starting".
+  const [startupError, setStartupError] = useState<string | null>(null);
   const failures = useRef(0);
+  const hasLoadedOnce = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
+    const startedAt = Date.now();
 
     const fetchGpus = () => {
       fetch(`${API_BASE}/api/system/gpu`)
@@ -25,16 +36,29 @@ export function useSystemGpu() {
         .then((data) => {
           if (cancelled) return;
           failures.current = 0;
+          hasLoadedOnce.current = true;
           setGpus(data);
           setError(null);
+          setStartupError(null);
         })
         .catch((err: Error) => {
           if (cancelled) return;
           failures.current += 1;
-          // A GPU read failing is a page-scoped concern (spec §23) — it
-          // never blocks or blanks the rest of the System tab, only its
-          // own GPU section.
-          if (failures.current >= 3) setError(err.message);
+
+          if (!hasLoadedOnce.current) {
+            // Still within the startup window — the backend/native engine
+            // may simply not be ready yet. Stay quiet until the shared
+            // grace period genuinely runs out.
+            const elapsed = Date.now() - startedAt;
+            if (elapsed >= STARTUP_GRACE_MS) setStartupError(err.message);
+            return;
+          }
+
+          // Steady-state behavior, unchanged: a GPU read failing after
+          // data has already loaded once is a page-scoped concern (spec
+          // §23) — it never blocks or blanks the rest of the System tab,
+          // only its own GPU section, and only after a few failed polls.
+          if (failures.current >= OFFLINE_AFTER_FAILURES) setError(err.message);
         });
     };
 
@@ -46,5 +70,5 @@ export function useSystemGpu() {
     };
   }, []);
 
-  return { gpus, error };
+  return { gpus, error, startupError };
 }

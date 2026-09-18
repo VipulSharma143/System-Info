@@ -71,12 +71,7 @@ export default function StatusIndicator({ connection, lastUpdated }: StatusIndic
         />
       </span>
       <span style={{ color }}>{label}</span>
-      {ageLabel && (
-        <>
-          <span className="text-[var(--text-faint)]">·</span>
-          <span className="tabular text-[var(--text-faint)]">updated {ageLabel}</span>
-        </>
-      )}
+
     </span>
   );
 }

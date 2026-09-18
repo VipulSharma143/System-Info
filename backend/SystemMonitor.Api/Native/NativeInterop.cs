@@ -34,9 +34,19 @@ public static class NativeInterop
 
     [DllImport("systemmonitor_native", EntryPoint = "run_simd_comparison")]
     public static extern void RunSimdComparison(long iterations, out double scalarOpsPerSec, out double simdOpsPerSec);
-    
-        [DllImport("systemmonitor_native", EntryPoint = "get_battery_info_json")]
-public static extern int GetBatteryInfoJson(StringBuilder bufferOut, int bufferSize);
 
+    [DllImport("systemmonitor_native", EntryPoint = "get_battery_info_json")]
+    public static extern int GetBatteryInfoJson(StringBuilder bufferOut, int bufferSize);
 
+    // VRAM via DXGI (DXGI_ADAPTER_DESC's SIZE_T fields — not subject to the
+    // 32-bit truncation WMI's Win32_VideoController.AdapterRAM has for 4GB+
+    // cards). Call with adapterIndex = 0, 1, 2, ... until the return value
+    // is 0 (no such adapter); that's how the caller discovers adapter count.
+    [DllImport("systemmonitor_native", EntryPoint = "get_gpu_vram_bytes")]
+    public static extern int GetGpuVramBytes(
+        int adapterIndex,
+        StringBuilder nameOut,
+        int nameBufferSize,
+        out long dedicatedBytes,
+        out long sharedSystemBytes);
 }

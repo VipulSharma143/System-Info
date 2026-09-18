@@ -26,3 +26,13 @@ export const API_BASE = import.meta.env.DEV
   : isTauri()
     ? TAURI_BACKEND_URL
     : '';
+
+// How long the frontend keeps retrying quietly before treating a failed
+// startup fetch as a real error. Chosen to exceed Tauri's own backend
+// readiness wait (READY_TIMEOUT = 30s in src-tauri/src/process.rs) with
+// headroom — that Rust code shows the window immediately and starts the
+// backend on a background thread, so on a slow cold start the frontend can
+// legitimately be polling an not-yet-listening backend for up to ~30
+// seconds. Shared by useSystemMetrics, useSystemGpu, and useSystemInfo so
+// their startup budgets can't drift out of sync with each other.
+export const STARTUP_GRACE_MS = 35_000;

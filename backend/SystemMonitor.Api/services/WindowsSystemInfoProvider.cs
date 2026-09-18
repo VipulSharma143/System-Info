@@ -4,6 +4,7 @@ using System.Runtime.Versioning;
 using System.Management;
 using System.Threading;
 using SystemMonitor.Api.Interface;
+using SystemMonitor.Api.Native;
 
 namespace SystemMonitor.Api.Services;
 
@@ -313,10 +314,9 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
         return present.Count > 0 ? present.Sum() : null;
     }
 
-    // System Identity (spec §6-§8). Deliberately three independent CIM
-    // queries in separate try/catch blocks rather than one combined query —
-    // spec §23: one optional field failing must not take the others down
-    // with it.
+    // System Identity (spec §6-§8). Deliberately independent CIM queries in
+    // separate try/catch blocks rather than one combined query — spec §23:
+    // one optional field failing must not take the others down with it.
     public SystemIdentity GetSystemIdentity()
     {
         string? computerName = null, manufacturer = null, model = null;
@@ -382,6 +382,40 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
             // Win32_OperatingSystem unavailable — leave these fields null.
         }
 
+        // Physical core count (distinct from logical processor count, which
+        // Environment.ProcessorCount already covers elsewhere). Win32_Processor
+        // returns one instance per physical CPU package — a typical consumer
+        // machine has exactly one, but this sums NumberOfCores across every
+        // instance returned so multi-socket systems aren't undercounted.
+        int? physicalCores = null;
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT NumberOfCores FROM Win32_Processor");
+            int sum = 0;
+            bool any = false;
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                if (obj["NumberOfCores"] is { } coresVal)
+                {
+                    try
+                    {
+                        sum += Convert.ToInt32(coresVal);
+                        any = true;
+                    }
+                    catch
+                    {
+                        // Malformed value on this instance — skip it, keep summing the rest.
+                    }
+                }
+            }
+            physicalCores = any && sum > 0 ? sum : null;
+        }
+        catch
+        {
+            // Win32_Processor unavailable — leave null.
+        }
+
         double? uptimeSeconds = lastBoot.HasValue
             ? Math.Max(0, (DateTime.Now - lastBoot.Value).TotalSeconds)
             : null;
@@ -395,7 +429,8 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
             WindowsBuild: string.IsNullOrWhiteSpace(windowsBuild) ? null : windowsBuild,
             Architecture: string.IsNullOrWhiteSpace(architecture) ? null : architecture,
             LastBootTime: lastBoot,
-            UptimeSeconds: uptimeSeconds
+            UptimeSeconds: uptimeSeconds,
+            PhysicalCores: physicalCores
         );
     }
 
@@ -421,8 +456,11 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
 
                 // Win32_VideoController.AdapterRAM is a 32-bit field and overflows
                 // (reports as a small/negative garbage value) for adapters with
-                // 4GB+ VRAM — a known WMI limitation, not a bug here. Treat an
-                // obviously-bogus result as unavailable instead of showing it.
+                // 4GB+ VRAM — a known WMI limitation, not a bug here. Used only
+                // as a last-resort fallback: ApplyDxgiVram() below replaces this
+                // with the correct 64-bit value from DXGI whenever DXGI
+                // enumeration succeeds and can be confidently matched to this
+                // adapter.
                 long? adapterRam = null;
                 if (obj["AdapterRAM"] is { } ramVal)
                 {
@@ -491,6 +529,19 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
             // have (possibly nothing) rather than fabricating an adapter.
         }
 
+        // Replace the (possibly overflowed/null) WMI VRAM figure with the
+        // correct 64-bit value from DXGI wherever it can be confidently
+        // attributed to an adapter. Never throws past this point — a DXGI
+        // failure just leaves the WMI-derived value in place.
+        try
+        {
+            ApplyDxgiVram(gpus);
+        }
+        catch
+        {
+            // Leave whatever GetGpus() already built untouched.
+        }
+
         List<GpuEngineUsage> engineUsage;
         try
         {
@@ -526,6 +577,91 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
         }
 
         return gpus;
+    }
+
+    // Reads every DXGI adapter's dedicated VRAM (see native_engine.h's
+    // get_gpu_vram_bytes) and, wherever it can be attributed to exactly one
+    // WMI-enumerated adapter, overwrites that adapter's AdapterMemoryBytes.
+    //
+    // DXGI's enumeration order is not guaranteed to match
+    // Win32_VideoController's, so correlation is done by name rather than
+    // by index — except in the single-GPU case, where there is nothing to
+    // disambiguate and the index-0 DXGI adapter is unambiguously the one
+    // WMI adapter. On a multi-GPU system, a WMI adapter is only updated
+    // when exactly one DXGI adapter's description matches its name; zero or
+    // multiple matches leave that adapter's VRAM as "unavailable" with an
+    // explanatory note rather than guessing.
+    private static void ApplyDxgiVram(List<GpuInfo> gpus)
+    {
+        var dxgiAdapters = ReadDxgiAdapters();
+        if (dxgiAdapters.Count == 0) return;
+
+        if (gpus.Count == 1 && dxgiAdapters.Count == 1)
+        {
+            var vram = dxgiAdapters[0].DedicatedBytes;
+            gpus[0] = gpus[0] with { AdapterMemoryBytes = vram > 0 ? vram : null };
+            return;
+        }
+
+        var used = new bool[dxgiAdapters.Count];
+        for (int i = 0; i < gpus.Count; i++)
+        {
+            var gpuName = gpus[i].Name;
+            if (string.IsNullOrWhiteSpace(gpuName)) continue;
+
+            var candidateIndices = new List<int>();
+            for (int d = 0; d < dxgiAdapters.Count; d++)
+            {
+                if (used[d]) continue;
+                var dxgiName = dxgiAdapters[d].Name;
+                if (string.IsNullOrWhiteSpace(dxgiName)) continue;
+
+                if (dxgiName.Contains(gpuName, StringComparison.OrdinalIgnoreCase) ||
+                    gpuName.Contains(dxgiName, StringComparison.OrdinalIgnoreCase))
+                {
+                    candidateIndices.Add(d);
+                }
+            }
+
+            if (candidateIndices.Count == 1)
+            {
+                var d = candidateIndices[0];
+                used[d] = true;
+                var vram = dxgiAdapters[d].DedicatedBytes;
+                gpus[i] = gpus[i] with { AdapterMemoryBytes = vram > 0 ? vram : null };
+            }
+            else
+            {
+                gpus[i] = gpus[i] with
+                {
+                    AdapterMemoryBytes = null,
+                    Note = AppendNote(gpus[i].Note, "Dedicated VRAM could not be reliably matched to this adapter.")
+                };
+            }
+        }
+    }
+
+    private static string? AppendNote(string? existing, string addition) =>
+        string.IsNullOrWhiteSpace(existing) ? addition : $"{existing} {addition}";
+
+    // Loops adapterIndex = 0, 1, 2, ... until get_gpu_vram_bytes reports no
+    // such adapter. 16 is a generous sanity ceiling — no real system has
+    // more DXGI adapters than that; it only exists to guarantee this loop
+    // terminates even if the native side ever returns 1 unexpectedly forever.
+    private static List<(string? Name, long DedicatedBytes, long SharedBytes)> ReadDxgiAdapters()
+    {
+        var results = new List<(string?, long, long)>();
+        var nameBuffer = new System.Text.StringBuilder(256);
+
+        for (int i = 0; i < 16; i++)
+        {
+            nameBuffer.Clear();
+            int found = NativeInterop.GetGpuVramBytes(i, nameBuffer, nameBuffer.Capacity, out long dedicated, out long shared);
+            if (found == 0) break;
+            results.Add((nameBuffer.ToString(), dedicated, shared));
+        }
+
+        return results;
     }
 
     // Samples every "GPU Engine" performance-counter instance twice, 200ms

@@ -284,6 +284,50 @@ public async Task<List<ProcessInfo>> GetProcessesAsync()
             // /proc/uptime unavailable — leave null.
         }
 
+        // Physical core count (distinct from logical processor count, which
+        // Environment.ProcessorCount already covers elsewhere). /proc/cpuinfo
+        // has one block per logical processor; "physical id" identifies the
+        // socket a block belongs to and "cpu cores" is that socket's physical
+        // core count, repeated on every logical block for the same socket.
+        // Grouping by physical id and taking one "cpu cores" value per group
+        // (rather than counting blocks) avoids double-counting hyperthreaded
+        // siblings, and summing across groups covers the rare multi-socket
+        // case. A machine that omits "physical id" (some VMs/containers) is
+        // treated as a single implicit socket.
+        int? physicalCores = null;
+        try
+        {
+            var lines = File.ReadAllLines("/proc/cpuinfo");
+            var coresBySocket = new Dictionary<string, int>();
+            string currentSocket = "0";
+
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("physical id"))
+                {
+                    var colonPos = line.IndexOf(':');
+                    if (colonPos != -1) currentSocket = line[(colonPos + 1)..].Trim();
+                }
+                else if (line.StartsWith("cpu cores"))
+                {
+                    var colonPos = line.IndexOf(':');
+                    if (colonPos != -1 && int.TryParse(line[(colonPos + 1)..].Trim(), out var cores))
+                    {
+                        coresBySocket[currentSocket] = cores; // last write per socket wins; value is constant per socket
+                    }
+                }
+            }
+
+            if (coresBySocket.Count > 0)
+            {
+                physicalCores = coresBySocket.Values.Sum();
+            }
+        }
+        catch
+        {
+            // /proc/cpuinfo unavailable or unparsable — leave null.
+        }
+
         return new SystemIdentity(
             ComputerName: Environment.MachineName,
             Manufacturer: string.IsNullOrWhiteSpace(manufacturer) ? null : manufacturer,
@@ -293,7 +337,8 @@ public async Task<List<ProcessInfo>> GetProcessesAsync()
             WindowsBuild: null,
             Architecture: System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
             LastBootTime: lastBoot,
-            UptimeSeconds: uptimeSeconds
+            UptimeSeconds: uptimeSeconds,
+            PhysicalCores: physicalCores
         );
     }
 }

@@ -128,7 +128,7 @@ export default function SystemView({ info, infoError, onRetryInfo, data, gpus, g
         <StatTile
           label="Logical processors"
           value={String(info.logicalProcessors)}
-          detail={info.coreCount !== null ? `${info.coreCount} physical cores` : 'Core count unavailable'}
+          detail={info.physicalCores !== null ? `${info.physicalCores} physical cores` : 'Physical core count unavailable'}
         />
         <StatTile
           label="Memory"
@@ -158,9 +158,13 @@ export default function SystemView({ info, infoError, onRetryInfo, data, gpus, g
           />
           <InfoRow
             label="Physical cores"
-            value={info.coreCount !== null ? String(info.coreCount) : <Unavailable />}
+            value={info.physicalCores !== null ? String(info.physicalCores) : <Unavailable />}
           />
           <InfoRow label="Logical processors" value={String(info.logicalProcessors)} />
+          <InfoRow
+            label="Current utilization"
+            value={data ? `${data.cpu.usedPercent}%` : <Unavailable />}
+          />
           <InfoRow
             label="Total memory"
             value={data ? `${(data.ram.totalMB / 1024).toFixed(2)} GB` : '—'}

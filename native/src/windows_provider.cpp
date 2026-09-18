@@ -123,4 +123,60 @@ int get_battery_info_json(char* bufferOut, int bufferSize) {
     return 0;
 }
 
+// Dedicated/shared VRAM, per adapter. Win32_VideoController.AdapterRAM (used
+// elsewhere via WMI) is a 32-bit field and silently wraps/truncates for any
+// adapter with 4GB+ VRAM — that's the root cause of GPUs reporting far less
+// VRAM than they actually have. DXGI_ADAPTER_DESC.DedicatedVideoMemory is a
+// SIZE_T (64-bit on x64) and isn't subject to that truncation, so this is
+// the reliable source of truth for VRAM size.
+//
+// adapterIndex mirrors DXGI's own enumeration order (0, 1, 2, ...), which is
+// not guaranteed to match Win32_VideoController's enumeration order on a
+// multi-GPU system — the caller (C#) is responsible for correlating adapters
+// by name/description when there's more than one, not this function.
+int get_gpu_vram_bytes(int adapterIndex, char* nameOut, int nameBufferSize,
+                        long long* dedicatedBytesOut, long long* sharedSystemBytesOut) {
+    if (dedicatedBytesOut) *dedicatedBytesOut = 0;
+    if (sharedSystemBytesOut) *sharedSystemBytesOut = 0;
+    if (nameOut && nameBufferSize > 0) nameOut[0] = '\0';
+
+    IDXGIFactory* factory = nullptr;
+    if (FAILED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&factory))) {
+        return 0;
+    }
+
+    IDXGIAdapter* adapter = nullptr;
+    HRESULT hr = factory->EnumAdapters((UINT)adapterIndex, &adapter);
+    if (hr == DXGI_ERROR_NOT_FOUND || FAILED(hr) || adapter == nullptr) {
+        factory->Release();
+        return 0;
+    }
+
+    DXGI_ADAPTER_DESC desc;
+    if (FAILED(adapter->GetDesc(&desc))) {
+        adapter->Release();
+        factory->Release();
+        return 0;
+    }
+
+    if (dedicatedBytesOut) *dedicatedBytesOut = (long long)desc.DedicatedVideoMemory;
+    if (sharedSystemBytesOut) *sharedSystemBytesOut = (long long)desc.SharedSystemMemory;
+
+    if (nameOut && nameBufferSize > 0) {
+        // desc.Description is a wide string (WCHAR[128]); adapter names are
+        // ASCII in practice, so a simple truncating narrow-conversion is fine
+        // here (this is a display label, not used for any comparison logic
+        // that needs full Unicode fidelity).
+        int i = 0;
+        for (; i < nameBufferSize - 1 && desc.Description[i] != L'\0'; i++) {
+            nameOut[i] = (char)desc.Description[i];
+        }
+        nameOut[i] = '\0';
+    }
+
+    adapter->Release();
+    factory->Release();
+    return 1;
+}
+
 } // extern "C"

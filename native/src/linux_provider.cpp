@@ -251,4 +251,20 @@ int get_battery_info_json(char* bufferOut, int bufferSize) {
     return 1;
 }
 
+// Windows-only path (DXGI's DedicatedVideoMemory). Linux VRAM detection
+// would need a separate sysfs-based implementation (e.g.
+// /sys/class/drm/cardN/device/mem_info_vram_total on some AMD/Nouveau
+// drivers) — out of scope for this fix. This stub exists only so the
+// shared library exports the same symbol on both platforms; it always
+// reports "no such adapter" so a caller looping adapterIndex until 0
+// terminates immediately and never gets fabricated data.
+int get_gpu_vram_bytes(int adapterIndex, char* nameOut, int nameBufferSize,
+                        long long* dedicatedBytesOut, long long* sharedSystemBytesOut) {
+    (void)adapterIndex;
+    if (nameOut && nameBufferSize > 0) nameOut[0] = '\0';
+    if (dedicatedBytesOut) *dedicatedBytesOut = 0;
+    if (sharedSystemBytesOut) *sharedSystemBytesOut = 0;
+    return 0;
+}
+
 } // extern "C"
