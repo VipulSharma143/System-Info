@@ -70,8 +70,15 @@ export default function StatusIndicator({ connection, lastUpdated }: StatusIndic
           style={{ backgroundColor: color }}
         />
       </span>
+
       <span style={{ color }}>{label}</span>
 
+      {ageLabel !== null && (
+        <>
+          <span aria-hidden="true">·</span>
+          <span>updated {ageLabel}</span>
+        </>
+      )}
     </span>
   );
 }
