@@ -429,19 +429,35 @@ jobs:
   # /opt/systeminfo, needed sudo to create /opt/systeminfo/logs, and
   # required a system-wide uvicorn install) — replaced here by the same
   # self-contained backend publish + PyInstaller analytics freeze +
-  # `tauri build` pipeline the Windows job already uses, just targeting
-  # linux-x64 and the deb/appimage bundlers instead of nsis. Those two
-  # legacy files are still used for pre-Tauri manual dev testing and are
-  # not part of the production build anymore.
-  # ============================================================
-  # ============================================================
-  # JOB 3 — Linux build.
+  # `tauri build` pipeline the Windows job already uses. Those two legacy
+  # files are still used for pre-Tauri manual dev testing and are not
+  # part of the production build anymore.
+  #
+  # .deb comes from Tauri's own bundler (this has built successfully on
+  # every run so far). The AppImage does NOT — tauri.conf.json's bundle
+  # targets deliberately exclude "appimage" (see the config's comment).
+  # Tauri's AppImage target uses `linuxdeploy` + its gtk/gstreamer plugins,
+  # which repeatedly failed here as "failed to run linuxdeploy" across
+  # multiple env-var workarounds (APPIMAGE_EXTRACT_AND_RUN, NO_STRIP) and
+  # both ubuntu-latest and ubuntu-22.04 — a known, long-standing pain point
+  # for Tauri-on-GitHub-Actions, not something specific to this repo. The
+  # "Build AppImage manually" step below builds the AppImage a different
+  # way instead: appimagetool alone (no linuxdeploy, no gtk/gstreamer
+  # plugin downloads), assembling the AppDir by hand from the same
+  # already-built `system-info` binary and the same resources/backend +
+  # resources/analytics already staged for the .deb. Resource placement
+  # inside the AppDir (usr/lib/system-info/...) matches Tauri's own
+  # documented AppImage resource_dir() resolution rule (${APPDIR}/usr/lib/
+  # ${exe_name}), so app.path().resource_dir() in process.rs resolves
+  # correctly at runtime with no code changes needed.
   # ============================================================
   build-linux:
     needs: version
     if: needs.version.outputs.skip != 'true'
-    # Pin to ubuntu-22.04: Ubuntu 24.04 breaks linuxdeploy (AppArmor unprivileged
-    # userns restrictions) and produces AppImages with Glibc 2.39+ that fail on older distros.
+    # ubuntu-22.04: gives the self-contained backend and the manually-built
+    # AppImage an older glibc baseline, so the resulting binaries run on a
+    # wider range of end-user distros than an ubuntu-latest (24.04) build
+    # would produce.
     runs-on: ubuntu-22.04
 
     steps:
@@ -487,6 +503,9 @@ jobs:
           APP_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -e
+          # Same single-authoritative-version propagation as the Windows
+          # job (migration spec sections 34/40/41) — kept identical so the
+          # two builds never end up shipping mismatched version numbers.
           node scripts/sync-version.mjs "$APP_VERSION"
           node scripts/check-version.mjs
 
@@ -494,6 +513,12 @@ jobs:
         run: |
           set -e
           sudo apt-get update
+          # nasm/cmake/build-essential: native C++/Assembly engine.
+          # libwebkit2gtk-4.1-dev/libgtk-3-dev/librsvg2-dev/patchelf/
+          # libayatana-appindicator3-dev/libssl-dev: required by `tauri
+          # build` itself on Linux (WebView + bundler toolchain, per
+          # Tauri's own Linux prerequisites). file/libfuse2: needed to run
+          # the downloaded appimagetool AppImage below.
           sudo apt-get install -y \
             nasm cmake build-essential file libfuse2 \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf \
@@ -520,6 +545,11 @@ jobs:
           if [ -d "build/backend" ]; then rm -rf "build/backend"; fi
           mkdir -p "build/backend"
 
+          # Not single-file (same reasoning as the Windows job): the native
+          # C++ engine needs to sit next to the executable as a normal
+          # loadable .so, and native/build.sh already copied
+          # libsystemmonitor_native.so into backend/SystemMonitor.Api/ above
+          # so the csproj's CopyToOutputDirectory item picks it up here.
           dotnet publish backend/SystemMonitor.Api \
             --configuration Release \
             --runtime linux-x64 \
@@ -580,6 +610,10 @@ jobs:
 
           rm -rf build dist analytics.spec
 
+          # Same reasoning as the Windows job: uvicorn resolves some
+          # internals dynamically by string name, invisible to PyInstaller's
+          # static import scan, so these must be collected explicitly or the
+          # frozen binary crashes on launch instead of failing to build.
           python -m PyInstaller --onefile --clean --noconfirm --name analytics \
             --collect-submodules uvicorn \
             --hidden-import uvicorn.protocols.http.h11_impl \
@@ -598,6 +632,14 @@ jobs:
         run: |
           set -e
 
+          # Same staging convention as Windows: tauri.conf.json's
+          # bundle.resources maps resources/backend|analytics/** into the
+          # .deb; the "Build AppImage manually" step below copies this same
+          # staged output into the hand-built AppDir too, so both packages
+          # ship identical backend/analytics binaries from one build.
+          # frontend/src-tauri/src/process.rs resolves them at runtime via
+          # app.path().resource_dir(). Not committed — see
+          # frontend/src-tauri/.gitignore.
           BACKEND_DEST="frontend/src-tauri/resources/backend"
           ANALYTICS_DEST="frontend/src-tauri/resources/analytics"
 
@@ -634,19 +676,25 @@ jobs:
         shell: bash
         run: |
           set -e
+          # Already a devDependency (package.json), installed by the
+          # earlier `npm ci`/`npm install` — this just confirms it resolved.
           npx tauri --version
 
-      - name: Build Tauri application and installers
+      - name: Build Tauri application and .deb
         working-directory: frontend
         shell: bash
-        env:
-          APPIMAGE_EXTRACT_AND_RUN: "1"
-          NO_STRIP: "true"
         run: |
           set -e
+          # Runs beforeBuildCommand (`npm run build`) again itself — kept
+          # deliberately redundant, same as the Windows job, so a broken
+          # frontend build fails at the earlier, cheaper step.
+          # tauri.conf.json's Linux targets are ["nsis","deb"] only — Tauri
+          # skips "nsis" here (Windows-only) and produces just the .deb;
+          # the AppImage is built by the next step instead, not by Tauri's
+          # own bundler (see the build-linux job header comment for why).
           npx tauri build
 
-      - name: Locate and verify deb and AppImage packages
+      - name: Locate and verify .deb package
         shell: bash
         env:
           VERSION: ${{ needs.version.outputs.version }}
@@ -661,12 +709,82 @@ jobs:
           fi
           cp "$DEB" "Output/systeminfo_${VERSION}_amd64.deb"
 
-          APPIMAGE=$(find frontend/src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -n1)
-          if [ -z "$APPIMAGE" ]; then
-            echo "::error::No .AppImage was produced under frontend/src-tauri/target/release/bundle/appimage."
+          ls -la Output/
+
+      - name: Build AppImage manually (bypasses Tauri's linuxdeploy bundler)
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          # appimagetool is itself an AppImage; GitHub's runners have no
+          # usable FUSE for nested-AppImage execution, so make it extract
+          # itself to a temp dir and run from there instead of FUSE-mounting.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          ARCH: x86_64
+        run: |
+          set -e
+
+          EXE_NAME="system-info"
+          BINARY="frontend/src-tauri/target/release/${EXE_NAME}"
+          if [ ! -x "$BINARY" ]; then
+            echo "::error::Tauri binary not found at $BINARY — 'tauri build' in the previous step should have produced it."
             exit 1
           fi
-          cp "$APPIMAGE" "Output/SystemInfo-${VERSION}-x86_64.AppImage"
+
+          APPDIR="AppDir"
+          rm -rf "$APPDIR"
+
+          # Layout follows Tauri's own documented AppImage resource_dir()
+          # resolution: at runtime the AppImage sets APPDIR, and
+          # app.path().resource_dir() resolves to
+          # ${APPDIR}/usr/lib/${exe_name} — so backend/analytics MUST live
+          # at usr/lib/system-info/, not anywhere else, or the app will
+          # start with no backend/analytics to find.
+          mkdir -p "$APPDIR/usr/bin"
+          mkdir -p "$APPDIR/usr/lib/${EXE_NAME}"
+          mkdir -p "$APPDIR/usr/share/applications"
+          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+
+          cp "$BINARY" "$APPDIR/usr/bin/${EXE_NAME}"
+          chmod +x "$APPDIR/usr/bin/${EXE_NAME}"
+
+          cp -r frontend/src-tauri/resources/backend "$APPDIR/usr/lib/${EXE_NAME}/backend"
+          cp -r frontend/src-tauri/resources/analytics "$APPDIR/usr/lib/${EXE_NAME}/analytics"
+          chmod +x "$APPDIR/usr/lib/${EXE_NAME}/backend/SystemMonitor.Api"
+          chmod +x "$APPDIR/usr/lib/${EXE_NAME}/analytics/analytics"
+
+          cp frontend/src-tauri/icons/icon.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/${EXE_NAME}.png"
+          cp frontend/src-tauri/icons/icon.png "$APPDIR/${EXE_NAME}.png"
+
+          cat > "$APPDIR/usr/share/applications/${EXE_NAME}.desktop" << DESKTOP
+          [Desktop Entry]
+          Type=Application
+          Name=SystemInfo
+          Comment=Multi-language system performance monitor
+          Exec=${EXE_NAME}
+          Icon=${EXE_NAME}
+          Categories=Utility;System;Monitor;
+          Terminal=false
+          DESKTOP
+          cp "$APPDIR/usr/share/applications/${EXE_NAME}.desktop" "$APPDIR/${EXE_NAME}.desktop"
+
+          cat > "$APPDIR/AppRun" << 'APPRUN'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          exec "$HERE/usr/bin/system-info" "$@"
+          APPRUN
+          chmod +x "$APPDIR/AppRun"
+
+          curl -fsSL -o appimagetool \
+            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool
+
+          ./appimagetool "$APPDIR" "Output/SystemInfo-${VERSION}-x86_64.AppImage"
+
+          if [ ! -f "Output/SystemInfo-${VERSION}-x86_64.AppImage" ]; then
+            echo "::error::AppImage was not created."
+            exit 1
+          fi
+          chmod +x "Output/SystemInfo-${VERSION}-x86_64.AppImage"
 
           ls -la Output/
 
@@ -674,6 +792,9 @@ jobs:
         shell: bash
         run: |
           set -e
+          # Same guard as the Windows job (spec section 43): a resources
+          # path baking in this runner's absolute checkout path would mean
+          # the installed app silently depends on this CI machine.
           conf="frontend/src-tauri/tauri.conf.json"
           if grep -qF "$GITHUB_WORKSPACE" "$conf"; then
             echo "::error::$conf contains an absolute runner path — resource paths must stay relative."
@@ -695,6 +816,7 @@ jobs:
           path: Output/*.deb
           if-no-files-found: error
           retention-days: 30
+
   # ============================================================
   # JOB 4 — Release. `needs: [build-windows, build-linux]` means this
   # ONLY runs if BOTH succeeded — GitHub Actions skips it automatically

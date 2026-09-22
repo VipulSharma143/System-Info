@@ -64,6 +64,14 @@ pub enum ServiceHealth {
     /// Process/health check didn't come up in time. Non-fatal — mirrors the
     /// graceful-degradation the backend already applies to a dead analytics
     /// service (AnalyticsEndpoints.cs returns 503 rather than erroring).
+    /// Not yet constructed on the Rust side (hence the dead-code warning
+    /// without this attribute) but IS part of the real cross-language
+    /// contract: frontend/src/hooks/useServiceControl.ts's ServiceHealth
+    /// type already includes 'unavailable', and ServiceControls.tsx already
+    /// branches on analytics === 'unavailable' to show "Partial — analytics
+    /// unavailable". Reserved for when a service fails its readiness check
+    /// but the app should stay open in a degraded state rather than exiting.
+    #[allow(dead_code)]
     Unavailable,
 }
 
