@@ -2,7 +2,7 @@
 
 # 🖥️ System Info
 
-**A cross-platform system-monitoring desktop application — live hardware telemetry, historical trend analysis, and a native Windows desktop shell, built across six languages with no database and no cloud dependency.**
+**A cross-platform system-monitoring desktop application — live hardware telemetry, historical trend analysis, and a native Tauri desktop shell on both Windows and Linux, built across six languages with no database and no cloud dependency.**
 
 `React 19` · `TypeScript` · `.NET 10` · `Tauri 2 / Rust` · `C++17` · `x86-64 Assembly` · `Python / FastAPI`
 
@@ -23,7 +23,7 @@ There is no backend cloud service, no account, and no external database. Everyth
 | Platform | Distribution | Shell |
 |---|---|---|
 | **Windows** | NSIS installer (`SystemInfo-Setup.exe`) | Native desktop window via **Tauri 2** |
-| **Linux** | AppImage or `.deb` | Browser tab, launched by `start-all.sh` |
+| **Linux** | AppImage or `.deb` | Native desktop window via **Tauri 2** |
 
 ---
 
@@ -48,8 +48,8 @@ flowchart TB
     subgraph Windows["Windows — native desktop app"]
         TW["Tauri 2 Shell\n(Rust · process.rs)"] --> FEW[React Frontend]
     end
-    subgraph Linux["Linux — browser tab"]
-        BR["start-all.sh"] --> FEL[React Frontend]
+    subgraph Linux["Linux — native desktop app"]
+        TL["Tauri 2 Shell\n(Rust · process.rs)"] --> FEL[React Frontend]
     end
 
     FEW -- "HTTP / JSON" --> API[".NET 10 Web API"]
@@ -130,7 +130,9 @@ System Info/
 ├── launcher/                        # DEPRECATED — pre-Tauri browser-launching production
 │                                     # launcher, kept as a rollback reference only
 │
-├── packaging/linux/                 # AppImage/.deb desktop file, icon, AppRun
+├── packaging/linux/                 # DEPRECATED — pre-Tauri AppImage/.deb desktop file, icon,
+│                                     # AppRun; kept as reference, icon source only is still used
+│                                     # to generate frontend/src-tauri/icons/
 ├── scripts/                         # sync-version.mjs, check-version.mjs,
 │                                     # archive-changelog.mjs (see below)
 ├── .github/workflows/release.yml    # The single CI/CD pipeline (version → build → release)
@@ -201,14 +203,14 @@ CORS is restricted to `http://localhost:5173` (Vite dev), `http://tauri.localhos
 
 ## 🪟 Desktop Application (Tauri 2)
 
-On Windows, `frontend/src-tauri/` wraps the React frontend in a real, resizable desktop window (1280×820 default, 980×650 minimum) instead of opening a browser tab.
+On both Windows and Linux, `frontend/src-tauri/` wraps the React frontend in a real, resizable desktop window (1280×820 default, 980×650 minimum) instead of opening a browser tab.
 
-- **`process.rs`** — spawns the backend (`:5132`) and analytics service (`:8001`) as managed child processes, polling each one's `/health` endpoint (400ms interval, 30s timeout) before the app reports itself ready.
+- **`process.rs`** — spawns the backend (`:5132`) and analytics service (`:8001`) as managed child processes, polling each one's `/health` endpoint (400ms interval, 30s timeout) before the app reports itself ready. Executable resolution and the local data directory (`%LOCALAPPDATA%\SystemInfo` on Windows, `~/.local/share/SystemInfo` on Linux) are handled by the same platform-agnostic code path — no per-platform launcher.
 - **`commands.rs`** — the *only* surface the frontend has onto process control: `start_services`, `stop_services`, `get_service_status`, `exit_app`. There is no generic "run this command" entry point, and the app deliberately does not use `tauri-plugin-shell` — the frontend has no shell/command-execution capability at all.
-- **Orphan-process hardening** — each child process is assigned to its own Windows Job Object (`win32job` crate, `KILL_ON_JOB_CLOSE`), so an interpreter process extracted by a PyInstaller `--onefile` bootstrap (which plain `Child::kill()` can miss) is guaranteed to die with it, including on an unexpected crash of the app itself.
+- **Orphan-process hardening** — on Windows, each child process is assigned to its own Windows Job Object (`win32job` crate, `KILL_ON_JOB_CLOSE`), so an interpreter process extracted by a PyInstaller `--onefile` bootstrap (which plain `Child::kill()` can miss) is guaranteed to die with it, including on an unexpected crash of the app itself. On Linux this collapses to a plain `Child::kill()` — the backend and analytics binaries aren't onefile-bootstrapped there, so there's no extraction-process indirection to guard against.
 - **Service controls** — `ServiceControls.tsx` (rendered only inside the Tauri shell) exposes **Stop** (halts services, keeps the window open), **Exit** (stops services and closes the app), and the native window's `X` button performs the same full shutdown as Exit.
 
-Linux does not yet use Tauri — `start-all.sh` starts the three services directly and the app runs from a browser tab (see [Platform-Specific Behavior](#-platform-specific-behavior--limitations)).
+Linux distribution: the production `.deb`/`.AppImage` install the Tauri-bundled app directly — no `sudo`, no system-wide `uvicorn`/Python packages, no browser, and no manual `localhost:5173` step. `packaging/linux/AppRun` and `systeminfo.desktop` are pre-Tauri artifacts kept only for reference (clearly marked deprecated in their own headers) — `tauri build` generates its own desktop entry and bundles its own AppImage runtime now. `start-all.sh` remains the Linux **dev-only** equivalent of `start-all.ps1` (see [Platform-Specific Behavior](#-platform-specific-behavior--limitations)).
 
 ---
 
@@ -238,7 +240,7 @@ Linux does not yet use Tauri — `start-all.sh` starts the three services direct
 - **Node.js:** 20.x+
 - **Python:** 3.10+
 - **Build tools:** CMake 3.10+, NASM
-- **Windows only, for the desktop shell:** Rust (stable), the Tauri 2 CLI
+- **For the desktop shell (Windows and Linux):** Rust (stable), the Tauri 2 CLI
 
 ### First-time setup
 
@@ -256,7 +258,8 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 
 ```bash
 # Linux/dev: starts backend + analytics + frontend together, waiting for
-# each to actually respond before starting the next
+# each to actually respond before starting the next (dotnet run / npm run
+# dev / uvicorn directly — a dev-only stand-in for the Tauri shell below)
 ./start-all.sh
 ```
 ```powershell
@@ -272,7 +275,7 @@ cd analytics && python -m uvicorn analytics_service:app --port 8001
 cd frontend && npm install && npm run dev
 ```
 
-To run the Windows desktop shell in dev mode:
+To run the desktop shell in dev mode (Windows or Linux):
 
 ```bash
 cd frontend && npm run tauri dev
@@ -294,7 +297,7 @@ cd frontend && npm run tauri dev
 
 1. **`version`** — parses `CHANGELOG.md`'s top `## [x.y.z]` entry, checks whether that tag already exists.
 2. **`build-windows`** — builds the native C++ engine, publishes the .NET backend self-contained, embeds the built frontend into its `wwwroot`, freezes the analytics service with PyInstaller, stages both as Tauri resources, and runs `tauri build` to produce the NSIS installer.
-3. **`build-linux`** — builds the same native/backend/frontend/analytics stack, then packages an AppImage and a `.deb`.
+3. **`build-linux`** — builds the same native/backend/frontend/analytics stack (self-contained `linux-x64` backend, PyInstaller-frozen analytics), stages both as Tauri resources, and runs `tauri build` to produce the AppImage and `.deb` — the same Tauri packaging path as Windows, just targeting different bundlers.
 4. **`release`** — downloads all three build artifacts, extracts that version's section out of `CHANGELOG.md` for the release notes, and publishes a GitHub Release with the version tag.
 
 `launcher/Program.cs`, `SystemInfo.iss`, `setup.ps1`, and `start-all.ps1` remain in the repository — clearly marked deprecated/dev-only in their own file headers — as a rollback reference, not as part of the current build. `README-WINDOWS-INSTALLER.md` and `GITHUB-ACTIONS-SETUP.md` document that older Inno-Setup-based path and predate the current Tauri pipeline.
@@ -333,7 +336,7 @@ This is a manual step you run after cutting a release — it isn't wired into CI
 | Script | Purpose |
 |---|---|
 | `setup.sh` / `setup.ps1` | First-time prerequisite install + local data directory setup (Linux full / Windows dev-only) |
-| `start-all.sh` / `start-all.ps1` | Start backend + analytics + frontend together, waiting for readiness at each step (Linux full / Windows dev-only) |
+| `start-all.sh` / `start-all.ps1` | Dev-only: start backend + analytics + frontend together, waiting for readiness at each step. Production on both platforms uses the Tauri shell (`process.rs`) instead |
 | `build.sh` | Fail-fast full build/validation across every layer |
 | `clean.sh` | Strip generated build artifacts (`node_modules`, `dist`, `bin`/`obj`, caches) before archiving or sharing the repo — never removes source, `.git`, or config |
 | `scripts/sync-version.mjs` | Propagate `CHANGELOG.md`'s top version to all five version-bearing files |
@@ -344,7 +347,7 @@ This is a manual step you run after cutting a release — it isn't wired into CI
 
 ## 🌍 Platform-Specific Behavior & Limitations
 
-- **Windows** ships as a native Tauri desktop app; **Linux** ships as an AppImage/`.deb` still using the pre-Tauri browser-tab model — Linux has not yet been migrated to Tauri.
+- **Both platforms** ship as native Tauri desktop apps (Windows: NSIS installer; Linux: AppImage/`.deb`) — no browser tab, no manual `localhost` step, no `sudo`, on either platform.
 - **GPU:** Windows reports every detected adapter via `Win32_VideoController` with live per-engine utilization; Linux's GPU path goes through the native engine's `get_gpu_vendor()`/`get_amd_gpu_usage_percent()` (AMD sysfs), a narrower path than the Windows one.
 - **Battery:** implemented on both platforms; the Windows IOCTL path and DXGI-linked GPU code have **not been hardware-verified** — no Windows/`dotnet` toolchain was available in the environment that most recently wrote/extended them. Windows native cross-compilation (via `mingw-w64`) was verified in isolation, but not the same as a Windows-hosted build.
 - **Storage health:** disk capacity/usage only — full SMART health needs root and is not implemented on either platform.

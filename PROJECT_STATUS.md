@@ -41,7 +41,7 @@ flowchart TB
         TW[Tauri 2 Desktop Shell] --> FEW[React Frontend]
     end
     subgraph Linux["Linux — current"]
-        BR[Browser tab, via start-all.sh] --> FEL[React Frontend]
+        TL[Tauri 2 Desktop Shell] --> FEL[React Frontend]
     end
     FEW -- HTTP/JSON --> API[.NET 10 Web API]
     FEL -- HTTP/JSON --> API
@@ -54,7 +54,7 @@ flowchart TB
     PY -- reads --> STORE
 ```
 
-This is the fourth architectural shape the project has taken (see [Historical Architecture](#historical-architecture) for the earlier three). The defining change from the previous shape was the Windows distribution model — a real native window with process-lifecycle ownership, replacing a self-contained console launcher that opened a browser tab. The most recent pass extended `ISystemInfoProvider` itself (GPU + extended System Identity) rather than changing the architectural shape.
+This is the fifth architectural shape the project has taken (see [Historical Architecture](#historical-architecture) for the earlier four). Shape 4 brought the Tauri native-window model to Windows only; this pass (Shape 5) brought Linux onto the same model — the `.deb`/AppImage now install and run the Tauri shell directly (no `sudo`, no system-wide `uvicorn`, no browser tab, no manual `localhost:5173`), replacing the `start-all.sh`-in-a-terminal production path. `process.rs`, `commands.rs`, and the rest of the Rust shell were already fully cross-platform going into this pass (Windows-only bits like `win32job` were already `cfg(windows)`-gated) — what changed was the Linux CI job (`build-linux` in `release.yml`, previously a hand-rolled `dpkg-deb`/`appimagetool` script wrapping `start-all.sh`) and `tauri.conf.json`'s bundle targets/icons, not the shell's own logic.
 
 ---
 
@@ -210,8 +210,8 @@ push to main (with a new top CHANGELOG.md entry)
 │ native → .NET │   │ native → .NET │
 │ → frontend →  │   │ → frontend →  │
 │ PyInstaller → │   │ PyInstaller → │
-│ tauri build   │   │ AppImage/.deb │
-│ (NSIS)        │   │               │
+│ tauri build   │   │ tauri build   │
+│ (NSIS)        │   │ (deb/AppImage)│
 └───────┬───────┘   └───────┬───────┘
         └──────────┬────────┘
                     ▼
@@ -220,7 +220,7 @@ push to main (with a new top CHANGELOG.md entry)
               └───────────┘  CHANGELOG.md, publishes GitHub Release
 ```
 
-`build-windows` additionally validates that the packaged app has no orphaned dev paths before uploading its installer artifact; `build-linux` converts the app icon and validates the AppImage desktop-file categories. The `release` job's release-notes extraction (`awk` against `## [$VERSION]`) requires that version's section to still be present in `CHANGELOG.md` — i.e. release before archiving it with `scripts/archive-changelog.mjs`, not after.
+Both build jobs now follow the same shape: native engine → self-contained backend publish → frontend build → PyInstaller-frozen analytics → stage all three as Tauri resources → `tauri build`. Both validate the staged resources are present and non-empty, and that `tauri.conf.json` doesn't leak the runner's absolute checkout path, before uploading their installer artifact(s). The `release` job's release-notes extraction (`awk` against `## [$VERSION]`) requires that version's section to still be present in `CHANGELOG.md` — i.e. release before archiving it with `scripts/archive-changelog.mjs`, not after.
 
 ---
 
@@ -236,6 +236,7 @@ push to main (with a new top CHANGELOG.md entry)
 
 - Native cross-compilation for Windows — verified in isolation using `mingw-w64`/`nasm` in a Linux sandbox, producing a real PE32+ DLL exporting all expected functions; this is not the same as a Windows-hosted build or runtime test
 - Windows installer / runtime behavior — verified for the pre-Tauri (`1.0.4`) packaging model; **not yet independently re-verified for the current Tauri-based packaging**
+- Linux `.deb`/AppImage packaging via `tauri build` (this pass) — reviewed against the Windows job it mirrors and against Tauri's own documented Linux build prerequisites (`libwebkit2gtk-4.1-dev` etc.), and the Rust shell's Linux code paths (`process.rs`'s `cfg(not(windows))` branches, `data_root()`, executable-name resolution) were already exercised by `tauri dev` reasoning; **the actual `release.yml` `build-linux` job has not been run on real GitHub Actions infrastructure, and the resulting `.deb`/`.AppImage` have not been installed/launched on a real Linux machine**
 - Windows battery IOCTL code, DXGI-linked GPU code, and the new `Win32_VideoController`/`GPU Engine` GPU support — implemented, **not run on real Windows hardware**
 - Dashboard UI — verified at 1280×720, 1366×768, 1920×1080, and 2560×1440, in both light and dark themes, with no horizontal overflow at any size; navigation confirmed to cause zero additional API requests across 14 tab switches (pre-GPU-panel baseline)
 - `useSystemInfo`'s bounded retry and the frontend TypeScript for the GPU/System-Identity work — `tsc -b` and `oxlint` both clean; **not build-verified on the .NET side** (no `dotnet`/Windows toolchain available in the environment that wrote it)
@@ -250,7 +251,7 @@ push to main (with a new top CHANGELOG.md entry)
 - GPU detection is split across two unreconciled paths — the structured Windows `ISystemInfoProvider.GetGpus()` path and the older native-engine `/api/native/gpu` path (Linux's only GPU source). These have not been unified into one interface.
 - Multi-GPU engine-to-adapter attribution on Windows relies on parsing the `_phys_N_` segment of the performance counter's instance name — unverified against a real dual-GPU (integrated + discrete) Windows laptop.
 - Cycle count is not guaranteed on any platform — some firmware reports `0` rather than a real count; the UI notes this explicitly rather than treating it as fact.
-- Linux desktop packaging has not been migrated to Tauri — it still uses the `start-all.sh` browser-launch model.
+- Linux desktop packaging now goes through the same Tauri pipeline as Windows (`tauri build` producing `.deb`/`.AppImage`) — implemented and reviewed, but not yet run against real GitHub Actions infrastructure or a real Linux machine (see Testing/Validation).
 - `trend_analysis.py` (battery, and by extension CPU/network trend logic) still reads a standalone `--file snapshots.jsonl` argument that hasn't existed since the move off MongoDB; it isn't reachable from `analytics_service.py` or the dashboard yet.
 - `SpeedTestEndpoints.cs`'s server-side `/api/speed-test` is fully implemented but not called by the frontend, which measures client-side instead — dead-but-functional code, not a bug, but worth reconciling one way or the other.
 - Local snapshot storage has no retention/TTL policy — `data/snapshots/` grows unbounded, a known trade-off.
@@ -284,12 +285,27 @@ Shape 3.5 (Windows packaging v1): whole-repo Inno Setup installer
   → replaced with a self-contained publish + a C# console launcher
   (launcher/Program.cs) that started the services and opened a browser tab
 
-Shape 4 (current): local JSONL storage (MongoDB fully removed) +
-  Tauri 2 native desktop shell on Windows, replacing the C# launcher's
-  browser-tab model; Linux packaging (AppImage/.deb) still uses the
-  pre-Tauri browser-launch model; most recently extended with Windows
-  GPU support and extended System Identity, and a split CHANGELOG.md/
-  CHANGELOG_ARCHIVE.md so version history stays legible as it grows
+Shape 4 (Windows Tauri migration): local JSONL storage (MongoDB fully
+  removed) + Tauri 2 native desktop shell on Windows, replacing the C#
+  launcher's browser-tab model; Linux packaging (AppImage/.deb) still used
+  the pre-Tauri browser-launch model at this point; most recently extended
+  with Windows GPU support and extended System Identity, and a split
+  CHANGELOG.md/CHANGELOG_ARCHIVE.md so version history stays legible as
+  it grows
+
+Shape 5 (current — Linux Tauri migration): the same Tauri 2 shell now
+  packages Linux too. release.yml's build-linux job stopped staging
+  start-all.sh into /opt/systeminfo (the source of the sudo-for-logs and
+  system-uvicorn problems) and instead publishes a self-contained
+  linux-x64 backend + PyInstaller-frozen analytics binary, stages both as
+  Tauri resources exactly like build-windows, and runs `tauri build`
+  against targets ["nsis","deb","appimage"] (Tauri skips whichever aren't
+  buildable on the current host). packaging/linux/AppRun and
+  systeminfo.desktop are now deprecated — Tauri generates its own desktop
+  entry and bundles its own AppImage runtime. No changes were needed to
+  process.rs/commands.rs/lib.rs themselves — the Rust shell was already
+  fully cross-platform (win32job already cfg(windows)-gated, data_root()
+  and executable-name resolution already branched on cfg(windows) vs not)
 ```
 
 Technologies that are **historical only** and must not appear in current setup instructions: MongoDB Atlas, `MONGO_URI`, PostgreSQL (planned for Phase 8, never implemented), the C# production launcher and Inno Setup installer as the *active* Windows build path (both files remain in the repo as an explicitly-marked rollback reference, not as part of the current build), and the earlier multi-workflow release pipeline (the current pipeline is one workflow, four jobs — see [Release Pipeline](#release-pipeline)).
@@ -312,9 +328,10 @@ Technologies that are **historical only** and must not appear in current setup i
 | 8 | Historical Storage | MongoDB Atlas → Local JSON Lines | ✅ Done | Originally MongoDB Atlas (727+ documents verified; one mixed-timestamp-type bug found and fixed defensively), later fully replaced with local JSONL files — no database, no `MONGO_URI`, no external service |
 | 9 | Battery Health | C++ / sysfs / Win32 / React | ✅ Linux · ⚠️ Windows | Linux: dynamic `BAT*` discovery (this hardware reports `BAT1`, not `BAT0`), unit auto-detection (`CHARGE_*` vs `ENERGY_*`), consolidated JSON bridge, verified live (52% charge, discharging, 13.9W, 77% health). Windows: real IOCTL-based reads implemented, not hardware-tested |
 | 10 | Advanced Dashboard UI | React | ✅ Done | Full redesign (not a restyle) around shared `Primitives.tsx`; seven sections; analytics range selector; trend/bottleneck visualization; live-freshness indicator; verified across 4 resolutions and both themes with zero extra fetches on navigation |
-| 11 | Desktop Packaging (Tauri) | Rust / Tauri 2 | ✅ Windows · ⬜ Linux | Native window, managed service lifecycle with Windows Job Object hardening, Start/Stop/Exit controls, single-source version propagation. Replaces the C# launcher + Inno Setup path for Windows only — Linux packaging unchanged |
+| 11 | Desktop Packaging (Tauri) | Rust / Tauri 2 | ✅ Windows · ✅ Linux | Native window, managed service lifecycle with Windows Job Object hardening (Linux: plain `Child::kill()`, already `cfg`-gated), Start/Stop/Exit controls, single-source version propagation. Replaces the C# launcher + Inno Setup path on Windows and the `start-all.sh`-in-a-terminal path on Linux; the Rust shell itself needed no changes for Linux — only `release.yml`'s `build-linux` job and `tauri.conf.json`'s bundle config did. Not yet run on real CI or real Linux hardware |
 | 12 | GPU & Extended System Identity | C# / WMI | ✅ Windows · ⬜ Linux (`ISystemInfoProvider`) | `Win32_VideoController` + `GPU Engine` perf counters; `Win32_ComputerSystem`/`Win32_BIOS`/`Win32_OperatingSystem`. Fixed the System tab's permanent "Failed to fetch" via bounded retry. Not build-verified on Windows (no `dotnet` toolchain in the authoring environment) |
 | 13 | Maintenance & Extensibility | Cross-cutting | 🔶 In Progress | `CHANGELOG.md`/`CHANGELOG_ARCHIVE.md` split shipped this pass. See [Remaining Work](#remaining-work) for the rest |
+| 14 | Linux Desktop Packaging (Tauri) | Rust / Tauri 2 / CI | ✅ Done (unverified on real CI/hardware) | Brought Linux onto the same Tauri packaging model as Windows. Root cause of the original bug reports: `build-linux` staged `start-all.sh` — a dev script assuming a writable `/opt/systeminfo/logs` and a system-wide `uvicorn` — into the `.deb`, which is what produced the `Permission denied` and `uvicorn: command not found` errors. `process.rs`/`commands.rs`/`lib.rs` needed no changes (already fully cross-platform); fixed `tauri.conf.json` (`targets` → `["nsis","deb","appimage"]`, added a generated Linux/macOS icon set via `tauri icon`, Linux bundle config) and rewrote `build-linux` to mirror `build-windows`: self-contained `linux-x64` backend publish, PyInstaller-frozen `analytics` binary (no `.exe`), staged as Tauri resources, then `tauri build`. Added Tauri's Linux build prerequisites (`libwebkit2gtk-4.1-dev` etc.) to the CI apt install step. `packaging/linux/AppRun` and `systeminfo.desktop` marked deprecated (Tauri generates its own) |
 
 ---
 
@@ -341,7 +358,7 @@ Technologies that are **historical only** and must not appear in current setup i
 - [ ] Verify multi-GPU engine-to-adapter attribution (`_phys_N_` parsing) on a real dual-GPU Windows laptop
 - [ ] Reconcile the two GPU detection paths (`ISystemInfoProvider.GetGpus()` vs. the native engine's `/api/native/gpu`) into one, and extend `GetGpus()` to Linux
 - [ ] Port `trend_analysis.py`'s battery/CPU/network trend logic into `analytics_service.py` so it's reachable from the dashboard (it currently only runs as a standalone CLI script against a file path that no longer exists)
-- [ ] Decide whether to bring Linux packaging onto Tauri or keep the `start-all.sh` browser-launch model as the permanent Linux distribution path
+- [ ] Verify the Linux Tauri packaging (`tauri build` producing `.deb`/`.AppImage`) end to end on real GitHub Actions infrastructure and a real Linux install, beyond this pass's own review of the workflow file
 - [ ] Add a retention/TTL policy for `data/snapshots/`
 - [ ] Implement full SMART storage health (needs root)
 - [ ] Add an automated test suite (populate the currently-empty `tests/` directory)

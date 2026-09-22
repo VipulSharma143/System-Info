@@ -410,6 +410,19 @@ jobs:
   # JOB 3 — Linux build. Runs in PARALLEL with build-windows (both only
   # depend on `version`, not on each other) — order between them no
   # longer matters at all.
+  #
+  # This mirrors build-windows: the Tauri desktop shell, not a shell
+  # script pretending localhost is a UI, owns the production packaging
+  # on Linux too. start-all.sh / packaging/linux/AppRun+systeminfo.desktop
+  # were the old "dev script wearing a fake moustache" approach (they
+  # ran `dotnet run` / `npm run dev` / bare `uvicorn` straight from
+  # /opt/systeminfo, needed sudo to create /opt/systeminfo/logs, and
+  # required a system-wide uvicorn install) — replaced here by the same
+  # self-contained backend publish + PyInstaller analytics freeze +
+  # `tauri build` pipeline the Windows job already uses, just targeting
+  # linux-x64 and the deb/appimage bundlers instead of nsis. Those two
+  # legacy files are still used for pre-Tauri manual dev testing and are
+  # not part of the production build anymore.
   # ============================================================
   build-linux:
     needs: version
@@ -435,11 +448,40 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build (frontend/src-tauri)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+
+      - name: Sync application version
+        shell: bash
+        env:
+          APP_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -e
+          # Same single-authoritative-version propagation as the Windows
+          # job (migration spec sections 34/40/41) — kept identical so the
+          # two builds never end up shipping mismatched version numbers.
+          node scripts/sync-version.mjs "$APP_VERSION"
+          node scripts/check-version.mjs
+
       - name: Install build tools
         run: |
           set -e
           sudo apt-get update
-          sudo apt-get install -y nasm cmake build-essential imagemagick file libfuse2
+          # nasm/cmake/build-essential: native C++/Assembly engine.
+          # libwebkit2gtk-4.1-dev/libgtk-3-dev/librsvg2-dev/patchelf/
+          # libayatana-appindicator3-dev/libssl-dev: required by `tauri build`
+          # itself on Linux (WebView + bundler toolchain, per Tauri's own
+          # Linux prerequisites). file/libfuse2: needed by the AppImage
+          # bundler tooling Tauri downloads at build time.
+          sudo apt-get install -y \
+            nasm cmake build-essential file libfuse2 \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf \
+            libayatana-appindicator3-dev libssl-dev
 
       - name: Build native C++ engine
         shell: bash
@@ -448,12 +490,44 @@ jobs:
           mkdir -p native/build
           bash native/build.sh
 
-      - name: Restore and build .NET backend
+      - name: Restore backend
         shell: bash
         run: |
           set -e
           dotnet restore backend/SystemMonitor.Api
-          dotnet build backend/SystemMonitor.Api --configuration Release --no-restore
+
+      - name: Publish backend (self-contained linux-x64)
+        shell: bash
+        run: |
+          set -e
+
+          if [ -d "build/backend" ]; then rm -rf "build/backend"; fi
+          mkdir -p "build/backend"
+
+          # Not single-file (same reasoning as the Windows job): the native
+          # C++ engine needs to sit next to the executable as a normal
+          # loadable .so, and native/build.sh already copied
+          # libsystemmonitor_native.so into backend/SystemMonitor.Api/ above
+          # so the csproj's CopyToOutputDirectory item picks it up here.
+          dotnet publish backend/SystemMonitor.Api \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            --no-restore \
+            --output build/backend
+
+          BACKEND_BIN="build/backend/SystemMonitor.Api"
+          if [ ! -f "$BACKEND_BIN" ]; then
+            echo "::error::Published backend executable was not created: $BACKEND_BIN"
+            exit 1
+          fi
+          chmod +x "$BACKEND_BIN"
+
+          NATIVE_LIB="build/backend/libsystemmonitor_native.so"
+          if [ ! -f "$NATIVE_LIB" ]; then
+            echo "::error::Native library is missing from publish output: $NATIVE_LIB"
+            exit 1
+          fi
 
       - name: Install frontend dependencies and build
         working-directory: frontend
@@ -463,122 +537,152 @@ jobs:
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
           npm run build
 
-      - name: Install Python analytics dependencies
+          if [ ! -d "dist" ]; then
+            echo "::error::Frontend dist directory was not created."
+            exit 1
+          fi
+
+      - name: Install analytics dependencies
         working-directory: analytics
         shell: bash
         run: |
           set -e
           python -m pip install --upgrade pip
+
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           else
             python -m pip install fastapi uvicorn
           fi
 
-      - name: Stage shared payload
+          if [ -f requirements-build.txt ]; then
+            python -m pip install -r requirements-build.txt
+          else
+            python -m pip install pyinstaller
+          fi
+
+      - name: Build analytics binary with PyInstaller
+        working-directory: analytics
         shell: bash
         run: |
           set -e
-          mkdir -p stage
-          cp -r backend frontend native analytics assembly stage/
-          cp start-all.sh setup.sh build.sh stage/
-          chmod +x stage/start-all.sh stage/setup.sh stage/build.sh
 
-          sed -i \
-            's|LOG_DIR="\$PROJECT_ROOT/logs"|LOG_DIR="${SYSTEMINFO_LOG_DIR:-$PROJECT_ROOT/logs}"|' \
-            stage/start-all.sh
+          rm -rf build dist analytics.spec
 
-          grep -q "SYSTEMINFO_LOG_DIR" stage/start-all.sh || {
-            echo "::error::start-all.sh LOG_DIR patch did not apply"
+          # Same reasoning as the Windows job: uvicorn resolves some
+          # internals dynamically by string name, invisible to PyInstaller's
+          # static import scan, so these must be collected explicitly or the
+          # frozen binary crashes on launch instead of failing to build.
+          python -m PyInstaller --onefile --clean --noconfirm --name analytics \
+            --collect-submodules uvicorn \
+            --hidden-import uvicorn.protocols.http.h11_impl \
+            --hidden-import uvicorn.lifespan.on \
+            --hidden-import uvicorn.loops.asyncio \
+            run_analytics.py
+
+          if [ ! -f "dist/analytics" ]; then
+            echo "::error::PyInstaller did not create the analytics binary."
             exit 1
-          }
+          fi
+          chmod +x dist/analytics
 
-      - name: Convert icon to PNG
+      - name: Stage backend and analytics as Tauri resources
         shell: bash
+        run: |
+          set -e
+
+          # Same staging convention as Windows: tauri.conf.json's
+          # bundle.resources maps resources/backend|analytics/** into the
+          # installed app; frontend/src-tauri/src/process.rs resolves them
+          # by app.path().resource_dir() at runtime. Not committed — see
+          # frontend/src-tauri/.gitignore.
+          BACKEND_DEST="frontend/src-tauri/resources/backend"
+          ANALYTICS_DEST="frontend/src-tauri/resources/analytics"
+
+          rm -rf "$BACKEND_DEST" "$ANALYTICS_DEST"
+          mkdir -p "$BACKEND_DEST" "$ANALYTICS_DEST"
+
+          cp -r build/backend/* "$BACKEND_DEST/"
+          cp analytics/dist/analytics "$ANALYTICS_DEST/analytics"
+          chmod +x "$BACKEND_DEST/SystemMonitor.Api" "$ANALYTICS_DEST/analytics"
+
+      - name: Validate Tauri resource staging
+        shell: bash
+        run: |
+          set -e
+
+          required_files=(
+            "frontend/src-tauri/resources/backend/SystemMonitor.Api"
+            "frontend/src-tauri/resources/backend/libsystemmonitor_native.so"
+            "frontend/src-tauri/resources/analytics/analytics"
+            "frontend/src-tauri/icons/icon.png"
+          )
+
+          for f in "${required_files[@]}"; do
+            if [ ! -s "$f" ]; then
+              echo "::error::Required Tauri resource is missing or empty: $f"
+              exit 1
+            fi
+          done
+
+          echo "Tauri resource staging validated."
+
+      - name: Install Tauri CLI
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -e
+          # Already a devDependency (package.json), installed by the
+          # earlier `npm ci`/`npm install` — this just confirms it resolved.
+          npx tauri --version
+
+      - name: Build Tauri application and installers
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -e
+          # Runs beforeBuildCommand (`npm run build`) again itself — kept
+          # deliberately redundant, same as the Windows job, so a broken
+          # frontend build fails at the earlier, cheaper step.
+          # tauri.conf.json lists targets ["nsis","deb","appimage"];
+          # Tauri skips whichever aren't buildable on the current host, so
+          # this run produces only deb + appimage here.
+          npx tauri build
+
+      - name: Locate and verify deb and AppImage packages
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -e
           mkdir -p Output
-          if [ -f packaging/linux/systeminfo.png ]; then
-            cp packaging/linux/systeminfo.png systeminfo.png
-          elif [ -f SystemInfo.ico ]; then
-            convert "SystemInfo.ico[0]" -resize 256x256 systeminfo.png
-          else
-            echo "::error::No icon source found."
+
+          DEB=$(find frontend/src-tauri/target/release/bundle/deb -name "*.deb" | head -n1)
+          if [ -z "$DEB" ]; then
+            echo "::error::No .deb package was produced under frontend/src-tauri/target/release/bundle/deb."
             exit 1
           fi
+          cp "$DEB" "Output/systeminfo_${VERSION}_amd64.deb"
 
-      - name: Build AppImage
-        shell: bash
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          set -e
-
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
-          chmod +x appimagetool
-
-          APPDIR="AppDir"
-          mkdir -p "$APPDIR/usr/share/systeminfo"
-          cp -r stage/* "$APPDIR/usr/share/systeminfo/"
-
-          cp packaging/linux/AppRun "$APPDIR/AppRun"
-          chmod +x "$APPDIR/AppRun"
-
-          mkdir -p "$APPDIR/usr/share/applications"
-          cp packaging/linux/systeminfo.desktop "$APPDIR/usr/share/applications/"
-          cp packaging/linux/systeminfo.desktop "$APPDIR/systeminfo.desktop"
-
-          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-          cp systeminfo.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/systeminfo.png"
-          cp systeminfo.png "$APPDIR/systeminfo.png"
-
-          ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$APPDIR" "Output/SystemInfo-${VERSION}-x86_64.AppImage"
-
-          if [ ! -f "Output/SystemInfo-${VERSION}-x86_64.AppImage" ]; then
-            echo "::error::AppImage was not created."
+          APPIMAGE=$(find frontend/src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -n1)
+          if [ -z "$APPIMAGE" ]; then
+            echo "::error::No .AppImage was produced under frontend/src-tauri/target/release/bundle/appimage."
             exit 1
           fi
+          cp "$APPIMAGE" "Output/SystemInfo-${VERSION}-x86_64.AppImage"
 
-      - name: Build .deb package
+          ls -la Output/
+
+      - name: Verify packaged app has no orphaned dev paths
         shell: bash
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -e
-
-          PKG_DIR="deb/systeminfo_${VERSION}_amd64"
-          mkdir -p "$PKG_DIR/DEBIAN" "$PKG_DIR/opt/systeminfo" "$PKG_DIR/usr/bin" \
-                   "$PKG_DIR/usr/share/applications" "$PKG_DIR/usr/share/icons/hicolor/256x256/apps"
-
-          cp -r stage/* "$PKG_DIR/opt/systeminfo/"
-          cp systeminfo.png "$PKG_DIR/usr/share/icons/hicolor/256x256/apps/systeminfo.png"
-
-          sed 's|Exec=start-all.sh|Exec=/opt/systeminfo/start-all.sh|' \
-            packaging/linux/systeminfo.desktop > "$PKG_DIR/usr/share/applications/systeminfo.desktop"
-
-          cat > "$PKG_DIR/usr/bin/systeminfo" << 'WRAPPER'
-          #!/bin/bash
-          exec /opt/systeminfo/start-all.sh "$@"
-          WRAPPER
-          chmod +x "$PKG_DIR/usr/bin/systeminfo"
-
-          cat > "$PKG_DIR/DEBIAN/control" << CONTROL
-          Package: systeminfo
-          Version: ${VERSION}
-          Section: utils
-          Priority: optional
-          Architecture: amd64
-          Maintainer: Vipul Sharma
-          Description: Multi-language system performance monitor
-           A full-stack system monitor reading CPU, memory, disk, network, and
-           process data directly from kernel interfaces, with a native C++/
-           Assembly engine, Python analytics, and a React dashboard.
-          CONTROL
-
-          dpkg-deb --build --root-owner-group "$PKG_DIR" "Output/systeminfo_${VERSION}_amd64.deb"
-
-          if [ ! -f "Output/systeminfo_${VERSION}_amd64.deb" ]; then
-            echo "::error::.deb package was not created."
+          # Same guard as the Windows job (spec section 43): a resources
+          # path baking in this runner's absolute checkout path would mean
+          # the installed app silently depends on this CI machine.
+          conf="frontend/src-tauri/tauri.conf.json"
+          if grep -qF "$GITHUB_WORKSPACE" "$conf"; then
+            echo "::error::$conf contains an absolute runner path — resource paths must stay relative."
             exit 1
           fi
 

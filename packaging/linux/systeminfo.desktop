@@ -1,3 +1,7 @@
+# DEPRECATED — no longer staged into the .deb/.AppImage. `tauri build`
+# generates its own .desktop entry (from tauri.conf.json's productName/
+# identifier/category) pointing at the real Tauri binary. Kept only for
+# reference. See .github/workflows/release.yml's build-linux job.
 [Desktop Entry]
 Type=Application
 Name=SystemInfo

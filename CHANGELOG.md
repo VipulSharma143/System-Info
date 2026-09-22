@@ -13,6 +13,24 @@ All notable changes to SystemInfo are documented here.
 ### Known Issues
 
 
+## [2.1.4] - 2026-09-22
+
+### Fixed
+
+* **Linux `.deb`/AppImage required `sudo` and a system-wide `uvicorn`.** The production Linux package previously staged `start-all.sh` — a development script that assumed `/opt/systeminfo/logs` was writable and called `uvicorn` from `PATH` — directly into the installed app, producing `mkdir: cannot create directory '/opt/systeminfo/logs': Permission denied` on a normal run and `start-all.sh: line 141: uvicorn: command not found` even under `sudo`. Linux packaging now goes through the same Tauri 2 pipeline already used for Windows: a self-contained `linux-x64` backend, a PyInstaller-frozen analytics binary, and no dependency on the system's Python/Node toolchain.
+* **Linux build opened a browser tab instead of a native window.** `systeminfo` now launches the Tauri desktop shell directly — no `localhost:5173`, no manually opening Firefox/Chrome, and no development server required after installation.
+
+### Changed
+
+* **`release.yml`'s `build-linux` job rewritten** to mirror `build-windows`: native C++ engine → self-contained `linux-x64` backend publish → frontend build → PyInstaller-frozen `analytics` binary → staged as Tauri resources → `npx tauri build`, producing the `.deb` and `.AppImage` from the same `tauri.conf.json` used for the Windows NSIS installer (`bundle.targets` now `["nsis","deb","appimage"]`).
+* **`frontend/src-tauri/icons/`** now includes a full desktop icon set (`32x32.png`, `128x128.png`, `128x128@2x.png`, `icon.png`, `icon.icns`) generated from the existing app icon, required by Tauri's Linux/macOS bundlers.
+
+### Known Issues
+
+* The reworked Linux CI job has been reviewed for consistency against the working Windows job and Tauri's documented Linux build prerequisites, but has not yet been run end-to-end on real GitHub Actions infrastructure or installed on a real Linux machine.
+* `packaging/linux/AppRun` and `packaging/linux/systeminfo.desktop` are no longer used by the build (Tauri generates its own desktop entry) and are kept only as a deprecated reference.
+
+
 ## [2.1.3] - 2026-09-18
 
 ### Added

@@ -1,4 +1,14 @@
 #!/bin/bash
+# DEPRECATED — no longer used by the production build.
+#
+# The Linux .deb/.AppImage packages are now built by `tauri build` (see
+# .github/workflows/release.yml's build-linux job), which bundles the
+# Tauri desktop shell directly — a proper native window, not this script
+# execing start-all.sh's dev-oriented `dotnet run`/`npm run dev`/bare
+# `uvicorn` flow inside a terminal. Kept only for reference; not staged
+# into any package anymore. See frontend/src-tauri/ for the real launcher
+# (src/process.rs) and packaging.
+#
 # AppRun — entry point invoked automatically when SystemInfo.AppImage is run.
 #
 # AppImages mount themselves as a read-only squashfs at runtime, so logs/
