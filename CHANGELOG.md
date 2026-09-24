@@ -13,6 +13,13 @@ All notable changes to SystemInfo are documented here.
 ### Known Issues
 
 
+## [2.2.1] - 2026-09-24
+
+### Changed
+
+* **Update-test release.** No application code changed in this version — it exists only to verify that an installed 2.2.0 finds, downloads and installs a new release from inside the app (Updates tab), stops and restarts all services cleanly, and shows these release notes.
+
+
 ## [2.2.0] - 2026-09-24
 
 ### Added

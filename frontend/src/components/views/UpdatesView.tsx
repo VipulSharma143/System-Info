@@ -272,7 +272,7 @@ function StatusLine({
     return (
       <p role="alert" className="flex items-start gap-2 text-[13px] text-[var(--critical)]">
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <span>{error ?? 'Something went wrong.'}</span>
+        <span className="whitespace-pre-wrap break-words">{error ?? 'Something went wrong.'}</span>
       </p>
     );
   }

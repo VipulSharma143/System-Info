@@ -76,7 +76,6 @@ export default function StatusIndicator({ connection, lastUpdated }: StatusIndic
       {ageLabel !== null && (
         <>
           <span aria-hidden="true">·</span>
-          <span>updated {ageLabel}</span>
         </>
       )}
     </span>

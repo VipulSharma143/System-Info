@@ -21,6 +21,7 @@ pub fn run() {
             commands::stop_services,
             commands::get_service_status,
             commands::exit_app,
+            commands::diagnose_update_check,
         ])
         .setup(|app| {
             // Startup sequence (spec section 11): start backend, wait for

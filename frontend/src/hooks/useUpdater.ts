@@ -57,7 +57,8 @@ export interface DownloadProgress {
 
 const FIRST_CHECK_DELAY_MS = 5_000;
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const CHECK_TIMEOUT_MS = 15_000;
+const CHECK_TIMEOUT_MS = 30_000;
+const CHECK_RETRY_DELAY_MS = 2_000;
 const AUTO_INSTALL_KEY = 'system-info-auto-update';
 
 function readAutoInstall(): boolean {
@@ -153,7 +154,17 @@ export function useUpdater(enabled: boolean) {
 
       try {
         const { check } = await import('@tauri-apps/plugin-updater');
-        const update = await check({ timeout: CHECK_TIMEOUT_MS });
+        // One retry: the first request after startup can fail or stall on a
+        // cold DNS/TLS connection even though a second attempt a moment
+        // later succeeds (seen in practice: attempt 1 "error sending
+        // request", the identical check right after it worked).
+        let update: Update | null;
+        try {
+          update = await check({ timeout: CHECK_TIMEOUT_MS });
+        } catch {
+          await new Promise((resolve) => window.setTimeout(resolve, CHECK_RETRY_DELAY_MS));
+          update = await check({ timeout: CHECK_TIMEOUT_MS });
+        }
         setLastChecked(Date.now());
 
         if (pending.current && pending.current !== update) {
@@ -171,7 +182,17 @@ export function useUpdater(enabled: boolean) {
         }
       } catch (err) {
         if (manual) {
-          setError(describe(err));
+          // The error that crosses the IPC boundary is only the outermost
+          // message ("error sending request for url ..."). Ask Rust to redo
+          // the check and report the whole cause chain (DNS/TLS/timeout/...).
+          let details = '';
+          try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            details = await invoke<string>('diagnose_update_check');
+          } catch {
+            /* diagnostics are best-effort */
+          }
+          setError(details ? `${describe(err)}\n${details}` : describe(err));
           changePhase('error');
         } else {
           console.warn('[updater] automatic update check failed:', err);
