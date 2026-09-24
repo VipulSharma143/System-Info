@@ -6,6 +6,7 @@ import { useSystemGpu } from './hooks/useSystemGpu';
 import { useServiceControl } from './hooks/useServiceControl';
 import { useTheme } from './hooks/useTheme';
 import { useProcessHistory } from './hooks/useProcessHistory';
+import { useUpdater } from './hooks/useUpdater';
 import { isTauri } from './lib/tauri';
 
 import AppShell from './components/layout/AppShell';
@@ -18,6 +19,7 @@ import StorageView from './components/views/StorageView';
 import NetworkView from './components/views/NetworkView';
 import BatteryView from './components/views/BatteryView';
 import SystemView from './components/views/SystemView';
+import UpdatesView, { UpdateInstallingOverlay } from './components/views/UpdatesView';
 
 import { OfflineBanner } from './components/common/States';
 import StatusIndicator from './components/common/StatusIndicator';
@@ -34,6 +36,7 @@ const SECTIONS = [
   { id: 'network', label: 'Network' },
   { id: 'battery', label: 'Battery' },
   { id: 'system', label: 'System' },
+  { id: 'updates', label: 'Updates' },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]['id'];
@@ -46,6 +49,7 @@ const TITLES: Record<SectionId, { title: string; description: string }> = {
   network: { title: 'Network', description: 'Interfaces, traffic, and connection speed' },
   battery: { title: 'Battery', description: 'Charge, health, and power draw' },
   system: { title: 'System', description: 'Hardware and operating system information' },
+  updates: { title: 'Updates', description: 'Check for new versions and read release notes' },
 };
 
 // Top-level wrapper only exists to own the "retry after a genuine startup
@@ -77,14 +81,21 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
   const [collapsed, setCollapsed] = useState(false);
 
+  // One updater instance for the whole app: the sidebar badge, the banner
+  // below and the Updates tab all read this same state. Automatic checks only
+  // begin once the dashboard has loaded, so they never compete with startup.
+  const updater = useUpdater(info !== null && data !== null && gpus !== null);
+  const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
+  const updateAvailable = updater.phase === 'available' && updater.available !== null;
+
   const navItems: NavItem[] = useMemo(
     () =>
-      SECTIONS.map((section) =>
-        section.id === 'processes'
-          ? { ...section, count: data?.processes.length ?? 0 }
-          : section
-      ),
-    [data?.processes]
+      SECTIONS.map((section) => {
+        if (section.id === 'processes') return { ...section, count: data?.processes.length ?? 0 };
+        if (section.id === 'updates') return { ...section, badge: updateAvailable };
+        return section;
+      }),
+    [data?.processes, updateAvailable]
   );
 
   // "Services starting" only means something inside the Tauri desktop
@@ -148,7 +159,38 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
         post-first-load, steady-state signal (see useSystemMetrics) — it can
         no longer fire during the startup window this component gates above.
       */}
-      {error && connection === 'offline' && (
+      {updateAvailable &&
+        updater.available &&
+        dismissedBanner !== updater.available.version &&
+        activeSection !== 'updates' && (
+          <div className="px-4 pt-4">
+            <div
+              role="status"
+              className="flex flex-wrap items-center gap-3 rounded-md border border-[var(--accent)]/30 px-4 py-2.5 text-[13px] text-[var(--text)]"
+              style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 8%, transparent)' }}
+            >
+              <span>
+                System Info <strong>v{updater.available.version}</strong> is available.
+              </span>
+              <button
+                type="button"
+                onClick={() => setActiveSection('updates')}
+                className="font-medium text-[var(--accent)] hover:underline"
+              >
+                View details
+              </button>
+              <button
+                type="button"
+                onClick={() => setDismissedBanner(updater.available!.version)}
+                className="ml-auto text-[12px] text-[var(--text-faint)] hover:text-[var(--text)]"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
+      {error && connection === 'offline' && updater.phase !== 'installing' && (
         <div className="px-4 pt-4">
           <OfflineBanner message={error} />
         </div>
@@ -190,6 +232,13 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
           gpuError={gpuError}
         />
       </div>
+      <div className={activeSection === 'updates' ? 'block' : 'hidden'}>
+        <UpdatesView updater={updater} />
+      </div>
+
+      {updater.phase === 'installing' && (
+        <UpdateInstallingOverlay version={updater.available?.version} />
+      )}
     </AppShell>
   );
 }

@@ -13,6 +13,28 @@ All notable changes to SystemInfo are documented here.
 ### Known Issues
 
 
+## [2.2.0] - 2026-09-24
+
+### Added
+
+* **In-app updates.** System Info now checks for new releases by itself a few seconds after the dashboard loads (and every 6 hours while it stays open), and a new **Updates** tab lets you check manually, see the installed version's release notes next to the new version's release notes, and install with one click. A green dot on the Updates tab and a dismissible banner announce an available update. An optional "Install updates automatically when found at startup" setting is off by default.
+* **Clean restart on update.** Installing an update downloads it first (services keep running), then stops the backend and analytics services, installs, and relaunches — the new version starts every service fresh. If the install fails or is cancelled (for example the Linux password prompt), the services are started again instead of being left stopped.
+* **Signed releases.** `release.yml` now signs the Windows installer, the AppImage and the `.deb` with a Tauri updater key (once, in the `release` job — build jobs never see the private key), generates `latest.json` with `scripts/make-update-manifest.mjs`, attaches it to the GitHub Release, and verifies that the manifest and every installer URL it lists are downloadable. The app verifies each download's signature against the public key in `tauri.conf.json` before installing.
+* **Updater plugins.** Added `tauri-plugin-updater` and `tauri-plugin-process` (Rust) plus their `@tauri-apps/plugin-*` counterparts, and committed `Cargo.lock` so the crate and npm versions cannot drift apart between CI runs.
+
+### Changed
+
+* **Release preflight.** The `version` job now fails immediately if the updater public key in `tauri.conf.json` is still the placeholder or the `TAURI_SIGNING_PRIVATE_KEY` secret is missing, instead of publishing a release whose installed copies could never update.
+* **AppImage stamped for the updater.** The hand-assembled AppImage now has Tauri's bundle-type marker patched in (the `.deb` gets its marker from `tauri build`), so the updater swaps the AppImage in place while `.deb` installs update through `dpkg`.
+* **Release notes come from CHANGELOG.md everywhere.** The GitHub Release body, the `notes` field of `latest.json`, and the Updates tab all read the same section.
+
+### Known Issues
+
+* **One-time setup required before the first release with this change:** generate a signing key (`npx tauri signer generate -w ~/.tauri/systeminfo.key`), paste the public key into `plugins.updater.pubkey` in `frontend/src-tauri/tauri.conf.json`, and add the repository secrets `TAURI_SIGNING_PRIVATE_KEY` (and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if the key has a password). Losing the private key means installed copies can no longer be updated.
+* **v2.1.4 and older cannot self-update** — they contain no updater. Install 2.2.0 manually once; every release after it can be installed from inside the app.
+* The Rust side compiles (`cargo check`/`cargo build --release`), the frontend type-checks and builds, and signing plus signature verification were checked end to end with a throwaway key. The full download → stop services → install → relaunch cycle has not yet been run on real Windows/Linux machines against a real GitHub Release.
+
+
 ## [2.1.4] - 2026-09-22
 
 ### Fixed

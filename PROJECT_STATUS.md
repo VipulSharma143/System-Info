@@ -244,6 +244,12 @@ Both build jobs now follow the same shape: native engine → self-contained back
 
 ---
 
+## In-App Updates (added 2.2.0)
+
+Implemented: automatic check at startup + every 6 h, manual check, Updates tab (installed vs new release notes, progress, optional auto-install), clean stop → install → relaunch sequence with service recovery on failure, minisign-signed installers, `latest.json` generated in `release.yml`'s `release` job and verified after publish, AppImage bundle-type stamping, release preflight for key/secret. See README "In-App Updates" for one-time key setup.
+
+Not yet verified on real machines: the full download/install/relaunch cycle on Windows and Linux against a real Release (signing + signature verification were verified locally with a throwaway key; Rust compiles; frontend builds).
+
 ## Known Limitations
 
 - Windows battery detail (capacity, voltage, health %, cycle count), DXGI-based GPU reads, and the new `Win32_VideoController`/`GPU Engine` GPU code are implemented but not hardware-verified.

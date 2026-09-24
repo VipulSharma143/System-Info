@@ -1,6 +1,6 @@
 [package]
 name = "system-info"
-version = "2.1.4"
+version = "2.2.0"
 description = "System Info — native desktop shell"
 authors = ["Vipul Sharma"]
 edition = "2021"
@@ -33,6 +33,16 @@ serde_json = "1"
 # these are short, local, blocking calls made from a background thread, not
 # hot-path async work, so pulling in an async runtime would be pure overhead.
 ureq = { version = "2.12", default-features = false }
+# In-app updates. tauri-plugin-updater downloads the signed installer that
+# CI attaches to each GitHub Release (see latest.json, produced by
+# scripts/make-update-manifest.mjs), verifies its minisign signature against
+# the public key in tauri.conf.json, and installs it (NSIS on Windows,
+# AppImage swap or `pkexec dpkg -i` on Linux). tauri-plugin-process only
+# provides relaunch() so the app can restart itself after an update. Keep
+# both on the same major.minor as their @tauri-apps/plugin-* npm twins —
+# `tauri build` refuses mismatched pairs, which is why Cargo.lock is committed.
+tauri-plugin-updater = "2.12"
+tauri-plugin-process = "2.3"
 
 [features]
 # This feature is used for production builds where `devPath` points to the

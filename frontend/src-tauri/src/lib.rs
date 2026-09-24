@@ -8,6 +8,13 @@ use process::ServiceManager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Auto-update: check/download/install come from the updater plugin
+        // (called from the frontend's useUpdater hook); relaunch() comes from
+        // the process plugin. Endpoint + public key live in tauri.conf.json
+        // under plugins.updater — the frontend cannot override either, and
+        // every download is signature-checked before anything is installed.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(ServiceManager::new())
         .invoke_handler(tauri::generate_handler![
             commands::start_services,

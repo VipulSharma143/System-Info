@@ -28,6 +28,12 @@ export default defineConfig(() => ({
     port: 5173,
     strictPort: true,
     host: '0.0.0.0',
+    // src/lib/changelog.ts imports ../CHANGELOG.md (repo root) as raw text so
+    // the Updates tab always shows the real release notes. Vite's dev server
+    // refuses files outside the frontend/ project root unless allowed here.
+    fs: {
+      allow: ['..'],
+    },
     watch: {
       // Don't reload the webview because `cargo build` touched files under
       // src-tauri/target — that's Rust output, not frontend source.

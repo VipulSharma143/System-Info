@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SystemInfo",
-  "version": "2.1.4",
+  "version": "2.2.0",
   "identifier": "dev.vipulsharma.systeminfo",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -67,6 +67,17 @@
     "linux": {
       "deb": {
         "depends": []
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg2MEM1OEM4OERCNEM4REIKUldUYnlMU055RmdNaGp0RThqUGlUMEMvbkdER3N2WWRZb1B3d3VuNDE3MnZvTllQYXRJUG9wRDIK",
+      "endpoints": [
+        "https://github.com/VipulSharma143/System-Info/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

@@ -214,6 +214,49 @@ Linux distribution: the production `.deb`/`.AppImage` install the Tauri-bundled 
 
 ---
 
+## 🔄 In-App Updates
+
+System Info updates itself from its own GitHub Releases — no reinstalling by hand after the first 2.2.0 install.
+
+**What the user sees**
+
+- A few seconds after the dashboard loads (and every 6 hours while it stays open) the app checks for a newer release. If one exists, the **Updates** tab gets a green dot and a dismissible banner appears.
+- The **Updates** tab shows the installed version's release notes, the new version's release notes, a **Check for updates** button, download progress, and an optional *install automatically at startup* switch (off by default).
+- **Install** = download (services keep running) → stop backend + analytics → install → relaunch → every service starts fresh. If the install is cancelled or fails, services are started again.
+
+**How it works**
+
+| Piece | Where | Role |
+|---|---|---|
+| `tauri-plugin-updater` | `frontend/src-tauri` | Fetches the manifest, verifies the signature, installs (NSIS on Windows; AppImage swap or `pkexec dpkg -i` on Linux) |
+| `useUpdater.ts` / `UpdatesView.tsx` | `frontend/src` | Check schedule, install sequence, Updates tab |
+| `latest.json` | attached to every GitHub Release | Version, notes (from `CHANGELOG.md`), download URL + signature per platform |
+| `scripts/make-update-manifest.mjs` | `release` job | Builds `latest.json` from the signed installers |
+| Signing key pair | `tauri.conf.json` (public) / GitHub secret (private) | Installed apps only accept installers signed by your key |
+
+The app reads `https://github.com/VipulSharma143/System-Info/releases/latest/download/latest.json`. Releasing works exactly as before — add a `CHANGELOG.md` entry and push to `main`; `release.yml` builds, signs, generates the manifest and publishes.
+
+**One-time setup**
+
+```bash
+cd frontend
+npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or leave empty)
+```
+
+1. Paste the printed **public key** into `plugins.updater.pubkey` in `frontend/src-tauri/tauri.conf.json`.
+2. Add GitHub repo secrets (Settings → Secrets and variables → Actions): `TAURI_SIGNING_PRIVATE_KEY` = full contents of `~/.tauri/systeminfo.key`, and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if you set a password.
+3. Back up the private key. If it is lost, installed copies can never be updated again — users would have to reinstall.
+
+`release.yml` refuses to run if the public key is still the placeholder or the secret is missing.
+
+**Good to know**
+
+- Versions before 2.2.0 have no updater; install 2.2.0 by hand once.
+- A `.deb` install updates through `dpkg` and asks for the user's password (polkit). An AppImage replaces itself in place — keep it in a location the user can write to.
+- Bundle-type detection: `tauri build` stamps the `.deb`'s binary; `release.yml` stamps the hand-assembled AppImage's binary — this is how the updater knows which installer to pick.
+
+---
+
 ## 📈 Storage & Historical Data
 
 **Before:** snapshot history was written to and read from **MongoDB Atlas** — `SnapshotLogger.cs` wrote documents, `analytics_service.py` queried Mongo directly, and a `MONGO_URI` connection string had to be configured before analytics would work at all.

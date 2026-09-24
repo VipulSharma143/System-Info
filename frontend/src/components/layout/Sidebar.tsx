@@ -2,6 +2,7 @@ import {
   Activity,
   BatteryMedium,
   Cpu,
+  Download,
   HardDrive,
   Info,
   ListTree,
@@ -20,6 +21,8 @@ export interface NavItem {
   id: string;
   label: string;
   count?: number;
+  /** Small attention dot (used by the Updates tab when a new version exists). */
+  badge?: boolean;
 }
 
 const ICONS: Record<string, typeof Cpu> = {
@@ -30,6 +33,7 @@ const ICONS: Record<string, typeof Cpu> = {
   network: Network,
   battery: BatteryMedium,
   system: Info,
+  updates: Download,
 };
 
 interface SidebarProps {
@@ -97,6 +101,14 @@ export default function Sidebar({
               />
               <Icon className="h-4 w-4 shrink-0" strokeWidth={1.8} />
               {!collapsed && <span className="truncate">{item.label}</span>}
+              {item.badge && (
+                <span
+                  title="Update available"
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)] ${
+                    collapsed ? 'absolute right-2 top-2' : 'ml-auto'
+                  }`}
+                />
+              )}
               {!collapsed && item.count !== undefined && (
                 <span className="tabular ml-auto rounded bg-[var(--surface-hover)] px-1.5 py-0.5 text-[11px] text-[var(--text-faint)]">
                   {item.count}

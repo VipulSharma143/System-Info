@@ -104,6 +104,28 @@ jobs:
             exit 1
           fi
 
+      - name: Verify in-app updater signing is configured
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -e
+          # Fail in seconds, not after two 15-minute builds. The updater's
+          # public key is compiled into every installed copy of the app, so
+          # shipping a release with a placeholder key would produce an app
+          # that can never verify (and therefore never install) any update.
+          PUBKEY=$(node -p "require('./frontend/src-tauri/tauri.conf.json').plugins.updater.pubkey")
+          if [ -z "$PUBKEY" ] || [[ "$PUBKEY" == REPLACE_WITH_* ]]; then
+            echo "::error::frontend/src-tauri/tauri.conf.json -> plugins.updater.pubkey is still the placeholder. Run 'npx tauri signer generate -w ~/.tauri/systeminfo.key' and paste the PUBLIC key there."
+            exit 1
+          fi
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::Repository secret TAURI_SIGNING_PRIVATE_KEY is not set. Add the contents of ~/.tauri/systeminfo.key (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD if you set one) under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "Updater public key present and signing secret configured."
+
   # ============================================================
   # JOB 2 — Windows build. Only starts once `version` has decided a
   # release is actually needed (skip=false). Any failure here means the
@@ -747,6 +769,29 @@ jobs:
           cp "$BINARY" "$APPDIR/usr/bin/${EXE_NAME}"
           chmod +x "$APPDIR/usr/bin/${EXE_NAME}"
 
+          # tauri-plugin-updater decides HOW to install an update from a
+          # marker string the Tauri bundler patches into the binary
+          # (__TAURI_BUNDLE_TYPE_VAR_<TYPE>). This AppImage is assembled by
+          # hand, so Tauri never patched it — stamp it as an AppImage here,
+          # exactly the way the bundler does (same-length replacement of the
+          # first marker), so the updater swaps the AppImage file in place
+          # instead of guessing. The .deb's binary is stamped as "deb" by
+          # `tauri build` itself, which makes deb installs update via dpkg.
+          python3 - "$APPDIR/usr/bin/${EXE_NAME}" << 'PATCH'
+          import sys
+          path = sys.argv[1]
+          data = open(path, "rb").read()
+          for old in (b"__TAURI_BUNDLE_TYPE_VAR_UNK", b"__TAURI_BUNDLE_TYPE_VAR_DEB"):
+              i = data.find(old)
+              if i >= 0:
+                  data = data[:i] + b"__TAURI_BUNDLE_TYPE_VAR_APP" + data[i + len(old):]
+                  open(path, "wb").write(data)
+                  print("Stamped bundle type: AppImage")
+                  break
+          else:
+              sys.exit("bundle-type marker not found in binary — is the tauri crate too old for the updater?")
+          PATCH
+
           cp -r frontend/src-tauri/resources/backend "$APPDIR/usr/lib/${EXE_NAME}/backend"
           cp -r frontend/src-tauri/resources/analytics "$APPDIR/usr/lib/${EXE_NAME}/analytics"
           chmod +x "$APPDIR/usr/lib/${EXE_NAME}/backend/SystemMonitor.Api"
@@ -859,6 +904,49 @@ jobs:
           name: SystemInfo-deb
           path: release-assets
 
+      - name: Set up Node.js (updater signing)
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Tauri CLI (used only for `signer sign`)
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+
+      # Signing happens ONCE, here, not in the build jobs: only this job ever
+      # sees the private key, and the same bytes that get uploaded to the
+      # release are the bytes that get signed. Windows/AppImage/.deb are all
+      # signed as-is (Tauri 2's updater consumes the installers directly).
+      - name: Sign updater artifacts
+        working-directory: frontend
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -e
+          for f in "$GITHUB_WORKSPACE"/release-assets/SystemInfo-Setup.exe \
+                   "$GITHUB_WORKSPACE"/release-assets/*.AppImage \
+                   "$GITHUB_WORKSPACE"/release-assets/*.deb; do
+            npx tauri signer sign "$f"
+            test -s "$f.sig" || { echo "::error::No signature produced for $f"; exit 1; }
+          done
+
+      - name: Generate update manifest (latest.json)
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -e
+          node scripts/make-update-manifest.mjs \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --assets release-assets \
+            --out release-assets/latest.json
+          cat release-assets/latest.json
+
       - name: Prepare release notes
         env:
           VERSION: ${{ needs.version.outputs.version }}
@@ -891,6 +979,7 @@ jobs:
             release-assets/SystemInfo-Setup.exe
             release-assets/*.AppImage
             release-assets/*.deb
+            release-assets/latest.json
           draft: false
           prerelease: false
         env:
@@ -906,3 +995,28 @@ jobs:
           gh release view "$TAG"
           echo ""
           echo "Release $TAG created and verified."
+
+      - name: Verify update manifest is downloadable
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -e
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+          for attempt in 1 2 3 4 5; do
+            if curl -fsSL "$BASE/latest.json" -o latest.json; then break; fi
+            echo "latest.json not reachable yet (attempt $attempt) — retrying in 5s"
+            sleep 5
+          done
+          test -s latest.json || { echo "::error::latest.json is not downloadable from the release."; exit 1; }
+
+          test "$(jq -r .version latest.json)" = "$TAG" \
+            || { echo "::error::latest.json version does not match $TAG"; exit 1; }
+
+          # Every installer the manifest points at must actually be reachable,
+          # otherwise installed apps would see an update they cannot download.
+          for url in $(jq -r '.platforms[].url' latest.json | sort -u); do
+            curl -fsIL "$url" > /dev/null || { echo "::error::Manifest URL not reachable: $url"; exit 1; }
+            echo "OK  $url"
+          done
