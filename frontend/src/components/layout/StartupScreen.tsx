@@ -1,5 +1,6 @@
-import { CheckCircle2, Loader2 } from 'lucide-react';
-import { ErrorState } from '../common/States';
+import { Activity, AlertTriangle, CheckCircle2, Loader2, RefreshCw } from 'lucide-react';
+import { ALERT_COPY } from '../../lib/errors';
+import Button from '../common/Button';
 
 export interface StartupStep {
   label: string;
@@ -16,9 +17,9 @@ interface StartupScreenProps {
   steps: StartupStep[];
   // True once STARTUP_GRACE_MS has elapsed with no success on at least one
   // of the underlying sources. When true, the checklist is replaced with a
-  // genuine error state — this is a real failure, not "still starting".
+  // genuine error state — this is a real failure, not "still starting". The
+  // wording is always the plain-language catalog copy, never the raw error.
   failed: boolean;
-  errorMessage?: string;
   onRetry: () => void;
 }
 
@@ -62,46 +63,66 @@ export function buildStartupSteps(args: {
 }
 
 // Full-screen replacement for the old inline "Connecting to backend…" text.
-// Reuses the app's existing visual language rather than inventing a new
-// style: Loader2 (already used by LoadingState), ErrorState (already used
-// for real failures elsewhere), and the same --bg/--text/--text-muted/
-// --text-faint/--accent/--border tokens the rest of the app is built on.
-export default function StartupScreen({ steps, failed, errorMessage, onRetry }: StartupScreenProps) {
+// Reuses the app's existing visual language: the same tokens, the shared
+// card surface, Loader2 for progress and Button for the retry action.
+export default function StartupScreen({ steps, failed, onRetry }: StartupScreenProps) {
+  const doneCount = steps.filter((step) => step.done).length;
+  const failure = ALERT_COPY.systemInfo;
+
   return (
-    <div className="flex h-screen w-full flex-col items-center justify-center gap-8 bg-[var(--bg)] px-6 text-[var(--text)]">
-      <div className="text-[15px] font-medium tracking-tight text-[var(--text)]">System Info</div>
+    <div className="flex h-screen w-full flex-col items-center justify-center bg-[var(--bg)] px-6 text-[var(--text)]">
+      <div className="mb-6 flex items-center gap-3">
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)]">
+          <Activity className="h-5 w-5 text-[var(--accent)]" strokeWidth={2.2} />
+        </span>
+        <span className="text-[18px] font-semibold tracking-[-0.01em]">System Info</span>
+      </div>
 
-      {failed ? (
-        <div className="flex w-full max-w-sm flex-col items-center gap-4">
-          <ErrorState
-            message={
-              errorMessage
-                ? `Startup didn't finish — ${errorMessage}`
-                : "Startup didn't finish. The backend never became reachable."
-            }
-          />
-          <button
-            type="button"
-            onClick={onRetry}
-            className="rounded-md border border-[var(--border)] px-4 py-1.5 text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)]"
-          >
-            Retry
-          </button>
-        </div>
-      ) : (
-        <>
-          <ul className="flex w-full max-w-sm flex-col gap-2.5">
-            {steps.map((step) => (
-              <StartupStepRow key={step.label} step={step} />
-            ))}
-          </ul>
-
-          <div className="flex items-center gap-2 text-[13px] text-[var(--text-muted)]">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Please wait…
+      <div className="card w-full max-w-sm p-5">
+        {failed ? (
+          <div role="alert" className="flex flex-col items-center gap-3 py-2 text-center">
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--critical-soft)] text-[var(--critical)]">
+              <AlertTriangle className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-[14px] font-semibold">{failure.title}</p>
+              <p className="mx-auto mt-1 max-w-[16rem] text-[13px] leading-relaxed text-[var(--text-muted)]">
+                {failure.text}
+              </p>
+            </div>
+            <Button variant="primary" icon={RefreshCw} onClick={onRetry} className="mt-1">
+              Try again
+            </Button>
           </div>
-        </>
-      )}
+        ) : (
+          <>
+            <div className="mb-4 flex items-baseline justify-between">
+              <p className="text-[13px] font-semibold">Getting things ready</p>
+              <p className="tabular text-[12px] text-[var(--text-faint)]">
+                {doneCount} of {steps.length}
+              </p>
+            </div>
+            <div
+              className="mb-4 h-1 w-full overflow-hidden rounded-full bg-[var(--surface-hover)]"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={steps.length}
+              aria-valuenow={doneCount}
+              aria-label="Startup progress"
+            >
+              <div
+                className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-300 ease-out"
+                style={{ width: `${(doneCount / steps.length) * 100}%` }}
+              />
+            </div>
+            <ul className="flex flex-col gap-2.5">
+              {steps.map((step) => (
+                <StartupStepRow key={step.label} step={step} />
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -110,9 +131,9 @@ function StartupStepRow({ step }: { step: StartupStep }) {
   return (
     <li className="flex items-center gap-2.5 text-[13px]">
       {step.done ? (
-        <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" strokeWidth={2} />
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-[var(--accent)]" strokeWidth={2} />
       ) : (
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--text-faint)]" />
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--text-faint)]" />
       )}
       <span className={step.done ? 'text-[var(--text)]' : 'text-[var(--text-muted)]'}>{step.label}</span>
     </li>

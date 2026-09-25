@@ -2,6 +2,8 @@ import type { GpuInfo, SystemIdentification, SystemSnapshot } from '../../types/
 import Panel from '../common/Panel';
 import { InfoRow, StatTile, TileGrid, Unavailable, ViewContainer } from '../common/Primitives';
 import { LoadingState } from '../common/States';
+import Button from '../common/Button';
+import { ALERT_COPY } from '../../lib/errors';
 
 interface SystemViewProps {
   info: SystemIdentification | null;
@@ -93,20 +95,16 @@ export default function SystemView({ info, infoError, onRetryInfo, data, gpus, g
     return (
       <ViewContainer>
         <Panel title="System">
-          <p className="text-[13px] text-[var(--text-muted)]">
-            System identification is unavailable — {infoError}
+          <p className="text-[13px] font-medium text-[var(--text)]">
+            {ALERT_COPY.systemInfo.title}
           </p>
+          <p className="mt-1 text-[13px] text-[var(--text-muted)]">{infoError}</p>
           <p className="mt-1 text-[12px] text-[var(--text-faint)]">
-            Live monitoring is unaffected; only this reference page needs the
-            <span className="tabular"> /api/system/info </span> endpoint.
+            Live monitoring is unaffected — only this reference page needs this information.
           </p>
-          <button
-            type="button"
-            onClick={onRetryInfo}
-            className="mt-3 rounded-md border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)]"
-          >
-            Retry
-          </button>
+          <Button className="mt-3" onClick={onRetryInfo}>
+            Try again
+          </Button>
         </Panel>
       </ViewContainer>
     );
@@ -184,9 +182,8 @@ export default function SystemView({ info, infoError, onRetryInfo, data, gpus, g
       */}
       {gpuError ? (
         <Panel title="GPU">
-          <p className="text-[13px] text-[var(--text-muted)]">
-            GPU information is unavailable — {gpuError}
-          </p>
+          <p className="text-[13px] font-medium text-[var(--text)]">{ALERT_COPY.gpu.title}</p>
+          <p className="mt-1 text-[13px] text-[var(--text-muted)]">{gpuError}</p>
         </Panel>
       ) : gpus === null ? (
         <Panel title="GPU">

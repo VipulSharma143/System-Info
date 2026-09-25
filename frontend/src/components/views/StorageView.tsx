@@ -106,7 +106,7 @@ export default function StorageView({ disks }: StorageViewProps) {
       ) : (
         <Panel title="Drives" meta={`${disks.length} total`} noPad>
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="table-flush w-full">
               <thead>
                 <tr>
                   <Th>Drive</Th>

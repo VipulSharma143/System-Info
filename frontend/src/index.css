@@ -1,6 +1,15 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 @import 'tailwindcss';
-@import 'bootstrap/dist/css/bootstrap-grid.min.css' layer(bootstrap);
+
+/*
+  Bootstrap's grid stylesheet used to be imported here. Nothing in the app uses
+  a Bootstrap class, but that file also ships `!important` spacing utilities
+  (.p-4, .px-5, .gap-3 ...) on Bootstrap's scale, which silently overrode
+  Tailwind's utilities of the same name — so `p-4` rendered as 24px instead of
+  16px and `px-5` as 48px instead of 20px. Removing the import makes every
+  spacing class mean what it says, and gives the dashboard the tighter,
+  desktop-appropriate density the components were written for.
+*/
 
 /*
   Design tokens — Signal, a system-monitoring workspace.
@@ -23,11 +32,12 @@
 
   --text: #e8ebf1;
   --text-muted: #8b93a4;
-  --text-faint: #565f70;
+  --text-faint: #6b7385;
 
   --accent: #3ddc97;
   --accent-soft: #3ddc9726;
   --accent-strong: #2fbb7f;
+  --on-accent: #06120c;
 
   --info: #5b9dff;
   --info-soft: #5b9dff26;
@@ -38,11 +48,22 @@
   --critical: #ec5f52;
   --critical-soft: #ec5f5226;
 
+  /* Fallback stacks matter here: the web fonts load over the network, and a
+     desktop app can start offline. Each stack lands on a good native face. */
   --font-ui:
-    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono:
+    'IBM Plex Mono', ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono',
+    monospace;
 
-  --shadow-panel: 0 1px 0 0 rgba(0, 0, 0, 0.4);
+  --radius-card: 10px;
+  --radius-control: 6px;
+
+  --shadow-panel: 0 1px 2px 0 rgba(0, 0, 0, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.025);
+  --shadow-pop: 0 24px 48px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --overlay: rgba(6, 8, 12, 0.62);
+
   --sidebar-w: 232px;
   --sidebar-w-collapsed: 68px;
 }
@@ -59,11 +80,12 @@
 
   --text: #171a21;
   --text-muted: #5b6272;
-  --text-faint: #9aa1af;
+  --text-faint: #7b8292;
 
   --accent: #17a673;
   --accent-soft: #17a67317;
   --accent-strong: #128a5f;
+  --on-accent: #ffffff;
 
   --info: #2f6fe0;
   --info-soft: #2f6fe017;
@@ -75,6 +97,8 @@
   --critical-soft: #d13d3117;
 
   --shadow-panel: 0 1px 2px 0 rgba(20, 24, 32, 0.06);
+  --shadow-pop: 0 24px 48px -12px rgba(20, 24, 32, 0.28), 0 0 0 1px rgba(20, 24, 32, 0.04);
+  --overlay: rgba(23, 26, 33, 0.38);
 }
 
 @theme {
@@ -107,22 +131,40 @@
     height: 100%;
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    /* A desktop window doesn't rubber-band or pull-to-refresh. */
+    overscroll-behavior: none;
   }
 
   ::selection {
     background: var(--accent-soft);
   }
 
+  /* App chrome (buttons, nav) isn't text you select; data values still are. */
+  button,
+  summary,
+  [role='button'] {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
@@ -130,7 +172,17 @@
   ::-webkit-scrollbar-thumb {
     background: var(--border-strong);
     border-radius: 999px;
-    border: 2px solid var(--surface);
+    /* A transparent border + content-box clip gives the thumb an inset look
+       on any background, instead of a ring in one fixed surface colour. */
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-faint);
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   :focus-visible {
@@ -140,6 +192,33 @@
 
   table {
     border-collapse: collapse;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  input[type='checkbox'] {
+    accent-color: var(--accent);
+  }
+}
+
+@layer components {
+  /* The one surface every panel, tile and hero metric is built on. */
+  .card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-panel);
+  }
+
+  /* Tables that sit edge-to-edge inside a card: line their first and last
+     column up with the card header's 16px inset. */
+  .table-flush :is(th, td):first-child {
+    padding-left: 1rem;
+  }
+  .table-flush :is(th, td):last-child {
+    padding-right: 1rem;
   }
 }
 
@@ -151,8 +230,8 @@
   }
 
   .scrollbar-thin::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -162,5 +241,173 @@
       animation-duration: 0.001ms !important;
       transition-duration: 0.001ms !important;
     }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Alerts — SweetAlert2 themed to the tokens above.                    */
+/* SweetAlert2 styles its parts through :where() (zero specificity), so */
+/* these plain class selectors win without !important.                 */
+/* ------------------------------------------------------------------ */
+
+.swal2-container {
+  --swal2-backdrop: var(--overlay);
+  --swal2-container-padding: 1.25rem;
+  font-family: var(--font-ui);
+}
+
+.swal2-container.swal2-backdrop-show {
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.swal2-popup.sysalert {
+  --swal2-show-animation: sysalert-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1);
+  --swal2-hide-animation: sysalert-out 0.12s ease-in forwards;
+
+  --tone: var(--text-muted);
+  --tone-soft: var(--surface-hover);
+
+  padding: 28px 28px 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: center;
+}
+
+.swal2-popup.sysalert--error {
+  --tone: var(--critical);
+  --tone-soft: var(--critical-soft);
+}
+.swal2-popup.sysalert--warning {
+  --tone: var(--warn);
+  --tone-soft: var(--warn-soft);
+}
+.swal2-popup.sysalert--info {
+  --tone: var(--info);
+  --tone-soft: var(--info-soft);
+}
+.swal2-popup.sysalert--question {
+  --tone: var(--accent);
+  --tone-soft: var(--accent-soft);
+}
+
+/* Replace SweetAlert's animated ring icon with a calm tinted disc. */
+.swal2-popup.sysalert .swal2-icon.sysalert__icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--tone-soft);
+  color: var(--tone);
+  box-sizing: border-box;
+}
+.swal2-popup.sysalert .swal2-icon.sysalert__icon .swal2-icon-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  animation: none;
+}
+.swal2-popup.sysalert .swal2-icon.sysalert__icon .swal2-icon-content svg {
+  width: 22px;
+  height: 22px;
+}
+
+.swal2-popup.sysalert .sysalert__title {
+  margin: 0;
+  padding: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+}
+
+.swal2-popup.sysalert .sysalert__text {
+  margin: 8px 0 0;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.swal2-popup.sysalert .sysalert__actions {
+  --swal2-actions-margin: 0;
+  margin: 22px 0 0;
+  gap: 8px;
+  justify-content: center;
+}
+
+.swal2-popup.sysalert .sysalert__btn {
+  min-width: 92px;
+  height: 34px;
+  margin: 0;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: default;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.swal2-popup.sysalert .sysalert__btn--primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.swal2-popup.sysalert .sysalert__btn--primary:hover {
+  background: var(--accent-strong);
+}
+
+.swal2-popup.sysalert .sysalert__btn--secondary {
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--text);
+}
+.swal2-popup.sysalert .sysalert__btn--secondary:hover {
+  background: var(--surface-hover);
+}
+
+.swal2-popup.sysalert .sysalert__btn--danger {
+  background: var(--critical);
+  color: #ffffff;
+}
+.swal2-popup.sysalert .sysalert__btn--danger:hover {
+  background: color-mix(in srgb, var(--critical) 86%, black);
+}
+
+.swal2-popup.sysalert .sysalert__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+@keyframes sysalert-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes sysalert-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
   }
 }

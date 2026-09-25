@@ -1,6 +1,8 @@
-import { ArrowDown, ArrowUp, Gauge, Loader2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Gauge, Play } from 'lucide-react';
 import { useSpeedTest } from '../hooks/useSpeedTest';
 import Panel from './common/Panel';
+import Button from './common/Button';
+import { ALERT_COPY } from '../lib/errors';
 
 function fmt(value: number): string {
   return value.toFixed(2);
@@ -15,7 +17,7 @@ const PHASE_LABEL: Record<string, string> = {
 
 function Meter({ percent }: { percent: number }) {
   return (
-    <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--surface-hover)]">
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-hover)]">
       <div
         className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-200"
         style={{ width: `${Math.min(100, Math.max(2, percent))}%` }}
@@ -56,7 +58,7 @@ function MetricSection({
   color: string;
 }) {
   return (
-    <div className="rounded-md border border-[var(--border)] p-4">
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)]/40 p-4">
       <div className="mb-3 flex items-center gap-1.5 text-[13px] font-medium text-[var(--text)]">
         <Icon className="h-4 w-4" style={{ color }} />
         {label}
@@ -81,15 +83,15 @@ export default function SpeedTestCard() {
       title="Speed test"
       meta=""
       action={
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
+          icon={isRunning ? undefined : Play}
+          loading={isRunning}
           onClick={runSpeedTest}
-          disabled={isRunning}
-          className="flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-[12px] font-medium text-[#0a0c10] transition-opacity hover:opacity-90 disabled:opacity-50"
         >
-          {isRunning && <Loader2 className="h-3 w-3 animate-spin" />}
           {isRunning ? 'Testing…' : 'Run test'}
-        </button>
+        </Button>
       }
     >
       {isRunning && (
@@ -112,9 +114,13 @@ export default function SpeedTestCard() {
       )}
 
       {error && !isRunning && (
-        <p className="text-[13px] text-[var(--critical)]" role="alert">
-          {error}
-        </p>
+        <div role="alert" className="flex items-start gap-2.5 text-[13px]">
+          <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--warn)]" />
+          <div>
+            <p className="font-medium text-[var(--text)]">{ALERT_COPY.speedTest.title}</p>
+            <p className="mt-0.5 text-[var(--text-muted)]">{error}</p>
+          </div>
+        </div>
       )}
 
       {result && !isRunning && !error && (
@@ -133,7 +139,7 @@ export default function SpeedTestCard() {
             mbPerSecond={result.upload.mbPerSecond}
             color="var(--accent)"
           />
-          <div className="rounded-md border border-[var(--border)] p-4">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)]/40 p-4">
             <div className="mb-3 flex items-center gap-1.5 text-[13px] font-medium text-[var(--text)]">
               <Gauge className="h-4 w-4 text-[var(--text-muted)]" />
               Latency

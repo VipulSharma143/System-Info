@@ -51,13 +51,13 @@ function HeroMetric({
   const color = chartColor ?? severityColor(percentForColor);
 
   return (
-    <div className="flex flex-col justify-between rounded-md border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+    <div className="card flex min-w-0 flex-col justify-between px-4 py-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[12px] text-[var(--text-muted)]">{label}</span>
+        <span className="text-[12px] font-medium text-[var(--text-muted)]">{label}</span>
         <Badge tone={statusTone ?? 'muted'}>{status}</Badge>
       </div>
 
-      <div className="mt-2 flex items-baseline gap-1">
+      <div className="mt-2 flex items-baseline gap-1 whitespace-nowrap">
         <span className="tabular text-[26px] font-medium leading-none text-[var(--text)]">
           {value}
         </span>
@@ -112,7 +112,7 @@ export default function OverviewView({ data }: OverviewViewProps) {
   return (
     <ViewContainer>
       {/* ---- Level 1: live state, visible without scrolling ---- */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <HeroMetric
           label="CPU"
           value={data.cpu.usedPercent.toFixed(1)}

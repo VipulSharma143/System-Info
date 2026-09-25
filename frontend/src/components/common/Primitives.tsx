@@ -8,7 +8,7 @@ import { severity } from '../../lib/format';
   type sizes, and card shapes. The rules, applied everywhere:
     - card padding: px-4 py-3  (compact) / p-4 (panel body)
     - grid gap:     gap-3
-    - radius:       rounded-md
+    - radius:       var(--radius-card) via the shared `.card` class
     - label text:   12px muted
     - value text:   20px (tile) / 26px (hero) tabular
     - detail text:  12px faint
@@ -51,7 +51,7 @@ export function StatTile({
   const color = accent ?? severityColor(percentForColor);
 
   return (
-    <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+    <div className="card min-w-0 px-4 py-3">
       <div className="flex items-center gap-1.5">
         {percentForColor !== undefined && (
           <span
@@ -89,7 +89,7 @@ export function InfoRow({
   hint?: string;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-[var(--border)] py-2 last:border-b-0">
+    <div className="flex items-baseline justify-between gap-4 border-b border-[var(--border)] py-2 first:pt-0 last:border-b-0 last:pb-0">
       <span className="shrink-0 text-[12px] text-[var(--text-muted)]">{label}</span>
       <span className="tabular min-w-0 truncate text-right text-[13px] text-[var(--text)]">
         {value}
@@ -128,7 +128,7 @@ export function Badge({
   const { fg, bg } = TONE[tone];
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium"
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium leading-4"
       style={{ color: fg, backgroundColor: bg }}
     >
       {dot && (
@@ -174,7 +174,7 @@ export function TileGrid({
     cols === 2
       ? 'sm:grid-cols-2'
       : cols === 3
-        ? 'sm:grid-cols-2 lg:grid-cols-3'
+        ? 'sm:grid-cols-2 md:grid-cols-3'
         : 'sm:grid-cols-2 xl:grid-cols-4';
 
   return <div className={`grid grid-cols-1 gap-3 ${colClass}`}>{children}</div>;

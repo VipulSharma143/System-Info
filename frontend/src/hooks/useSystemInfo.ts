@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SystemIdentification } from '../types/system';
 import { API_BASE, STARTUP_GRACE_MS } from '../lib/apiConfig';
+import { inlineMessage, reportDiagnostic } from '../lib/errors';
 
 // Fast initial ramp — most cold starts resolve well within this. Once
 // exhausted, retries fall back to a steady interval (below) for the
@@ -35,8 +36,9 @@ export function useSystemInfo() {
           setInfo(data);
           setError(null);
         })
-        .catch((err: Error) => {
+        .catch((err: unknown) => {
           if (cancelled) return;
+          reportDiagnostic('system info request failed', err);
 
           const elapsed = Date.now() - startedAt;
           if (elapsed < STARTUP_GRACE_MS) {
@@ -51,7 +53,7 @@ export function useSystemInfo() {
                 : STEADY_RETRY_MS;
             timer = setTimeout(() => attemptFetch(attemptIndex + 1), delay);
           } else {
-            setError(err.message);
+            setError(inlineMessage('systemInfo'));
           }
         });
     };

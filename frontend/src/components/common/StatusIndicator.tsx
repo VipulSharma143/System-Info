@@ -4,6 +4,8 @@ import type { ConnectionState } from '../../hooks/useSystemMetrics';
 interface StatusIndicatorProps {
   connection: ConnectionState;
   lastUpdated: number | null;
+  /** Status word only, without the "updated Ns ago" readout (for tight toolbars). */
+  compact?: boolean;
 }
 
 // Renders "● Live · updated 2s ago". The relative age is recomputed on its
@@ -11,7 +13,7 @@ interface StatusIndicatorProps {
 // keeps climbing — the user can always tell whether what they're looking at
 // is current. Status is never communicated by colour alone: the dot always
 // has a word next to it.
-export default function StatusIndicator({ connection, lastUpdated }: StatusIndicatorProps) {
+export default function StatusIndicator({ connection, lastUpdated, compact = false }: StatusIndicatorProps) {
   // `now` is held in state and advanced by the interval below rather than
   // read via Date.now() during render — render stays pure, and the ticking
   // is an explicit, cleaned-up subscription to the clock.
@@ -54,11 +56,10 @@ export default function StatusIndicator({ connection, lastUpdated }: StatusIndic
 
   return (
     <span
-      className="inline-flex items-center gap-1.5 text-[12px] text-[var(--text-muted)]"
+      className="inline-flex items-center gap-1.5 whitespace-nowrap text-[12px] font-medium text-[var(--text-muted)]"
       role="status"
-      aria-live="polite"
     >
-      <span className="relative flex h-1.5 w-1.5">
+      <span className="relative flex h-2 w-2">
         {connection === 'live' && (
           <span
             className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
@@ -66,16 +67,21 @@ export default function StatusIndicator({ connection, lastUpdated }: StatusIndic
           />
         )}
         <span
-          className="relative inline-flex h-1.5 w-1.5 rounded-full"
+          className="relative inline-flex h-2 w-2 rounded-full"
           style={{ backgroundColor: color }}
         />
       </span>
 
-      <span style={{ color }}>{label}</span>
+      <span style={{ color }} aria-live="polite">
+        {label}
+      </span>
 
-      {ageLabel !== null && (
+      {!compact && ageLabel !== null && (
         <>
-          <span aria-hidden="true">·</span>
+          <span aria-hidden="true" className="text-[var(--text-faint)]">·</span>
+          <span className="tabular text-[11px] text-[var(--text-faint)]" aria-live="off">
+            {ageLabel === 'just now' ? 'updated just now' : `updated ${ageLabel}`}
+          </span>
         </>
       )}
     </span>

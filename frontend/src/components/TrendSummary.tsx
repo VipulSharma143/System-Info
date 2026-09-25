@@ -67,6 +67,7 @@ export default function TrendSummary({ trend }: { trend: TrendResponse }) {
         <DirectionTag t={cpuTrend} />
       </div>
       {networkEntries.length > 0 && (
+        <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
             <tr>
@@ -85,6 +86,7 @@ export default function TrendSummary({ trend }: { trend: TrendResponse }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </Panel>
   );

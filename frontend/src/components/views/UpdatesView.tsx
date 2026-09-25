@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, CircleCheck, Download, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ChevronRight, CircleCheck, Download, Loader2, RefreshCw } from 'lucide-react';
 import type { UpdaterApi } from '../../hooks/useUpdater';
 import { APP_VERSION } from '../../lib/version';
 import {
@@ -9,6 +9,8 @@ import {
 } from '../../lib/changelog';
 import Panel from '../common/Panel';
 import ReleaseNotes from '../common/ReleaseNotes';
+import Button from '../common/Button';
+import { ALERT_COPY, type AlertKind } from '../../lib/errors';
 import { ViewContainer } from '../common/Primitives';
 
 /*
@@ -73,18 +75,9 @@ export default function UpdatesView({ updater }: { updater: UpdaterApi }) {
         meta={`Installed: v${APP_VERSION}`}
         action={
           supported && (
-            <button
-              type="button"
-              onClick={() => void checkNow()}
-              disabled={busy}
-              className="flex h-7 items-center gap-1.5 rounded-md border border-[var(--border)] px-2.5 text-[12px] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40"
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${phase === 'checking' ? 'animate-spin' : ''}`}
-                strokeWidth={2}
-              />
+            <Button size="sm" icon={RefreshCw} loading={phase === 'checking'} disabled={busy} onClick={() => void checkNow()}>
               Check for updates
-            </button>
+            </Button>
           )
         }
       >
@@ -101,14 +94,9 @@ export default function UpdatesView({ updater }: { updater: UpdaterApi }) {
 
             {phase === 'available' && available && (
               <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => void installNow()}
-                  className="flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-[12px] font-semibold text-[#06120c] hover:bg-[var(--accent-strong)]"
-                >
-                  <Download className="h-3.5 w-3.5" strokeWidth={2.2} />
+                <Button variant="primary" icon={Download} onClick={() => void installNow()}>
                   Download &amp; install v{available.version}
-                </button>
+                </Button>
                 <span className="text-[12px] text-[var(--text-faint)]">
                   Monitoring services are stopped for the install and restart automatically.
                   {IS_LINUX && ' On a .deb install you will be asked for your password.'}
@@ -117,14 +105,9 @@ export default function UpdatesView({ updater }: { updater: UpdaterApi }) {
             )}
 
             {phase === 'error' && available && (
-              <button
-                type="button"
-                onClick={() => void installNow()}
-                className="flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] px-3 text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)]"
-              >
-                <Download className="h-3.5 w-3.5" />
+              <Button icon={Download} onClick={() => void installNow()}>
                 Retry install of v{available.version}
-              </button>
+              </Button>
             )}
 
             {phase === 'downloading' && (
@@ -193,9 +176,10 @@ export default function UpdatesView({ updater }: { updater: UpdaterApi }) {
           {[...previous, ...(archived ?? [])].map((entry) => (
             <details
               key={entry.version}
-              className="group rounded-md border border-[var(--border)] px-3 py-2"
+              className="group rounded-lg border border-[var(--border)] px-3 py-2 transition-colors open:bg-[var(--bg)]/40"
             >
-              <summary className="flex cursor-pointer list-none items-baseline gap-2 text-[13px] text-[var(--text)]">
+              <summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] text-[var(--text)]">
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--text-faint)] transition-transform group-open:rotate-90" />
                 <span className="font-medium">v{entry.version}</span>
                 {entry.date && (
                   <span className="text-[12px] text-[var(--text-faint)]">{entry.date}</span>
@@ -208,19 +192,22 @@ export default function UpdatesView({ updater }: { updater: UpdaterApi }) {
           ))}
 
           {!archived && (
-            <button
-              type="button"
-              onClick={() => void showArchive()}
-              disabled={archiveLoading}
-              className="text-[12px] text-[var(--accent)] hover:underline disabled:opacity-50"
-            >
+            <Button variant="ghost" size="sm" loading={archiveLoading} onClick={() => void showArchive()}>
               {archiveLoading ? 'Loading…' : 'Show older releases'}
-            </button>
+            </Button>
           )}
         </div>
       </Panel>
     </ViewContainer>
   );
+}
+
+// The hook stores the catalog sentence for whichever step failed; find the
+// matching catalog title so the inline state mirrors the alert exactly.
+function failureTitle(text: string | null): string {
+  const kinds: AlertKind[] = ['updateCheck', 'updateDownload', 'updateInstall'];
+  const match = kinds.find((kind) => ALERT_COPY[kind].text === text);
+  return match ? ALERT_COPY[match].title : 'Something went wrong';
 }
 
 function StatusLine({
@@ -270,10 +257,13 @@ function StatusLine({
   }
   if (phase === 'error') {
     return (
-      <p role="alert" className="flex items-start gap-2 text-[13px] text-[var(--critical)]">
-        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <span className="whitespace-pre-wrap break-words">{error ?? 'Something went wrong.'}</span>
-      </p>
+      <div role="alert" className="flex items-start gap-2.5 text-[13px]">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--critical)]" />
+        <div>
+          <p className="font-medium text-[var(--text)]">{failureTitle(error)}</p>
+          <p className="mt-0.5 text-[var(--text-muted)]">{error ?? 'Something went wrong. Please try again.'}</p>
+        </div>
+      </div>
     );
   }
   return (
@@ -288,8 +278,8 @@ function StatusLine({
 export function UpdateInstallingOverlay({ version }: { version?: string }) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[var(--bg)]/95 text-center">
-      <Loader2 className="h-6 w-6 animate-spin text-[var(--accent)]" />
-      <p className="text-[15px] text-[var(--text)]">Installing System Info v{version}</p>
+      <Loader2 className="h-7 w-7 animate-spin text-[var(--accent)]" />
+      <p className="text-[16px] font-semibold text-[var(--text)]">Installing System Info v{version}</p>
       <p className="max-w-sm text-[13px] text-[var(--text-faint)]">
         Services have been stopped. The app will close and reopen on its own when the update is
         done — please don&apos;t close this window.

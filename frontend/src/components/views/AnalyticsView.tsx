@@ -5,6 +5,7 @@ import TrendSummary from '../TrendSummary';
 import StatsSummary from '../StatsSummary';
 import BottleneckTimeline from '../BottleneckTimeline';
 import Panel from '../common/Panel';
+import Segmented from '../common/Segmented';
 import { LoadingState } from '../common/States';
 import { ViewContainer } from '../common/Primitives';
 
@@ -42,34 +43,19 @@ export default function AnalyticsView({ findNearest }: AnalyticsViewProps) {
     (stats?.count ?? 0) === 0;
 
   const rangeSelector = (
-    <div
-      className="flex items-center gap-0.5 rounded-md border border-[var(--border)] p-0.5"
-      role="group"
-      aria-label="Analytics time range"
-    >
-      {RANGES.map((r) => (
-        <button
-          key={r.minutes}
-          type="button"
-          onClick={() => setMinutes(r.minutes)}
-          aria-pressed={minutes === r.minutes}
-          className={`rounded px-2.5 py-1 text-[12px] transition-colors ${
-            minutes === r.minutes
-              ? 'bg-[var(--surface-hover)] text-[var(--text)]'
-              : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
-          }`}
-        >
-          {r.label}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      ariaLabel="Analytics time range"
+      value={minutes}
+      onChange={setMinutes}
+      options={RANGES.map((r) => ({ value: r.minutes, label: r.label }))}
+    />
   );
 
   return (
     <ViewContainer>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-[13px] font-medium text-[var(--text)]">Historical analysis</h2>
+          <h2 className="text-[13px] font-semibold text-[var(--text)]">Historical analysis</h2>
           <p className="text-[12px] text-[var(--text-faint)]">
             From locally stored snapshots — no external database involved.
           </p>

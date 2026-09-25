@@ -1,6 +1,9 @@
 import { Play, Power, Square } from 'lucide-react';
 import { isTauri } from '../../lib/tauri';
+import { confirmExit, showAlert } from '../../lib/alerts';
+import { reportDiagnostic, type AlertKind } from '../../lib/errors';
 import { useServiceControl, type ServiceHealth } from '../../hooks/useServiceControl';
+import Button from '../common/Button';
 
 // Renders nothing when this bundle is running as a plain browser tab (the
 // legacy launcher path) — there is no process for these buttons to control
@@ -14,52 +17,68 @@ export default function ServiceControls() {
 
   const { label, color, filled } = summarize(status.backend, status.analytics);
 
-  const handleExit = () => {
-    if (window.confirm('Exit System Info? This stops monitoring and closes the app.')) {
-      void exit();
+  // start/stop reject if the desktop shell can't complete the request. Nothing
+  // used to surface that; now the user gets a plain-language alert and the
+  // technical cause goes to the developer console.
+  const run = async (action: () => Promise<void>, failure: AlertKind) => {
+    try {
+      await action();
+    } catch (err) {
+      reportDiagnostic(`${failure} failed`, err);
+      void showAlert(failure);
     }
   };
 
+  const handleExit = async () => {
+    if (await confirmExit()) void exit();
+  };
+
   return (
-    <div className="flex items-center gap-3">
-      <span className="inline-flex items-center gap-1.5 text-[12px] text-[var(--text-muted)]">
+    <div className="flex items-center gap-2">
+      <span className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[12px] font-medium">
         <span
-          className="inline-flex h-1.5 w-1.5 rounded-full"
+          className="inline-flex h-2 w-2 shrink-0 rounded-full"
           style={{ backgroundColor: filled ? color : 'transparent', border: `1.5px solid ${color}` }}
         />
-        <span style={{ color }}>{label}</span>
+        <span className="max-w-[9rem] truncate xl:max-w-none" style={{ color }}>
+          {label}
+        </span>
       </span>
 
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => void start()}
+      <div className="flex items-center gap-0.5 rounded-[var(--radius-control)] border border-[var(--border)] p-0.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={Play}
+          collapseLabel
+          onClick={() => void run(start, 'serviceStart')}
           disabled={pending || (status.backend === 'running' && status.analytics !== 'stopped')}
-          title="Start/resume monitoring services"
-          className="flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40"
+          title="Start or resume monitoring services"
         >
-          <Play className="h-3.5 w-3.5" strokeWidth={2} />
           Start
-        </button>
-        <button
-          type="button"
-          onClick={() => void stop()}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={Square}
+          collapseLabel
+          onClick={() => void run(stop, 'serviceStop')}
           disabled={pending || (status.backend === 'stopped' && status.analytics === 'stopped')}
           title="Stop monitoring services (keeps the window open)"
-          className="flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40"
         >
-          <Square className="h-3.5 w-3.5" strokeWidth={2} />
           Stop
-        </button>
-        <button
-          type="button"
-          onClick={handleExit}
+        </Button>
+        <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-[var(--border)]" />
+        <Button
+          variant="danger"
+          size="sm"
+          icon={Power}
+          collapseLabel
+          onClick={() => void handleExit()}
           title="Stop services and close System Info"
-          className="flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-[var(--critical)] hover:bg-[var(--surface-hover)]"
         >
-          <Power className="h-3.5 w-3.5" strokeWidth={2} />
           Exit
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -25,6 +25,7 @@ export default function SpikeDetail({ snapshot, spikeTime }: SpikeDetailProps) {
         {snapshot.cpuPercent.toFixed(1)}% · sorted by memory — per-process CPU% isn't exposed by the
         backend yet, so this shows what was running, not a confirmed cause
       </p>
+      <div className="overflow-x-auto">
       <table className="w-full border-collapse">
         <thead>
           <tr>
@@ -43,6 +44,7 @@ export default function SpikeDetail({ snapshot, spikeTime }: SpikeDetailProps) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

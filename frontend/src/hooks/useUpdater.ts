@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Update } from '@tauri-apps/plugin-updater';
 import { isTauri } from '../lib/tauri';
+import { inlineMessage, reportDiagnostic, type AlertKind } from '../lib/errors';
+import { showAlert } from '../lib/alerts';
 
 /*
   In-app updates, end to end.
@@ -69,10 +71,12 @@ function readAutoInstall(): boolean {
   }
 }
 
-function describe(err: unknown): string {
-  if (typeof err === 'string') return err;
-  if (err instanceof Error) return err.message;
-  return 'Unknown error';
+// Raw updater errors (URLs, TLS/DNS causes, installer output) are for developers.
+// They go to the console; the UI shows catalog copy and raises a friendly alert.
+function fail(kind: AlertKind, context: string, err: unknown): string {
+  reportDiagnostic(context, err);
+  void showAlert(kind);
+  return inlineMessage(kind);
 }
 
 export function useUpdater(enabled: boolean) {
@@ -114,7 +118,7 @@ export function useUpdater(enabled: boolean) {
         }
       });
     } catch (err) {
-      setError(`Download failed: ${describe(err)}`);
+      setError(fail('updateDownload', 'update download failed', err));
       changePhase('error');
       return;
     }
@@ -134,7 +138,7 @@ export function useUpdater(enabled: boolean) {
       } catch {
         /* nothing more to do — the error below is what matters */
       }
-      setError(`Install failed: ${describe(err)}`);
+      setError(fail('updateInstall', 'update install failed', err));
       changePhase('error');
     }
   }, [supported, changePhase]);
@@ -185,14 +189,14 @@ export function useUpdater(enabled: boolean) {
           // The error that crosses the IPC boundary is only the outermost
           // message ("error sending request for url ..."). Ask Rust to redo
           // the check and report the whole cause chain (DNS/TLS/timeout/...).
-          let details = '';
+          // That chain is developer diagnostics: it is logged, never shown.
           try {
             const { invoke } = await import('@tauri-apps/api/core');
-            details = await invoke<string>('diagnose_update_check');
+            reportDiagnostic('update check cause chain', await invoke<string>('diagnose_update_check'));
           } catch {
             /* diagnostics are best-effort */
           }
-          setError(details ? `${describe(err)}\n${details}` : describe(err));
+          setError(fail('updateCheck', 'update check failed', err));
           changePhase('error');
         } else {
           console.warn('[updater] automatic update check failed:', err);

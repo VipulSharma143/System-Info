@@ -5,6 +5,7 @@ import Panel from '../common/Panel';
 import { Th, Td, Tr } from '../common/Table';
 import { EmptyState } from '../common/States';
 import SearchControl from '../common/SearchControl';
+import Segmented from '../common/Segmented';
 import { StatTile, TileGrid, ViewContainer } from '../common/Primitives';
 
 interface ProcessesViewProps {
@@ -12,6 +13,12 @@ interface ProcessesViewProps {
 }
 
 type SortKey = 'memory' | 'name' | 'pid';
+
+const SORT_OPTIONS = [
+  { value: 'memory', label: 'Memory' },
+  { value: 'name', label: 'Name' },
+  { value: 'pid', label: 'PID' },
+] as const;
 
 /*
   Processes is a dense table by design — it's the one page where a long
@@ -49,22 +56,6 @@ export default function ProcessesView({ processes }: ProcessesViewProps) {
       ? processes.reduce((a, b) => (b.memoryMB > a.memoryMB ? b : a))
       : null;
 
-  const sortButton = (key: SortKey, label: string) => (
-    <button
-      key={key}
-      type="button"
-      onClick={() => setSortKey(key)}
-      aria-pressed={sortKey === key}
-      className={`rounded px-2 py-1 text-[12px] transition-colors ${
-        sortKey === key
-          ? 'bg-[var(--surface-hover)] text-[var(--text)]'
-          : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
-      }`}
-    >
-      {label}
-    </button>
-  );
-
   return (
     <ViewContainer>
       <TileGrid cols={3}>
@@ -86,12 +77,13 @@ export default function ProcessesView({ processes }: ProcessesViewProps) {
         meta={`${filtered.length} of ${processes.length}`}
         action={
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-0.5" role="group" aria-label="Sort processes">
-              <span className="mr-1 text-[11px] text-[var(--text-faint)]">Sort</span>
-              {sortButton('memory', 'Memory')}
-              {sortButton('name', 'Name')}
-              {sortButton('pid', 'PID')}
-            </div>
+            <span className="hidden text-[12px] text-[var(--text-faint)] lg:inline">Sort by</span>
+            <Segmented
+              ariaLabel="Sort processes"
+              value={sortKey}
+              onChange={setSortKey}
+              options={SORT_OPTIONS}
+            />
             <SearchControl value={query} onChange={setQuery} placeholder="Filter by name or PID" />
           </div>
         }
@@ -101,10 +93,10 @@ export default function ProcessesView({ processes }: ProcessesViewProps) {
           <EmptyState icon={ListTree} title="No process data yet" />
         ) : (
           <div className="max-h-[calc(100vh-320px)] min-h-[240px] overflow-y-auto scrollbar-thin">
-            <table className="w-full border-collapse">
-              <thead className="sticky top-0 z-10 bg-[var(--surface)]">
+            <table className="table-flush w-full border-collapse">
+              <thead className="sticky top-0 z-10 bg-[var(--surface)] shadow-[0_1px_0_var(--border)]">
                 <tr>
-                  <Th className="w-24">PID</Th>
+                  <Th className="w-28">PID</Th>
                   <Th>Process</Th>
                   <Th className="w-32 text-right">Memory</Th>
                 </tr>

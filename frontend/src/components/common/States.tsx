@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import { AlertTriangle, Inbox, Loader2, WifiOff } from 'lucide-react';
+import { inlineMessage, safeMessage } from '../../lib/errors';
 
 export function EmptyState({
   title,
@@ -33,27 +34,36 @@ export function LoadingState({ label = 'Loading' }: { label?: string }) {
 }
 
 export function ErrorState({ message }: { message: string }) {
+  // Belt and braces: callers pass catalog copy, but if anything technical
+  // (a URL, a port, "Failed to fetch") ever slipped through, show the
+  // generic sentence instead of leaking it.
+  const text = safeMessage(message, inlineMessage('systemInfo'));
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-md border border-[var(--critical)]/30 bg-[var(--critical-soft,transparent)] px-4 py-3 text-[13px] text-[var(--critical)]"
-      style={{ backgroundColor: 'color-mix(in srgb, var(--critical) 10%, transparent)' }}
+      className="flex items-start gap-2.5 rounded-[var(--radius-control)] border border-[var(--critical)]/30 px-4 py-3 text-[13px] leading-relaxed text-[var(--critical)]"
+      style={{ backgroundColor: 'color-mix(in srgb, var(--critical) 9%, transparent)' }}
     >
-      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>{message}</span>
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>{text}</span>
     </div>
   );
 }
 
-export function OfflineBanner({ message }: { message: string }) {
+export function OfflineBanner() {
   return (
     <div
       role="alert"
-      className="flex items-center gap-2 rounded-md border border-[var(--critical)]/30 px-4 py-2.5 text-[13px] text-[var(--critical)]"
-      style={{ backgroundColor: 'color-mix(in srgb, var(--critical) 8%, transparent)' }}
+      className="flex items-center gap-2.5 rounded-[var(--radius-control)] border border-[var(--warn)]/30 px-4 py-2.5 text-[13px] text-[var(--text)]"
+      style={{ backgroundColor: 'color-mix(in srgb, var(--warn) 8%, transparent)' }}
     >
-      <WifiOff className="h-3.5 w-3.5 shrink-0" />
-      Backend unreachable — {message}
+      <WifiOff className="h-4 w-4 shrink-0 text-[var(--warn)]" />
+      <span>
+        <strong className="font-semibold">Live updates paused.</strong>{' '}
+        <span className="text-[var(--text-muted)]">
+          Showing the last data received. This page will refresh on its own once the connection is back.
+        </span>
+      </span>
     </div>
   );
 }

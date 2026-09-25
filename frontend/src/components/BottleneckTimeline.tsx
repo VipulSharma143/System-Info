@@ -54,6 +54,7 @@ export default function BottleneckTimeline({ bottlenecks, findNearest }: Bottlen
       {!hasAny && <EmptyState title="No bottleneck episodes in this window" />}
 
       {sustained.length > 0 && (
+        <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
             <tr>
@@ -99,6 +100,7 @@ export default function BottleneckTimeline({ bottlenecks, findNearest }: Bottlen
             })}
           </tbody>
         </table>
+        </div>
       )}
 
       {spikes.length > 0 && (

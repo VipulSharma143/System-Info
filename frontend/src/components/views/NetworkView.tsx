@@ -148,7 +148,7 @@ export default function NetworkView({ network }: NetworkViewProps) {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="table-flush w-full">
               <thead>
                 <tr>
                   <Th>Interface</Th>

@@ -1,9 +1,13 @@
 import type { ReactNode, ThHTMLAttributes, TdHTMLAttributes } from 'react';
 
+// Tables that fill a card edge to edge should also carry the `table-flush`
+// class (see index.css) so their first/last columns align with the card's
+// header inset.
+
 export function Th({ children, className = '', ...rest }: ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
-      className={`border-b border-[var(--border)] px-3 py-2 text-left text-[12px] font-normal text-[var(--text-faint)] ${className}`}
+      className={`whitespace-nowrap border-b border-[var(--border)] px-3 py-2 text-left text-[12px] font-medium text-[var(--text-muted)] ${className}`}
       {...rest}
     >
       {children}
@@ -30,7 +34,7 @@ export function Tr({
 }: React.HTMLAttributes<HTMLTableRowElement>) {
   return (
     <tr
-      className={`border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-hover)] ${className}`}
+      className={`border-b border-[var(--border)] transition-colors last:border-0 hover:bg-[var(--surface-hover)] ${className}`}
       {...rest}
     >
       {children}

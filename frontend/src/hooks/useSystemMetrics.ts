@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SystemSnapshot } from '../types/system';
 import { API_BASE, STARTUP_GRACE_MS } from '../lib/apiConfig';
+import { inlineMessage, reportDiagnostic } from '../lib/errors';
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -64,9 +65,12 @@ export function useSystemMetrics() {
             lastUpdated: Date.now(),
           });
         })
-        .catch((err: Error) => {
+        .catch((err: unknown) => {
           if (cancelled) return;
           failures.current += 1;
+          // The raw cause stays in the developer console; the UI only ever
+          // receives plain-language copy (lib/errors.ts).
+          reportDiagnostic('system metrics request failed', err);
 
           if (!hasLoadedOnce.current) {
             // Nothing has ever loaded yet — this is very likely the
@@ -78,7 +82,7 @@ export function useSystemMetrics() {
             setState((prev) => ({
               ...prev,
               connection: 'connecting',
-              startupError: elapsed >= STARTUP_GRACE_MS ? err.message : null,
+              startupError: elapsed >= STARTUP_GRACE_MS ? inlineMessage('systemInfo') : null,
             }));
             return;
           }
@@ -89,7 +93,7 @@ export function useSystemMetrics() {
           // reconnecting rather than blanking the dashboard.
           setState((prev) => ({
             ...prev,
-            error: err.message,
+            error: inlineMessage('connectionLost'),
             connection:
               failures.current >= OFFLINE_AFTER_FAILURES ? 'offline' : 'reconnecting',
           }));

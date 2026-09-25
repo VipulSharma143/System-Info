@@ -13,6 +13,31 @@ All notable changes to SystemInfo are documented here.
 ### Known Issues
 
 
+## [2.2.2] - 2026-09-25
+
+### Added
+
+* **Clear, friendly error messages.** When something goes wrong, System Info now shows a simple pop-up that explains what happened and what to do next, instead of technical text. This covers: system information not loading, live updates pausing, graphics details being unavailable, update checks/downloads/installs failing, the speed test failing, and monitoring failing to start or stop. Where it helps, the pop-up has a **Try again** button.
+* **Smarter pop-ups.** You will never see the same message stacked several times, and the "Live updates paused" message closes by itself as soon as the connection is back. It also stays quiet when the pause is expected, such as when you stop monitoring yourself or while an update is installing.
+
+### Changed
+
+* **Cleaner, more compact look across every tab.** Spacing, alignment, sizes, borders and cards are now consistent everywhere. More fits on screen, and the Overview tab now shows everything at once on a typical laptop without scrolling.
+* **Consistent buttons and controls.** All buttons, the time-range picker in Analytics and the sort options in Processes now look and behave the same way.
+* **Better use of small windows.** In a narrow window, the top-bar buttons switch to icons only, cards rearrange to fit, and wide tables scroll inside their own card instead of pushing the whole page sideways.
+* **Clearer live status.** The status indicator now shows how fresh your data is, for example "Live · updated just now".
+* **Exit confirmation** now uses the same styled pop-up as the rest of the app.
+* **Easier to read.** Dimmer text has better contrast in both light and dark themes, and the window title now correctly reads "System Info".
+
+### Fixed
+
+* **Technical messages are no longer shown.** Web addresses, network error text and other developer-style details no longer appear anywhere in the app, even when something fails.
+* **Start and Stop no longer fail silently.** If starting or stopping monitoring doesn't work, you are now told.
+* **Stray dot next to the Live indicator** has been removed.
+* **Previous releases** in the Updates tab now show an arrow so it is clear that each one can be opened.
+
+
+
 ## [2.2.1] - 2026-09-24
 
 ### Changed

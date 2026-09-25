@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GpuInfo } from '../types/system';
 import { API_BASE, STARTUP_GRACE_MS } from '../lib/apiConfig';
+import { inlineMessage, reportDiagnostic } from '../lib/errors';
 
 // GPU gets its own polling cadence (spec §26/§27), separate from the 1s
 // CPU/RAM loop — sampling "GPU Engine" performance counters takes its own
@@ -41,16 +42,17 @@ export function useSystemGpu() {
           setError(null);
           setStartupError(null);
         })
-        .catch((err: Error) => {
+        .catch((err: unknown) => {
           if (cancelled) return;
           failures.current += 1;
+          reportDiagnostic('gpu request failed', err);
 
           if (!hasLoadedOnce.current) {
             // Still within the startup window — the backend/native engine
             // may simply not be ready yet. Stay quiet until the shared
             // grace period genuinely runs out.
             const elapsed = Date.now() - startedAt;
-            if (elapsed >= STARTUP_GRACE_MS) setStartupError(err.message);
+            if (elapsed >= STARTUP_GRACE_MS) setStartupError(inlineMessage('systemInfo'));
             return;
           }
 
@@ -58,7 +60,7 @@ export function useSystemGpu() {
           // data has already loaded once is a page-scoped concern (spec
           // §23) — it never blocks or blanks the rest of the System tab,
           // only its own GPU section, and only after a few failed polls.
-          if (failures.current >= OFFLINE_AFTER_FAILURES) setError(err.message);
+          if (failures.current >= OFFLINE_AFTER_FAILURES) setError(inlineMessage('gpu'));
         });
     };
 

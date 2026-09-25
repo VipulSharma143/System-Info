@@ -1,5 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { SpeedTestResult } from "../types/speedtest";
+import { inlineMessage, reportDiagnostic } from "../lib/errors";
+import { showAlert } from "../lib/alerts";
 
 type SpeedTestStatus = "idle" | "running" | "success" | "error";
 
@@ -281,8 +283,11 @@ export function useSpeedTest(): UseSpeedTestResult {
 
       setStatus("success");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unable to complete the speed test.";
-      setError(message);
+      // The thrown message can name a status code or the test server; that
+      // detail goes to the developer console, the user gets plain language.
+      reportDiagnostic("speed test failed", err);
+      setError(inlineMessage("speedTest"));
+      void showAlert("speedTest");
       setStatus("error");
       setPhase("idle");
     } finally {

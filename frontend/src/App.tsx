@@ -7,6 +7,7 @@ import { useServiceControl } from './hooks/useServiceControl';
 import { useTheme } from './hooks/useTheme';
 import { useProcessHistory } from './hooks/useProcessHistory';
 import { useUpdater } from './hooks/useUpdater';
+import { useFailureAlerts } from './hooks/useFailureAlerts';
 import { isTauri } from './lib/tauri';
 
 import AppShell from './components/layout/AppShell';
@@ -24,6 +25,7 @@ import UpdatesView, { UpdateInstallingOverlay } from './components/views/Updates
 import { OfflineBanner } from './components/common/States';
 import StatusIndicator from './components/common/StatusIndicator';
 import ServiceControls from './components/layout/ServiceControls';
+import Button from './components/common/Button';
 
 // Order matters — this is the reading order of the product: what's
 // happening now, what happened over time, then the per-subsystem detail
@@ -117,7 +119,18 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
   // any source has loaded once, a later disconnect is steady-state
   // territory (OfflineBanner / SystemView's own error panels), not this.
   const startupFailed = !initialLoadComplete && Boolean(metricsStartupError || gpuStartupError || infoError);
-  const startupErrorMessage = metricsStartupError ?? gpuStartupError ?? infoError ?? undefined;
+
+  // Friendly SweetAlert notifications for genuine failures. This only observes
+  // the error state the hooks above already produce — no requests, no polling
+  // changes. `quiet` covers moments when a dropped connection is expected: the
+  // user pressed Stop, services are still starting, or an update is installing.
+  useFailureAlerts({
+    startupFailed,
+    onRetryStartup,
+    connection,
+    gpuHasError: Boolean(gpuError),
+    quiet: updater.phase === 'installing' || (isTauri() && serviceStatus.backend !== 'running'),
+  });
 
   if (!initialLoadComplete || !data || !info || !gpus) {
     const steps = buildStartupSteps({ servicesReady, infoLoaded, metricsLoaded, gpuLoaded });
@@ -125,7 +138,6 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
       <StartupScreen
         steps={steps}
         failed={startupFailed}
-        errorMessage={startupErrorMessage}
         onRetry={onRetryStartup}
       />
     );
@@ -145,9 +157,10 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
       title={TITLES[activeSection].title}
       description={TITLES[activeSection].description}
       topBarAction={
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <ServiceControls />
-          <StatusIndicator connection={connection} lastUpdated={lastUpdated} />
+          {isTauri() && <span aria-hidden="true" className="h-4 w-px bg-[var(--border)]" />}
+          <StatusIndicator connection={connection} lastUpdated={lastUpdated} compact />
         </div>
       }
     >
@@ -166,11 +179,12 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
           <div className="px-4 pt-4">
             <div
               role="status"
-              className="flex flex-wrap items-center gap-3 rounded-md border border-[var(--accent)]/30 px-4 py-2.5 text-[13px] text-[var(--text)]"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[var(--radius-control)] border border-[var(--accent)]/30 px-4 py-2 text-[13px] text-[var(--text)]"
               style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 8%, transparent)' }}
             >
               <span>
-                System Info <strong>v{updater.available.version}</strong> is available.
+                System Info <strong className="font-semibold">v{updater.available.version}</strong> is
+                available.
               </span>
               <button
                 type="button"
@@ -179,20 +193,21 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
               >
                 View details
               </button>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto"
                 onClick={() => setDismissedBanner(updater.available!.version)}
-                className="ml-auto text-[12px] text-[var(--text-faint)] hover:text-[var(--text)]"
               >
                 Dismiss
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
       {error && connection === 'offline' && updater.phase !== 'installing' && (
         <div className="px-4 pt-4">
-          <OfflineBanner message={error} />
+          <OfflineBanner />
         </div>
       )}
 
