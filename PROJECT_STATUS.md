@@ -12,28 +12,28 @@
 
 ## 📑 Contents
 
-1. [Current Architecture](#current-architecture)
-2. [Backend Status](#backend-status)
-3. [Frontend Status](#frontend-status)
-4. [Windows Desktop Integration](#windows-desktop-integration)
-5. [Hardware, GPU & Battery Monitoring](#hardware-gpu--battery-monitoring)
-6. [Storage](#storage)
-7. [API Surface](#api-surface)
-8. [Speed Test](#speed-test)
-9. [Languages Used](#languages-used)
-10. [Build & Packaging](#build--packaging)
-11. [Release Pipeline](#release-pipeline)
-12. [Version & Changelog Management](#version--changelog-management)
-13. [Testing / Validation](#testing--validation)
-14. [Known Limitations](#known-limitations)
-15. [Historical Architecture](#historical-architecture)
-16. [Phase Log](#phase-log)
-17. [Performance Metrics](#performance-metrics)
-18. [Remaining Work](#remaining-work)
+1. [Current Architecture](#-current-architecture)
+2. [Backend Status](#-backend-status)
+3. [Frontend Status](#-frontend-status)
+4. [Windows Desktop Integration](#-windows-desktop-integration)
+5. [Hardware, GPU & Battery Monitoring](#-hardware-gpu--battery-monitoring)
+6. [Storage](#-storage)
+7. [API Surface](#-api-surface)
+8. [Speed Test](#-speed-test)
+9. [Languages Used](#-languages-used)
+10. [Build & Packaging](#-build--packaging)
+11. [Release Pipeline](#-release-pipeline)
+12. [Version & Changelog Management](#-version--changelog-management)
+13. [Testing / Validation](#-testing--validation)
+14. [Known Limitations](#-known-limitations)
+15. [Historical Architecture](#-historical-architecture)
+16. [Phase Log](#-phase-log)
+17. [Performance Metrics](#-performance-metrics)
+18. [Remaining Work](#-remaining-work)
 
 ---
 
-## Current Architecture
+## 🏗️ Current Architecture
 
 ```mermaid
 flowchart TB
@@ -54,11 +54,11 @@ flowchart TB
     PY -- reads --> STORE
 ```
 
-This is the fifth architectural shape the project has taken (see [Historical Architecture](#historical-architecture) for the earlier four). Shape 4 brought the Tauri native-window model to Windows only; this pass (Shape 5) brought Linux onto the same model — the `.deb`/AppImage now install and run the Tauri shell directly (no `sudo`, no system-wide `uvicorn`, no browser tab, no manual `localhost:5173`), replacing the `start-all.sh`-in-a-terminal production path. `process.rs`, `commands.rs`, and the rest of the Rust shell were already fully cross-platform going into this pass (Windows-only bits like `win32job` were already `cfg(windows)`-gated) — what changed was the Linux CI job (`build-linux` in `release.yml`, previously a hand-rolled `dpkg-deb`/`appimagetool` script wrapping `start-all.sh`) and `tauri.conf.json`'s bundle targets/icons, not the shell's own logic.
+This is the fifth architectural shape the project has taken (see [Historical Architecture](#-historical-architecture) for the earlier four). Shape 4 brought the Tauri native-window model to Windows only; this pass (Shape 5) brought Linux onto the same model — the `.deb`/AppImage now install and run the Tauri shell directly (no `sudo`, no system-wide `uvicorn`, no browser tab, no manual `localhost:5173`), replacing the `start-all.sh`-in-a-terminal production path. `process.rs`, `commands.rs`, and the rest of the Rust shell were already fully cross-platform going into this pass (Windows-only bits like `win32job` were already `cfg(windows)`-gated) — what changed was the Linux CI job (`build-linux` in `release.yml`, previously a hand-rolled `dpkg-deb`/`appimagetool` script wrapping `start-all.sh`) and `tauri.conf.json`'s bundle targets/icons, not the shell's own logic.
 
 ---
 
-## Backend Status
+## ⚙️ Backend Status
 
 `backend/SystemMonitor.Api` — ASP.NET Core Minimal API, .NET 10.
 
@@ -79,7 +79,7 @@ This is the fifth architectural shape the project has taken (see [Historical Arc
 
 ---
 
-## Frontend Status
+## 🎨 Frontend Status
 
 `frontend/src` — React 19, TypeScript, Vite 8.
 
@@ -98,7 +98,7 @@ This is the fifth architectural shape the project has taken (see [Historical Arc
 
 ---
 
-## Windows Desktop Integration
+## 🪟 Windows Desktop Integration
 
 | Component | Status | Notes |
 |---|:-:|---|
@@ -111,7 +111,7 @@ This is the fifth architectural shape the project has taken (see [Historical Arc
 
 ---
 
-## Hardware, GPU & Battery Monitoring
+## 🔋 Hardware, GPU & Battery Monitoring
 
 **GPU — two independent detection paths exist:**
 
@@ -133,7 +133,7 @@ These have not yet been unified — the Windows path is the newer, more structur
 
 ---
 
-## Storage
+## 📦 Storage
 
 **Before → Why → Now**, in detail:
 
@@ -147,7 +147,7 @@ No retention/TTL policy exists yet — `data/snapshots/` grows unbounded (docume
 
 ---
 
-## API Surface
+## 🔌 API Surface
 
 | Group | Routes | Backing |
 |---|---|---|
@@ -156,17 +156,17 @@ No retention/TTL policy exists yet — `data/snapshots/` grows unbounded (docume
 | System (static) | `GET /api/system/info`, `GET /api/system/gpu` | `ISystemInfoProvider.GetSystemIdentity()` / `.GetGpus()` |
 | Analytics | `GET /api/analytics/{stats,trend,bottlenecks}` | Proxies to `analytics_service.py` (FastAPI, `:8001`), graceful `503` if unreachable |
 | Native diagnostics | `GET /api/native/{test,cpuinfo,cpu,cputemp,gpu,battery,fan,benchmark,asmtest,simd-benchmark}` | P/Invoke into the C++/Assembly native engine |
-| Speed test | `GET /api/speed-test` | Server-side Cloudflare-based measurement — **implemented, not currently called by the frontend** (see [Speed Test](#speed-test)) |
+| Speed test | `GET /api/speed-test` | Server-side Cloudflare-based measurement — **implemented, not currently called by the frontend** (see [Speed Test](#-speed-test)) |
 
 ---
 
-## Speed Test
+## ⚡ Speed Test
 
 `SpeedTestCard.tsx` / `useSpeedTest.ts` perform the download/upload/ping measurement **client-side**, directly against `https://speed.cloudflare.com`, bypassing the local backend entirely so results aren't skewed by a loopback hop. `backend/SystemMonitor.Api/Endpoints/SpeedTestEndpoints.cs` implements an equivalent server-side measurement (10 MB download / 5 MB upload against the same Cloudflare endpoints) at `GET /api/speed-test`, fully functional, but it is not currently wired into the frontend — both paths exist in the repository, only one is in active use.
 
 ---
 
-## Languages Used
+## 💻 Languages Used
 
 Application/source languages present in the repository, by area:
 
@@ -181,7 +181,7 @@ Application/source languages present in the repository, by area:
 
 ---
 
-## Build & Packaging
+## 🛠️ Build & Packaging
 
 **Before:** a whole-repository Inno Setup installer (`SystemInfo.iss`) requiring Node/npm/Python/pip/the .NET SDK on the end-user machine → replaced by a self-contained `dotnet publish` plus a C# console launcher (`launcher/Program.cs`) that started the services and opened a browser tab → replaced again by the current Tauri 2 model.
 
@@ -191,7 +191,7 @@ Application/source languages present in the repository, by area:
 
 ---
 
-## Release Pipeline
+## 🚀 Release Pipeline
 
 Single workflow, `.github/workflows/release.yml`, four jobs:
 
@@ -224,7 +224,7 @@ Both build jobs now follow the same shape: native engine → self-contained back
 
 ---
 
-## Version & Changelog Management
+## 🔢 Version & Changelog Management
 
 **Version sync:** `scripts/sync-version.mjs` propagates `CHANGELOG.md`'s top version to `frontend/package.json`, `frontend/src-tauri/tauri.conf.json`, `frontend/src-tauri/Cargo.toml`, `Directory.Build.props`, and `SystemInfo.iss`. `scripts/check-version.mjs` fails loudly if any of them drift — this is what CI runs, and it currently passes clean at `2.1.2` across all five files.
 
@@ -232,7 +232,7 @@ Both build jobs now follow the same shape: native engine → self-contained back
 
 ---
 
-## Testing / Validation
+## ✅ Testing / Validation
 
 - Native cross-compilation for Windows — verified in isolation using `mingw-w64`/`nasm` in a Linux sandbox, producing a real PE32+ DLL exporting all expected functions; this is not the same as a Windows-hosted build or runtime test
 - Windows installer / runtime behavior — verified for the pre-Tauri (`1.0.4`) packaging model; **not yet independently re-verified for the current Tauri-based packaging**
@@ -244,13 +244,13 @@ Both build jobs now follow the same shape: native engine → self-contained back
 
 ---
 
-## In-App Updates (added 2.2.0)
+## 🔄 In-App Updates (added 2.2.0)
 
 Implemented: automatic check at startup + every 6 h, manual check, Updates tab (installed vs new release notes, progress, optional auto-install), clean stop → install → relaunch sequence with service recovery on failure, minisign-signed installers, `latest.json` generated in `release.yml`'s `release` job and verified after publish, AppImage bundle-type stamping, release preflight for key/secret. See README "In-App Updates" for one-time key setup.
 
 Not yet verified on real machines: the full download/install/relaunch cycle on Windows and Linux against a real Release (signing + signature verification were verified locally with a throwaway key; Rust compiles; frontend builds).
 
-## Known Limitations
+## ⚠️ Known Limitations
 
 - Windows battery detail (capacity, voltage, health %, cycle count), DXGI-based GPU reads, and the new `Win32_VideoController`/`GPU Engine` GPU code are implemented but not hardware-verified.
 - AMD GPU usage (native engine, Linux) is written but unverified on real hardware; fan RPM is correctly reported unavailable on hardware without an exposed sensor.
@@ -267,7 +267,7 @@ Not yet verified on real machines: the full download/install/relaunch cycle on W
 
 ---
 
-## Historical Architecture
+## 🕰️ Historical Architecture
 
 The project has gone through three earlier architectural shapes before the current one:
 
@@ -314,11 +314,11 @@ Shape 5 (current — Linux Tauri migration): the same Tauri 2 shell now
   and executable-name resolution already branched on cfg(windows) vs not)
 ```
 
-Technologies that are **historical only** and must not appear in current setup instructions: MongoDB Atlas, `MONGO_URI`, PostgreSQL (planned for Phase 8, never implemented), the C# production launcher and Inno Setup installer as the *active* Windows build path (both files remain in the repo as an explicitly-marked rollback reference, not as part of the current build), and the earlier multi-workflow release pipeline (the current pipeline is one workflow, four jobs — see [Release Pipeline](#release-pipeline)).
+Technologies that are **historical only** and must not appear in current setup instructions: MongoDB Atlas, `MONGO_URI`, PostgreSQL (planned for Phase 8, never implemented), the C# production launcher and Inno Setup installer as the *active* Windows build path (both files remain in the repo as an explicitly-marked rollback reference, not as part of the current build), and the earlier multi-workflow release pipeline (the current pipeline is one workflow, four jobs — see [Release Pipeline](#-release-pipeline)).
 
 ---
 
-## Phase Log
+## 🗂️ Phase Log
 
 | # | Phase | Layer | Status | Summary |
 |:-:|---|---|:-:|---|
@@ -336,12 +336,12 @@ Technologies that are **historical only** and must not appear in current setup i
 | 10 | Advanced Dashboard UI | React | ✅ Done | Full redesign (not a restyle) around shared `Primitives.tsx`; seven sections; analytics range selector; trend/bottleneck visualization; live-freshness indicator; verified across 4 resolutions and both themes with zero extra fetches on navigation |
 | 11 | Desktop Packaging (Tauri) | Rust / Tauri 2 | ✅ Windows · ✅ Linux | Native window, managed service lifecycle with Windows Job Object hardening (Linux: plain `Child::kill()`, already `cfg`-gated), Start/Stop/Exit controls, single-source version propagation. Replaces the C# launcher + Inno Setup path on Windows and the `start-all.sh`-in-a-terminal path on Linux; the Rust shell itself needed no changes for Linux — only `release.yml`'s `build-linux` job and `tauri.conf.json`'s bundle config did. Not yet run on real CI or real Linux hardware |
 | 12 | GPU & Extended System Identity | C# / WMI | ✅ Windows · ⬜ Linux (`ISystemInfoProvider`) | `Win32_VideoController` + `GPU Engine` perf counters; `Win32_ComputerSystem`/`Win32_BIOS`/`Win32_OperatingSystem`. Fixed the System tab's permanent "Failed to fetch" via bounded retry. Not build-verified on Windows (no `dotnet` toolchain in the authoring environment) |
-| 13 | Maintenance & Extensibility | Cross-cutting | 🔶 In Progress | `CHANGELOG.md`/`CHANGELOG_ARCHIVE.md` split shipped this pass. See [Remaining Work](#remaining-work) for the rest |
+| 13 | Maintenance & Extensibility | Cross-cutting | 🔶 In Progress | `CHANGELOG.md`/`CHANGELOG_ARCHIVE.md` split shipped this pass. See [Remaining Work](#-remaining-work) for the rest |
 | 14 | Linux Desktop Packaging (Tauri) | Rust / Tauri 2 / CI | ✅ Done (unverified on real CI/hardware) | Brought Linux onto the same Tauri packaging model as Windows. Root cause of the original bug reports: `build-linux` staged `start-all.sh` — a dev script assuming a writable `/opt/systeminfo/logs` and a system-wide `uvicorn` — into the `.deb`, which is what produced the `Permission denied` and `uvicorn: command not found` errors. `process.rs`/`commands.rs`/`lib.rs` needed no changes (already fully cross-platform); fixed `tauri.conf.json` (`targets` → `["nsis","deb","appimage"]`, added a generated Linux/macOS icon set via `tauri icon`, Linux bundle config) and rewrote `build-linux` to mirror `build-windows`: self-contained `linux-x64` backend publish, PyInstaller-frozen `analytics` binary (no `.exe`), staged as Tauri resources, then `tauri build`. Added Tauri's Linux build prerequisites (`libwebkit2gtk-4.1-dev` etc.) to the CI apt install step. `packaging/linux/AppRun` and `systeminfo.desktop` marked deprecated (Tauri generates its own) |
 
 ---
 
-## Performance Metrics
+## 📊 Performance Metrics
 
 | Metric | Value |
 |---|---|
@@ -357,7 +357,7 @@ Technologies that are **historical only** and must not appear in current setup i
 
 ---
 
-## Remaining Work
+## 📝 Remaining Work
 
 - [ ] Hardware-verify the Windows battery IOCTL path, DXGI GPU reads, and the new `Win32_VideoController`/`GPU Engine` GPU code on a real Windows machine
 - [ ] Verify the AMD GPU sysfs path on real hardware
