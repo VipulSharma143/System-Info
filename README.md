@@ -6,7 +6,7 @@
 
 `React 19` · `TypeScript` · `.NET 10` · `Tauri 2 / Rust` · `C++17` · `x86-64 Assembly` · `Python / FastAPI`
 
-[Features](#-features) · [Architecture](#-architecture) · [Tech Stack](#-tech-stack--why) · [API](#-api-reference) · [Getting Started](#-getting-started) · [Building](#-building--packaging) · [Project Status](./PROJECT_STATUS.md)
+[Features](#-features) · [Architecture](#-architecture) · [Tech Stack](#-tech-stack--why) · [API](#-api-reference) · [Getting Started](#-getting-started) · [Building](#-building--packaging) · [Project Status](./PROJECT_STATUS.md) · [Agent Guide](./AGENT.md)
 
 </div>
 
@@ -146,7 +146,8 @@ System Info/
 ├── CHANGELOG.md                     # Recent version history (source of truth for the app
 │                                     # version — see Version Management below)
 ├── CHANGELOG_ARCHIVE.md             # Everything older, split out to keep CHANGELOG.md short
-└── PROJECT_STATUS.md                # Detailed engineering status & history (this file's sibling)
+├── PROJECT_STATUS.md                # Detailed engineering status & history (this file's sibling)
+└── AGENT.md                         # Fast-load technical summary for AI coding agents
 ```
 
 `database/`, `docs/`, and `tests/` currently exist as **empty placeholder directories** in the repository — no automated test suite or additional documentation lives there yet (see [Known Limitations](./PROJECT_STATUS.md#known-limitations) in `PROJECT_STATUS.md`).
@@ -409,5 +410,6 @@ No `LICENSE` file is currently present in this repository.
 <div align="center">
 
 For detailed engineering history, verification status, and remaining work, see **[`PROJECT_STATUS.md`](./PROJECT_STATUS.md)**.
+For a fast-load technical summary meant for AI coding agents (stack, structure, endpoints, known traps, behavioral contracts), see **[`AGENT.md`](./AGENT.md)**.
 
 </div>
