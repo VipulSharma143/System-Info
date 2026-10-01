@@ -49,7 +49,7 @@ try
     Check(!emptyJson.Contains("cpu_trend") && emptyJson.Contains("\"count\":0"), $"empty JSON omits cpu_trend: {emptyJson}");
 
     // 60 samples, 1/s. CPU climbs 0->59 (slope 60/min). eth0 rx flat 100, tx 50. lo absent for first 30 samples.
-    // 7-digit fractional seconds + Z exactly as DateTime.ToString("o") emits (the historic Python parsing bug).
+    // 7-digit fractional seconds + Z exactly as DateTime.ToString("o") emits (the 7-digit form older parsers choked on).
     for (int i = 0; i < 60; i++)
     {
         var lo = i >= 30 ? ",{\"iface\":\"lo\",\"rxKBps\":1.5,\"txKBps\":1.5}" : "";

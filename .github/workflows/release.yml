@@ -397,7 +397,7 @@ jobs:
   # script pretending localhost is a UI, owns the production packaging
   # on Linux too. the old start-all.sh / AppRun+systeminfo.desktop approach
   # were the old "dev script wearing a fake moustache" approach (they
-  # ran `dotnet run` / `npm run dev` / bare `uvicorn` straight from
+  # ran `dotnet run` / `npm run dev` / straight from
   # /opt/systeminfo, needed sudo to create /opt/systeminfo/logs) — replaced here by the same
   # self-contained backend publish +
   # `tauri build` pipeline the Windows job already uses. Both files were
@@ -673,19 +673,22 @@ jobs:
           # first marker), so the updater swaps the AppImage file in place
           # instead of guessing. The .deb's binary is stamped as "deb" by
           # `tauri build` itself, which makes deb installs update via dpkg.
-          python3 - "$APPDIR/usr/bin/${EXE_NAME}" << 'PATCH'
-          import sys
-          path = sys.argv[1]
-          data = open(path, "rb").read()
-          for old in (b"__TAURI_BUNDLE_TYPE_VAR_UNK", b"__TAURI_BUNDLE_TYPE_VAR_DEB"):
-              i = data.find(old)
-              if i >= 0:
-                  data = data[:i] + b"__TAURI_BUNDLE_TYPE_VAR_APP" + data[i + len(old):]
-                  open(path, "wb").write(data)
-                  print("Stamped bundle type: AppImage")
-                  break
-          else:
-              sys.exit("bundle-type marker not found in binary — is the tauri crate too old for the updater?")
+          node - "$APPDIR/usr/bin/${EXE_NAME}" << 'PATCH'
+          const fs = require("fs");
+          const path = process.argv[2];
+          const data = fs.readFileSync(path);
+          const replacement = Buffer.from("__TAURI_BUNDLE_TYPE_VAR_APP");
+          for (const old of ["__TAURI_BUNDLE_TYPE_VAR_UNK", "__TAURI_BUNDLE_TYPE_VAR_DEB"]) {
+            const i = data.indexOf(old);
+            if (i >= 0) {
+              replacement.copy(data, i);          // same length: the binary's layout is unchanged
+              fs.writeFileSync(path, data);
+              console.log("Stamped bundle type: AppImage");
+              process.exit(0);
+            }
+          }
+          console.error("bundle-type marker not found in binary — is the tauri crate too old for the updater?");
+          process.exit(1);
           PATCH
 
           cp -r frontend/src-tauri/resources/backend "$APPDIR/usr/lib/${EXE_NAME}/backend"

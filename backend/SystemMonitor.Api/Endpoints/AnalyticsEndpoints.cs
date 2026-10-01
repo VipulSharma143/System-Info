@@ -1,8 +1,7 @@
 // /api/analytics/{stats,trend,bottlenecks}
 //
 // Computed in-process by AnalyticsService from the local JSONL snapshot
-// history. Previously these proxied to a separate Python/FastAPI process on
-// :8001; that process, its PyInstaller build and its port no longer exist.
+// history by an in-process service. There is no separate analytics process or port.
 // Routes, query parameters and JSON shapes are unchanged.
 
 using System.Collections.Concurrent;

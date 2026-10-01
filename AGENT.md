@@ -12,11 +12,11 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.2.2 · **License:** none — no `LICENSE` file exists in the repo.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.3.0 · **License:** none — no `LICENSE` file exists in the repo.
 
 ## 📖 What it is
 
-Real-time hardware telemetry (CPU/RAM/disk/network/processes/battery/GPU/system identity) + local historical trend/bottleneck analysis, packaged as a native desktop app on Windows and Linux via Tauri 2. No cloud, no account, no database — fully local/offline, single user. Also a deliberate learning project spanning 6 languages, built in stages (React → .NET → C++ → Assembly → Python → packaging), each stage solid before the next was added.
+Real-time hardware telemetry (CPU/RAM/disk/network/processes/battery/GPU/system identity) + local historical trend/bottleneck analysis, packaged as a native desktop app on Windows and Linux via Tauri 2. No cloud, no account, no database — fully local/offline, single user. Also a deliberate learning project spanning 6 languages, built in stages (React → .NET → C++ → Assembly → analytics → packaging), each stage solid before the next was added. Analytics started life as a separate Python service and was moved into the .NET backend in 2.3.0 — see `PROJECT_STATUS.md` → *Why analytics moved from Python to C#* before proposing a second runtime or process again.
 
 **Hard rule, applies everywhere:** if the OS can't prove a value, show `Unavailable`. Never default to 0, guess, or silently omit.
 
@@ -38,11 +38,11 @@ Real-time hardware telemetry (CPU/RAM/disk/network/processes/battery/GPU/system 
 | Frontend | React 19, TypeScript, Vite 8, Tailwind 4, sweetalert2 (alerts), lucide-react (icons) — no router, no Redux, state lives in custom hooks |
 | Desktop shell | Tauri 2 (Rust, `win32job` on Windows) — native window, spawns/supervises the backend as a child process |
 | Backend | C#, .NET 10 Minimal API. No auth (loopback-only, single user). No ORM. |
-| Native engine | C++17 (CMake), called via P/Invoke — CPU benchmark, GPU vendor detect, diagnostics |
+| Native engine | C++17 (CMake), called via P/Invoke — CPU topology/features, storage volumes, fans, GPU/VRAM, battery, benchmarks, memory bandwidth |
 | Assembly | x86-64 NASM: benchmark loops + SSE2/AVX2 vector kernels (`vector_kernels.asm`: add, dot, int32 sum) behind runtime CPUID/XGETBV dispatch in `simd_dispatch.cpp`; every kernel is verified against a C++ reference by `si_kernel_selftest()` |
 | Analytics | `AnalyticsService.cs` (in-process; was Python/FastAPI on :8001) — trend/bottleneck/stats over local snapshot files, 5 s result cache |
 | Storage | **No database.** Append-only local JSON Lines: `data/snapshots/{yyyy}/{MM}/{dd}.jsonl`. (Previously MongoDB Atlas, before that PostgreSQL was the original target — both replaced deliberately for offline capability. Don't reintroduce a DB without discussion.) |
-| CI/CD | One workflow, `.github/workflows/release.yml`: `version → build-windows + build-linux (parallel) → release`. Triggered by a new top `CHANGELOG.md` entry. |
+| CI/CD | `.github/workflows/release.yml`: `version → tests → build-windows + build-linux (parallel) → release`, triggered by a new top `CHANGELOG.md` entry. `tests` is the reusable `tests.yml` (native/Assembly ctest on Linux + Windows/MSVC, C# tests, Rust supervisor tests); `tests.yml` also runs on every PR and non-main push. |
 
 **Prerequisites for local dev:** .NET SDK 10.0+, Node.js 20.x+, CMake 3.10+, NASM, Rust (stable) + Tauri 2 CLI (only needed for the desktop shell itself).
 
@@ -53,18 +53,22 @@ frontend/src/          React app: components/{views,common,layout}, hooks/, lib/
   views/                OverviewView, AnalyticsView, ProcessesView, StorageView, NetworkView, BatteryView, SystemView, UpdatesView
   common/                Shared design-system primitives: Panel, MetricCard, Sparkline, UsageBar, States, Table, Segmented, StatusIndicator
   hooks/                 useSystemMetrics, useSystemInfo, useSystemGpu, useAnalytics, useSpeedTest, useServiceControl, useUpdater, useTheme
-frontend/src-tauri/     Rust shell: process.rs (spawn/supervise), commands.rs (start_services/stop_services/get_service_status/exit_app —
-                        ONLY 4 IPC commands, deliberately no tauri-plugin-shell / no generic command execution)
+frontend/src-tauri/     Rust shell: supervisor.rs (Tauri-free lifecycle core), process.rs (resource lookup + command building), commands.rs
+                        (start_services/stop_services/get_service_status/exit_app — ONLY 4 IPC commands, deliberately no
+                        tauri-plugin-shell / no generic command execution); supervisor-tests/ = std-only test crate for supervisor.rs
 backend/SystemMonitor.Api/
   Endpoints/            SystemEndpoints, AnalyticsEndpoints, NativeEndpoints, SpeedTestEndpoints
-  services/             WindowsSystemInfoProvider / LinuxSystemInfoProvider, SystemMonitorBackgroundService,
-                         LocalJsonSnapshotStore, SnapshotLogger, WindowsBatteryInterop, AppDataPath
+  services/             WindowsSystemInfoProvider / LinuxSystemInfoProvider, SystemMonitorBackgroundService, SystemSnapshotService
+                         (/api/system/all isolation), AnalyticsService, LocalJsonSnapshotStore, SnapshotLogger,
+                         WindowsBatteryInterop, AppDataPath
   interface/             ISystemInfoProvider, ISnapshotStore
-  Native/                 NativeInterop.cs (P/Invoke bridge)
-native/                  C++ engine: include/native_engine.h (C ABI), src/{windows,linux}_provider.cpp, src/common.cpp
-assembly/                NASM benchmarks: benchmark_loop.asm, simd_loop.asm, get_constant.asm
+  Native/                 NativeInterop.cs (P/Invoke bridge), NativeKernels.cs (safe span wrappers + C# reference implementations)
+backend/SystemMonitor.Tests/  dependency-free test runner (analytics, storage, native wrappers); links sources instead of referencing the Api project
+native/                  C++ engine: include/native_engine.h (C ABI), src/{windows,linux}_provider.cpp, src/common.cpp,
+                         src/simd_dispatch.cpp (CPUID + dispatch + self-test), src/hardware_info.cpp (topology/storage/fans), build.sh
+assembly/                NASM: benchmark_loop.asm, simd_loop.asm, get_constant.asm, vector_kernels.asm (SSE2/AVX2 kernels)
 scripts/                 sync-version.mjs, check-version.mjs, archive-changelog.mjs, make-update-manifest.mjs
-tests/native/            C++/Assembly tests (ctest). Rust supervisor tests: frontend/src-tauri/tests/supervisor.rs.
+tests/native/            C++/Assembly tests (ctest)
 packaging/linux/         only systeminfo.png (icon source). The AppImage's AppRun is generated inline by release.yml.
 database/, docs/         Empty placeholders.
 ```
@@ -98,7 +102,7 @@ Window: 1280×820 default, 980×650 minimum, both platforms. `supervisor.rs` (Ta
 
 ## 🔄 In-app updates (since 2.2.0)
 
-Checks GitHub Releases a few seconds after load and every 6h while open; `Updates` tab shows current/new release notes, a manual check button, download progress, and an "install automatically at startup" toggle (off by default). Install sequence: download (services keep running) → stop backend+analytics → install → relaunch → services start fresh; a cancelled/failed install restarts services instead. Reads `github.com/VipulSharma143/System-Info/releases/latest/download/latest.json`, built by `scripts/make-update-manifest.mjs` in the `release` job. Signing: public key lives in `tauri.conf.json` (`plugins.updater.pubkey`); private key only as GitHub secrets `TAURI_SIGNING_PRIVATE_KEY`(`_PASSWORD`) — `release.yml` refuses to run if the public key is still a placeholder or the secret is missing. Versions before 2.2.0 have no updater and need one manual install.
+Checks GitHub Releases a few seconds after load and every 6h while open; `Updates` tab shows current/new release notes, a manual check button, download progress, and an "install automatically at startup" toggle (off by default). Install sequence: download (services keep running) → stop the backend → install → relaunch → services start fresh; a cancelled/failed install restarts services instead. Reads `github.com/VipulSharma143/System-Info/releases/latest/download/latest.json`, built by `scripts/make-update-manifest.mjs` in the `release` job. Signing: public key lives in `tauri.conf.json` (`plugins.updater.pubkey`); private key only as GitHub secrets `TAURI_SIGNING_PRIVATE_KEY`(`_PASSWORD`) — `release.yml` refuses to run if the public key is still a placeholder or the secret is missing. Versions before 2.2.0 have no updater and need one manual install.
 
 ## 🔌 API (backend on :5132, or whatever `apiConfig.ts` resolves)
 
@@ -115,7 +119,7 @@ cd backend/SystemMonitor.Api && dotnet run  # :5132
 cd frontend && npm run dev                  # :5173
 cd frontend && npm run tauri dev            # actual desktop shell, dev mode
 cmake -S native -B native/build -DBUILD_NATIVE_TESTS=ON && cmake --build native/build && (cd native/build && ctest --output-on-failure)   # native + assembly tests
-cd frontend/src-tauri/supervisor-tests && cargo test   # process-supervision tests (needs python3 as a fake service, ports 18101-18152)
+cd frontend/src-tauri/supervisor-tests && cargo test   # process-supervision tests (std-only fake service; uses loopback ports 18101-18152)
 dotnet run --project backend/SystemMonitor.Tests   # analytics + storage + native wrapper tests (SYSTEMINFO_NATIVE_DIR=<native build dir>)
 ./build.sh                                  # fail-fast full validation build (native → backend → frontend)
 ./clean.sh                                  # strip build artifacts (node_modules/dist/bin/obj/caches) before archiving/sharing
@@ -139,16 +143,24 @@ Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job
 - **Never manually create a release git tag.** A broken/premature tag permanently blocked a version once under the old multi-workflow (`workflow_run`-linked) chain, which had no atomic tag+release guarantee; the current single `release.yml` with job-level `needs:` fixes this, but don't defeat it by tagging by hand.
 - Windows DXGI/system-lib links need an explicit `target_link_libraries(...)` in `CMakeLists.txt` — an MSVC-only `#pragma comment(lib,...)` silently no-ops on other toolchains (e.g. mingw).
 - Don't add a generic Tauri command/shell-execution bridge. `commands.rs` intentionally exposes exactly 4 named commands and nothing else.
+- **Don't reintroduce a second runtime or a second process for analytics** (Python, Node, anything frozen with PyInstaller-style tooling). It was tried, and cost a PyInstaller build per platform, a hidden-import failure mode that built cleanly but crashed on launch, a second port with its own health check and a proxy hop, and a Job Object workaround — all to run ~800 lines of arithmetic over files the backend already owns. Full account in `PROJECT_STATUS.md`.
+- **Never hold a lock across a readiness wait, and never block in a sync Tauri command.** Sync commands run on the UI thread; this froze the window on slow cold starts once. `get_service_status` must stay lock-free and do no I/O.
+- **Keep every native export exception-free and bounds-checked.** An exception crossing the `extern "C"` boundary into .NET kills the process. Use the `std::error_code` filesystem overloads, validate buffers, report unknown as `-1`/`0` return — never a fabricated zero.
+- **Assembly kernels must stay verified.** Any new or changed kernel needs a C++ reference and a case in `si_kernel_selftest()` covering n = 0, 1, odd lengths, tails and misaligned pointers; SSE2 is the only baseline — AVX2 is reachable only through the CPUID+XGETBV dispatcher.
+- **An unbounded query range is a trap.** `ISnapshotStore.QueryAsync(DateTime.MinValue, …)` is legal because the store clamps to the oldest day on disk; don't add code that iterates calendar days itself.
+- When zipping the repo for sharing, don't exclude `native/build*` — it also matches `native/build.sh`.
 
 ## ⚠️ Unverified / known-limited (check `PROJECT_STATUS.md` before assuming these work)
 
-Windows battery IOCTL detail + DXGI-linked GPU reads — implemented, not hardware-verified (no Windows/dotnet toolchain in the environment that most recently extended them; Windows cross-compilation via mingw-w64 was verified in isolation only). GPU detection is split across two unreconciled code paths (Windows structured provider vs. Linux native-engine path — see Architecture above). Multi-GPU engine-to-adapter attribution on Windows (parses `_phys_N_` from perf-counter instance names) is unverified against real dual-GPU hardware. No retention/TTL on snapshot storage (grows unbounded — accepted tradeoff, not a bug to silently fix). Tests exist only for the native/Assembly layer and the Rust supervisor (not gated in CI yet); there are no backend or frontend tests. `docs/`, `database/` are empty placeholders. No `LICENSE` file.
+Windows battery IOCTL detail + DXGI-linked GPU reads — implemented, not hardware-verified (no Windows/dotnet toolchain in the environment that most recently extended them; Windows cross-compilation via mingw-w64 was verified in isolation only). GPU detection is split across two unreconciled code paths (Windows structured provider vs. Linux native-engine path — see Architecture above). Multi-GPU engine-to-adapter attribution on Windows (parses `_phys_N_` from perf-counter instance names) is unverified against real dual-GPU hardware. No retention/TTL on snapshot storage (grows unbounded — accepted tradeoff, not a bug to silently fix). Automated tests exist for the native/Assembly layer, the C# analytics + native wrappers, and the Rust supervisor, and CI gates releases on them; there are no frontend tests and nothing automatically exercises an *installed* build — the 2.3.0 changes (supervisor rewrite, in-process analytics, new native functions) had not been run from a real installer when this was written. The Windows-only C# (WMI provider) has only ever been compiled by CI. `docs/`, `database/` are empty placeholders. No `LICENSE` file.
 
 ## 📜 Behavioral contracts (do not break)
 
 - No fabricated hardware values, ever — `Unavailable` is always correct over a guess.
 - Fully offline: no account, no cloud backend, no database.
-- Windows Job Object hardening must keep guaranteeing no orphaned backend process survives a crash.
+- Windows Job Object hardening must keep guaranteeing no orphaned backend process survives a crash; on Linux the pid-file reaper must keep verifying `/proc/<pid>/exe` before killing anything.
+- The backend is the only process the app starts. Analytics stays in-process.
+- A failing subsystem degrades `/api/system/all` to partial data with a named `unavailable` entry — it never fails the whole request and never becomes a zero.
 - Update install must cleanly stop all services first, restart fresh after (or restart again if cancelled/failed) — never straddle services across an update.
 - CORS stays restricted to the known Tauri/Vite-dev origins listed above — it's the only real access boundary this API has.
 

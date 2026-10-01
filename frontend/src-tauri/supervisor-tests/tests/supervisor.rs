@@ -1,4 +1,4 @@
-// Real process supervision against fake HTTP services (python3 -m http-ish stub).
+// Real process supervision against fake HTTP services (src/bin/fake-service.rs, std-only).
 // Regression coverage for: status() blocking during startup (the window-freeze bug),
 // waiting out the full timeout for a crashed child, a stale/foreign process on the
 // port being mistaken for a healthy service, orphaned children, cancellation.
@@ -7,26 +7,16 @@ mod tests {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
-    const FAKE: &str = r#"
-import sys, time, http.server, socketserver
-port, delay = int(sys.argv[1]), float(sys.argv[2])
-time.sleep(delay)
-class H(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200); self.end_headers(); self.wfile.write(b'{"status":"ok"}')
-    def log_message(self,*a): pass
-socketserver.TCPServer.allow_reuse_address = True
-socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
-"#;
+    const FAKE_EXE: &str = env!("CARGO_BIN_EXE_fake-service");
 
     fn fake(port: u16, delay: f32) -> std::io::Result<Command> {
-        let mut c = Command::new("python3");
-        c.args(["-c", FAKE, &port.to_string(), &delay.to_string()]).stdout(Stdio::null()).stderr(Stdio::null());
+        let mut c = Command::new(FAKE_EXE);
+        c.args([&port.to_string(), &delay.to_string()]).stdout(Stdio::null()).stderr(Stdio::null());
         Ok(c)
     }
     fn launch(c: std::io::Result<Command>, secs: u64) -> Launch { Launch { command: c, timeout: Duration::from_secs(secs) } }
     fn sup(bp: u16, ap: u16) -> Supervisor {
-        Supervisor::new(vec![Service::new("backend", bp, "python3"), Service::new("analytics", ap, "python3")])
+        Supervisor::new(vec![Service::new("backend", bp, "fake-service"), Service::new("second", ap, "fake-service")])
     }
     fn tmp(name: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("suptest-{name}-{}", std::process::id()));
@@ -58,7 +48,7 @@ socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
     #[test]
     fn early_exit_reported_fast_not_after_timeout() {
         let s = sup(18111, 18112); let logs = tmp("exit");
-        let dead = || { let mut c = Command::new("python3"); c.args(["-c", "import sys; sys.exit(3)"]); Ok(c) };
+        let dead = || { let mut c = Command::new(FAKE_EXE); c.args(["exit", "3"]); Ok(c) };
         let t = Instant::now();
         let st = s.start(&logs, vec![launch(dead(), 30), launch(fake(18112, 0.2), 10)], &|_| {});
         assert!(t.elapsed() < Duration::from_secs(3), "waited {:?} for a dead process", t.elapsed());
@@ -85,7 +75,7 @@ socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
     #[test]
     fn missing_executable_is_unavailable_not_a_hang() {
         let s = sup(18131, 18132); let logs = tmp("missing");
-        let missing = Err(std::io::Error::new(std::io::ErrorKind::NotFound, "analytics not found in resources"));
+        let missing = Err(std::io::Error::new(std::io::ErrorKind::NotFound, "second service executable not found in resources"));
         let st = s.start(&logs, vec![launch(fake(18131, 0.0), 10), launch(missing, 10)], &|_| {});
         assert_eq!(st[0], ServiceHealth::Running);
         assert_eq!(st[1], ServiceHealth::Unavailable);
@@ -116,7 +106,7 @@ socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
         assert!(!port_free(18151));
         let exe = std::fs::read_link(format!("/proc/{}/exe", stale.id())).unwrap();
         let name: &'static str = Box::leak(exe.file_name().unwrap().to_string_lossy().into_owned().into_boxed_str());
-        let s = Supervisor::new(vec![Service::new("backend", 18151, name), Service::new("analytics", 18152, name)]);
+        let s = Supervisor::new(vec![Service::new("backend", 18151, name), Service::new("second", 18152, name)]);
         let st = s.start(&logs, vec![launch(fake(18151, 0.0), 10), launch(fake(18152, 0.0), 10)], &|_| {});
         assert_eq!(st[0], ServiceHealth::Running, "stale process should have been cleaned up");
         assert!(stale.try_wait().unwrap().is_some(), "stale process still alive");

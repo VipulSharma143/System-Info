@@ -36,7 +36,7 @@ There is no backend cloud service, no account, and no external database. Everyth
 - **Historical analytics** — CPU/network trend charts, bottleneck-episode detection, and summary stats over selectable windows (1h / 6h / 24h / 7d), computed in-process by the .NET backend from the local snapshot files (no separate service).
 - **Network speed test** — client-side download/upload/ping test against Cloudflare's public speed-test endpoints.
 - **Local, file-based storage** — append-only JSON Lines snapshots, no database to install, configure, or lose connectivity to.
-- **Native Windows desktop app** — a real window (not a browser tab) that owns the backend process lifecycle, with Start / Stop / Exit controls and orphan-process hardening via Windows Job Objects.
+- **Native desktop app on Windows and Linux** — a real window (not a browser tab) that owns the backend process lifecycle, with Start / Stop / Exit controls, immediate crash detection, and orphan-process hardening (Windows Job Objects; a pid file on Linux).
 - **No hardware values are ever fabricated.** Anything the OS doesn't expose is reported as `Unavailable`, never guessed, defaulted to `0`, or silently omitted — enforced consistently across every metric, on both platforms.
 
 ---
@@ -60,16 +60,16 @@ flowchart TB
     PROV -->|Linux| LINP["/proc · /sys"]
 
     API -- "P/Invoke" --> CPP["C++ Native Engine"] --> ASM["x86-64 Assembly\n(NASM, scalar + SIMD)"]
-    API -- "reads .jsonl" --> AN["AnalyticsService\n(in-process)"]
+    API --> AN["AnalyticsService\n(in-process)"]
     API -- "appends" --> STORE[("Local JSON Lines\ndata/snapshots/")]
-    PY -- "reads" --> STORE
+    AN -- "reads" --> STORE
 ```
 
 **Request flow, live metrics:** the frontend polls `GET /api/system/all` once per cycle → the API's `SystemMonitorBackgroundService` returns already-cached CPU/network samples and calls `ISystemInfoProvider` for RAM/disk/battery on demand → the platform-specific provider (Windows: WMI + `PerformanceCounter`; Linux: `/proc`, `/sys`) does the actual read.
 
 **Request flow, history:** the same background service appends every sample to a local JSON Lines file → the frontend's Analytics tab calls the .NET API → `AnalyticsService` (in the same process) reads and aggregates the `.jsonl` files directly, skipping malformed lines, with a 5-second result cache.
 
-**Two separate hardware-reading paths exist by design:** most live metrics (`/api/system/*`) go through `ISystemInfoProvider` in C#, talking to the OS directly (WMI/PerformanceCounter on Windows, `/proc`/`/sys` on Linux). A second, independent native C++/Assembly engine (`/api/native/*`) exists for CPU benchmarking (scalar + SIMD), GPU vendor/AMD-usage detection, and diagnostic hardware reads. The dashboard's dedicated GPU panel and CPU/RAM/battery cards currently read through the C# provider path, not the native engine.
+**Two separate hardware-reading paths exist by design:** most live metrics (`/api/system/*`) go through `ISystemInfoProvider` in C#, talking to the OS directly (WMI/PerformanceCounter on Windows, `/proc`/`/sys` on Linux). A second, independent native C++/Assembly engine (`/api/native/*`) provides CPU identity/topology and feature detection, GPU vendor/AMD-usage detection, storage-volume and fan enumeration, CPU benchmarking, and SSE2/AVX2 numeric kernels. The backend uses it as the *first* source for physical core count and (on Linux) the list of real storage volumes. The dashboard's dedicated GPU panel and CPU/RAM/battery cards currently read through the C# provider path, not the native engine.
 
 ---
 
@@ -79,13 +79,13 @@ flowchart TB
 |---|---|---|---|
 | **Frontend** | React 19, TypeScript, Vite 8 | Dashboard UI, metric polling, visualization | Fast dev loop (Vite), type-safe data contracts across seven views |
 | **Styling** | Tailwind CSS 4 | Utility-first styling, shared design tokens | One spacing/type/color scale reused across every panel (`Primitives.tsx`) instead of per-component CSS |
-| **Desktop Shell (Windows)** | Tauri 2, Rust, `win32job` | Native window, backend process lifecycle, orphan-process prevention | Real OS window instead of a browser tab; Rust gives safe, low-overhead process management with no Electron-sized runtime |
+| **Desktop Shell** | Tauri 2, Rust, `win32job` (Windows) | Native window, backend process lifecycle, orphan-process prevention | Real OS window instead of a browser tab; Rust gives safe, low-overhead process management with no Electron-sized runtime |
 | **Backend** | C#, .NET 10 Web API (Minimal APIs) | REST endpoints, platform-provider dispatch, snapshot writes, in-process analytics | Strong typing and WMI/`PerformanceCounter` access on Windows without native interop for most metrics |
-| **Native Engine** | C++17, CMake | Kernel/OS-level hardware reads exposed via P/Invoke; CPU benchmarking | Direct OS-level access (DXGI, sysfs) where a managed API isn't sufficient or fast enough |
-| **Performance Demo** | x86-64 Assembly (NASM) | Scalar & SIMD (SSE2) CPU benchmarking, called from the C++ engine | Ground-truth performance baseline the C++/C# layers are measured against |
-| **Analytics** | C# (`AnalyticsService`) | Trend analysis, bottleneck detection, stats aggregation over historical snapshots | Was a Python/FastAPI service; moved in-process so there is no second runtime to ship, no extra port and no extra process to start |
+| **Native Engine** | C++17, CMake | Kernel/OS-level hardware reads exposed via P/Invoke: CPU topology/features, storage, fans, GPU/VRAM, battery; CPU benchmarking | Direct OS-level access (DXGI, sysfs, `GetLogicalProcessorInformationEx`) where a managed API isn't sufficient or fast enough |
+| **Assembly** | x86-64 NASM | Benchmark loops plus SSE2/AVX2 kernels (vector add, dot product, int32 sum/min/max, memcpy, XOR checksum) chosen at run time by CPUID/XGETBV; used by the memory-bandwidth and kernel-throughput benchmarks | Real, verifiable low-level work: every kernel is checked against a C++ reference, and the Windows x64 and System V ABIs are both assembled from the same source |
+| **Analytics** | C# (`AnalyticsService`, in-process) | Trend analysis, bottleneck detection, stats aggregation over historical snapshots | The backend already owns the snapshot files, so the analysis runs next to them: no second runtime, no extra port, no extra process. The history of how it got here is in [`PROJECT_STATUS.md`](./PROJECT_STATUS.md#-why-analytics-moved-from-python-to-c) |
 | **Storage** | Local JSON Lines files | Historical snapshot persistence | No database to install, configure, or fail to connect to — see [Storage](#-storage--historical-data) below for the MongoDB → local-file migration |
-| **Build / Release** | GitHub Actions (`release.yml`), Tauri's NSIS bundler, `appimagetool`, `dpkg-deb` | CI builds for both platforms, version-tag-driven GitHub Releases | Single workflow, four jobs (`version` → `build-windows` / `build-linux` → `release`), triggered by pushing a new `CHANGELOG.md` entry |
+| **Build / Release** | GitHub Actions (`release.yml`, `tests.yml`), Tauri's NSIS bundler, `appimagetool`, `dpkg-deb` | CI builds for both platforms, version-tag-driven GitHub Releases | One release workflow, five jobs (`version` → `tests` → `build-windows` / `build-linux` → `release`), triggered by pushing a new `CHANGELOG.md` entry; the `tests` job gates both builds |
 
 ---
 
@@ -97,42 +97,50 @@ System Info/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── views/              # OverviewView, AnalyticsView, ProcessesView,
-│   │   │   │                       # StorageView, NetworkView, BatteryView, SystemView
+│   │   │   │                       # StorageView, NetworkView, BatteryView, SystemView, UpdatesView
 │   │   │   ├── common/              # Shared design-system primitives (Panel, InfoRow,
 │   │   │   │                       # StatTile, Sparkline, UsageBar, States, Table, ...)
 │   │   │   └── layout/              # AppShell, Sidebar, TopBar, ServiceControls
 │   │   ├── hooks/                   # useSystemMetrics, useSystemInfo, useSystemGpu,
-│   │   │                            # useAnalytics, useSpeedTest, useServiceControl, ...
+│   │   │                            # useAnalytics, useSpeedTest, useServiceControl, useUpdater, ...
 │   │   └── lib/                     # apiConfig.ts (env-aware API base), tauri.ts, format.ts
 │   └── src-tauri/                   # Tauri 2 desktop shell (Rust)
-│       └── src/                     # main.rs, lib.rs, process.rs, commands.rs
+│       ├── src/                     # main.rs, lib.rs, supervisor.rs (lifecycle core),
+│       │                            # process.rs (resource lookup, command building), commands.rs
+│       └── supervisor-tests/        # std-only test crate for supervisor.rs (no Tauri toolchain needed)
 │
-├── backend/SystemMonitor.Api/       # .NET 10 Minimal API
-│   ├── Endpoints/                   # SystemEndpoints, AnalyticsEndpoints,
-│   │                                 # NativeEndpoints, SpeedTestEndpoints
-│   ├── services/                    # WindowsSystemInfoProvider, LinuxSystemInfoProvider,
-│   │                                 # SystemMonitorBackgroundService, LocalJsonSnapshotStore,
-│   │                                 # WindowsBatteryInterop, AppDataPath, SnapshotLogger
-│   ├── interface/                   # ISystemInfoProvider, ISnapshotStore
-│   └── Native/                      # NativeInterop.cs — P/Invoke bridge to the C++ engine
+├── backend/
+│   ├── SystemMonitor.Api/           # .NET 10 Minimal API
+│   │   ├── Endpoints/               # SystemEndpoints, AnalyticsEndpoints,
+│   │   │                            # NativeEndpoints, SpeedTestEndpoints
+│   │   ├── services/                # WindowsSystemInfoProvider, LinuxSystemInfoProvider,
+│   │   │                            # SystemMonitorBackgroundService, SystemSnapshotService,
+│   │   │                            # AnalyticsService, LocalJsonSnapshotStore, SnapshotLogger,
+│   │   │                            # WindowsBatteryInterop, AppDataPath
+│   │   ├── interface/               # ISystemInfoProvider, ISnapshotStore
+│   │   └── Native/                  # NativeInterop.cs (P/Invoke), NativeKernels.cs (safe span wrappers)
+│   └── SystemMonitor.Tests/         # dependency-free test runner: analytics, storage, native wrappers
 │
 ├── native/                          # C++17 native engine (CMake)
 │   ├── include/native_engine.h      # Cross-platform C ABI (extern "C")
-│   └── src/                         # common.cpp, windows_provider.cpp, linux_provider.cpp
+│   ├── src/                         # common.cpp, windows_provider.cpp, linux_provider.cpp,
+│   │                                # simd_dispatch.cpp (CPUID + kernel dispatch, self-test),
+│   │                                # hardware_info.cpp (topology, storage volumes, fans)
+│   └── build.sh                     # Standalone native build used by ./build.sh
 │
 ├── assembly/                        # x86-64 NASM — benchmark loops + SSE2/AVX2 kernels
 │                                     # (vector add, dot, int32 sum/min/max, memcpy, XOR checksum)
 │
-├── packaging/linux/systeminfo.png   # Source art used to generate frontend/src-tauri/icons/
 ├── tests/native/                    # C++/Assembly tests (ctest) — see "Tests" below
+├── packaging/linux/systeminfo.png   # Source art used to generate frontend/src-tauri/icons/
 ├── scripts/                         # sync-version.mjs, check-version.mjs,
-│                                     # archive-changelog.mjs (see below)
-├── .github/workflows/release.yml    # The single CI/CD pipeline (version → build → release)
+│                                     # archive-changelog.mjs, make-update-manifest.mjs
+├── .github/workflows/               # release.yml (version → tests → build → release), tests.yml
 │
 ├── setup.sh / setup.ps1             # DEV-ONLY: first-time developer prerequisite install
 ├── start-all.sh / start-all.ps1     # DEV-ONLY: run backend + Vite together in a browser tab
 │                                     # (the installed app never uses these; Tauri starts everything itself)
-├── build.sh                         # Fail-fast full build/validation
+├── build.sh                         # Fail-fast full build/validation, including the test suites
 ├── clean.sh                         # Strip build artifacts before archiving/sharing the repo
 │
 ├── CHANGELOG.md                     # Recent version history (source of truth for the app
@@ -142,7 +150,7 @@ System Info/
 └── AGENT.md                         # Fast-load technical summary for AI coding agents
 ```
 
-`database/`, `docs/`, and `tests/` currently exist as **empty placeholder directories** in the repository — no automated test suite or additional documentation lives there yet (see [Known Limitations](./PROJECT_STATUS.md#known-limitations) in `PROJECT_STATUS.md`).
+`database/` and `docs/` currently exist as **empty placeholder directories**. Tests live next to what they test (see [Tests](#-tests)).
 
 ---
 
@@ -152,7 +160,7 @@ System Info/
 |---|---|---|---|
 | CPU (usage, model, cores) | `PerformanceCounter` (`% Processor Time`), `Win32_Processor`-equivalent native read | `/proc/stat`, `/proc/cpuinfo` | Cached server-side; polled continuously by `SystemMonitorBackgroundService` |
 | RAM | `Win32_OperatingSystem` (`TotalVisibleMemorySize`/`FreePhysicalMemory`) | `/proc/meminfo` | |
-| Disk | `DriveInfo` (.NET) | `DriveInfo` (.NET) | Capacity/usage only — full SMART health is not implemented (needs root) |
+| Disk | `DriveInfo` (.NET), fixed and removable drives only (a disconnected network share can no longer stall the view) | `DriveInfo` filtered to real block-device volumes from `/proc/mounts` (RAM, loop, squashfs and bind mounts are excluded; filesystem type read from `/proc/mounts`) | Capacity/usage only — full SMART health is not implemented (needs root) |
 | Network | Windows network counters | `/proc/net/dev` | Throughput, not "internet speed" |
 | Processes | .NET `Process` APIs | `/proc/[pid]/status` | Parallelized listing |
 | **Battery** | Battery class driver IOCTL (`IOCTL_BATTERY_QUERY_*`) | sysfs `BAT*` (dynamic discovery, unit auto-detection) | Cycle count/health are hardware-dependent; reported `Unavailable` when the driver doesn't expose them, never `0` |
@@ -172,7 +180,7 @@ All endpoints are served by the .NET backend on `:5132` (or the port the fronten
 | Method | Route | Purpose |
 |---|---|---|
 | `GET` | `/health` | Dependency-free readiness probe (used by the Tauri process manager) |
-| `GET` | `/api/system/all` | Consolidated live snapshot: CPU + RAM + disk + network + battery in one call |
+| `GET` | `/api/system/all` | Consolidated live snapshot: CPU + RAM + processes + disk + network + battery in one call. Each subsystem is read with its own timeout; one that fails or hangs is named in an additive `unavailable` array while the rest is still returned. Concurrent requests share one scan (750 ms reuse) |
 | `GET` | `/api/system/cpu` | Cached CPU usage |
 | `GET` | `/api/system/ram` | RAM usage |
 | `GET` | `/api/system/disk` | Disk capacity/usage |
@@ -187,6 +195,10 @@ All endpoints are served by the .NET backend on `:5132` (or the port the fronten
 | `GET` | `/api/speed-test` | Server-side download/upload/ping test against Cloudflare *(implemented, but the dashboard currently runs this client-side instead — see below)* |
 | `GET` | `/api/native/cpuinfo`, `/cpu`, `/cputemp`, `/gpu`, `/battery`, `/fan` | Diagnostic reads through the native C++ engine |
 | `GET` | `/api/native/test`, `/benchmark`, `/asmtest`, `/simd-benchmark` | Native engine self-tests and the scalar/SIMD CPU benchmark |
+| `GET` | `/api/native/cpufeatures` | Vendor and the SSE/SSE2/SSE3/SSSE3/SSE4.1/SSE4.2/AVX/AVX2/FMA features the CPU *and the OS* actually support, plus which kernel set is active |
+| `GET` | `/api/native/kernels` | Runs the Assembly self-test against the C++ reference on this CPU and reports kernel throughput (GB/s) |
+| `GET` | `/api/native/topology`, `/storage`, `/fans` | Physical/logical cores and packages (`null` when the OS doesn't expose them), real storage volumes with 64-bit sizes, fan tachometers (empty list when none exist) |
+| `GET` | `/api/native/memory-bandwidth` | Sustained copy and read bandwidth through the Assembly kernels (128 MB buffer, about a second of work — deliberately not polled) |
 
 **Speed test note:** the dashboard's `NetworkView` measures download/upload/ping directly from the browser against `speed.cloudflare.com`, so results aren't affected by a loopback hop through the local backend. `SpeedTestEndpoints.cs` implements the same measurement server-side but isn't currently called by the frontend.
 
@@ -198,7 +210,7 @@ CORS is restricted to `http://localhost:5173` (Vite dev), `http://tauri.localhos
 
 On both Windows and Linux, `frontend/src-tauri/` wraps the React frontend in a real, resizable desktop window (1280×820 default, 980×650 minimum) instead of opening a browser tab.
 
-- **`supervisor.rs` / `process.rs`** — `supervisor.rs` is the Tauri-independent lifecycle core (spawn, readiness, exit detection, stale-process cleanup, cancellation) and has its own integration tests; `process.rs` resolves the packaged executables from the app's resource directory, builds the child commands (`CREATE_NO_WINDOW` on Windows, log redirection, environment) and exposes the manager. Backend (`:5132`) and analytics (`:8001`) start **concurrently**; each is polled on `/health` every 100 ms, a child that exits during startup is reported immediately (not after a timeout), a port already held by another program is detected before spawning, and a pid file lets the next launch reap a process left by an uncleanly terminated run. `get_service_status` never blocks and never does network I/O — the old implementation held a lock during the readiness wait, which froze the window on slow cold starts. The 45 s/60 s timeouts are upper bounds only. Timing per stage is written to `logs/startup.log` under the data directory.
+- **`supervisor.rs` / `process.rs`** — `supervisor.rs` is the Tauri-independent lifecycle core (spawn, readiness, exit detection, stale-process cleanup, cancellation) and has its own integration tests; `process.rs` resolves the packaged backend executable from the app's resource directory, builds the child command (`CREATE_NO_WINDOW` on Windows, log redirection, environment) and exposes the manager. The supervisor manages a list of services and starts them **concurrently**; today that list is the backend (`:5132`), polled on `/health` every 100 ms, a child that exits during startup is reported immediately (not after a timeout), a port already held by another program is detected before spawning, and a pid file lets the next launch reap a process left by an uncleanly terminated run. `get_service_status` never blocks and never does network I/O — the old implementation held a lock during the readiness wait, which froze the window on slow cold starts. The 45 s timeout is an upper bound only. Timing per stage is written to `logs/startup.log` under the data directory.
 - **`commands.rs`** — the *only* surface the frontend has onto process control: `start_services`, `stop_services`, `get_service_status`, `exit_app`. There is no generic "run this command" entry point, and the app deliberately does not use `tauri-plugin-shell` — the frontend has no shell/command-execution capability at all.
 - **Orphan-process hardening** — on Windows, each child process is assigned to its own Windows Job Object (`win32job` crate, `KILL_ON_JOB_CLOSE`), so the backend and anything it spawns is guaranteed to die with the app, including on an unexpected crash of the app itself. On Linux a pid file lets the next launch reap a leftover backend (verified by checking `/proc/<pid>/exe`, so a reused pid is never killed).
 - **Service controls** — `ServiceControls.tsx` (rendered only inside the Tauri shell) exposes **Stop** (halts services, keeps the window open), **Exit** (stops services and closes the app), and the native window's `X` button performs the same full shutdown as Exit.
@@ -252,7 +264,7 @@ npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or
 
 ## 📈 Storage & Historical Data
 
-**Before:** snapshot history was written to and read from **MongoDB Atlas** — `SnapshotLogger.cs` wrote documents, the Python analytics service queried Mongo directly, and a `MONGO_URI` connection string had to be configured before analytics would work at all.
+**Before:** snapshot history was written to and read from **MongoDB Atlas** — `SnapshotLogger.cs` wrote documents, the then-separate analytics service queried Mongo directly, and a `MONGO_URI` connection string had to be configured before analytics would work at all.
 
 **Why it changed:** MongoDB Atlas added an external dependency, an account, and a network requirement to what is otherwise a fully local, offline-capable application — and mid-project the target was originally PostgreSQL before the team settled on Mongo Atlas as what was available at the time.
 
@@ -264,7 +276,7 @@ npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or
 | Windows (packaged) | `%LOCALAPPDATA%\SystemInfo\data` |
 | Linux (packaged) | `~/.local/share/SystemInfo/data` |
 
-`AnalyticsService` reads these `.jsonl` files directly for the requested date range; malformed lines are logged and skipped rather than crashing the request. There is currently **no retention/TTL policy** — the snapshot directory grows unbounded over time (a known, documented trade-off, not a bug).
+`AnalyticsService` reads these `.jsonl` files directly for the requested date range; malformed lines are logged and skipped rather than crashing the request, and an "all time" query is clamped to the oldest day that actually has data. Results are cached for 5 seconds. (Analytics was a separate Python service before it moved into the backend — see [`PROJECT_STATUS.md`](./PROJECT_STATUS.md#-why-analytics-moved-from-python-to-c).) There is currently **no retention/TTL policy** — the snapshot directory grows unbounded over time (a known, documented trade-off, not a bug).
 
 ---
 
@@ -318,14 +330,14 @@ cd frontend && npm run tauri dev
 ### Full validation build
 
 ```bash
-./build.sh   # native engine → backend → frontend, fail-fast at the first broken step
+./build.sh   # native engine → backend → frontend → tests, fail-fast at the first broken step
 ```
 
 ---
 
 ## 📦 Building & Packaging
 
-**Before:** the Windows build was a whole-repository Inno Setup installer (`SystemInfo.iss`) that required the end user to have Node, npm, Python, pip, and the .NET SDK installed — later replaced by a self-contained `dotnet publish` plus a C# console launcher (`launcher/Program.cs`) that started the services and opened a browser tab.
+**Before:** the Windows build was a whole-repository Inno Setup installer (`SystemInfo.iss`) that required the end user to have a full development toolchain installed — later replaced by a self-contained `dotnet publish` plus a C# console launcher (`launcher/Program.cs`) that started the services and opened a browser tab.
 
 **Now:** CI (`.github/workflows/release.yml`) builds and packages both platforms in one workflow, triggered by a push containing a new top `CHANGELOG.md` entry:
 
@@ -333,7 +345,7 @@ cd frontend && npm run tauri dev
 2. **`tests`** — the reusable `tests.yml` workflow (native + Assembly `ctest` on Linux and Windows/MSVC, the C# test project, the Rust supervision tests). Both builds `needs:` it, so a failing test stops the release before any installer is built.
 3. **`build-windows`** — builds the native C++ engine, publishes the .NET backend self-contained, embeds the built frontend into its `wwwroot`, stages the backend as a Tauri resource, and runs `tauri build` to produce the NSIS installer.
 4. **`build-linux`** — builds the same native/backend/frontend stack (self-contained `linux-x64` backend), stages it as a Tauri resource, and runs `tauri build` to produce the AppImage and `.deb` — the same Tauri packaging path as Windows, just targeting different bundlers.
-4. **`release`** — downloads all three build artifacts, extracts that version's section out of `CHANGELOG.md` for the release notes, and publishes a GitHub Release with the version tag.
+5. **`release`** — downloads all three build artifacts, extracts that version's section out of `CHANGELOG.md` for the release notes, and publishes a GitHub Release with the version tag.
 
 The pre-Tauri artifacts (`launcher/`, `SystemInfo.iss`, `SystemInfo.ico`, `README-WINDOWS-INSTALLER.md`, `GITHUB-ACTIONS-SETUP.md`, `packaging/linux/AppRun`, `systeminfo.desktop`) were removed on 2026-09-29 — nothing in the build referenced them. `setup.*` and `start-all.*` remain as developer-only tooling.
 
@@ -372,11 +384,26 @@ This is a manual step you run after cutting a release — it isn't wired into CI
 |---|---|
 | `setup.sh` / `setup.ps1` | First-time prerequisite install + local data directory setup (Linux full / Windows dev-only) |
 | `start-all.sh` / `start-all.ps1` | Dev-only: start backend + frontend together, waiting for readiness at each step. Production on both platforms uses the Tauri shell (`process.rs`) instead |
-| `build.sh` | Fail-fast full build/validation across every layer |
+| `build.sh` | Fail-fast full build/validation across every layer, ending with the native/Assembly and C# test suites |
+| `native/build.sh` | Standalone native-engine build used by `build.sh` |
 | `clean.sh` | Strip generated build artifacts (`node_modules`, `dist`, `bin`/`obj`, caches) before archiving or sharing the repo — never removes source, `.git`, or config |
-| `scripts/sync-version.mjs` | Propagate `CHANGELOG.md`'s top version to all five version-bearing files |
-| `scripts/check-version.mjs` | Verify all five version-bearing files agree (run by CI) |
+| `scripts/sync-version.mjs` | Propagate `CHANGELOG.md`'s top version to all four version-bearing files |
+| `scripts/check-version.mjs` | Verify all four version-bearing files agree (run by CI) |
 | `scripts/archive-changelog.mjs` | Move old `CHANGELOG.md` entries into `CHANGELOG_ARCHIVE.md` |
+
+---
+
+## 🧪 Tests
+
+Nothing needs Python or a scripting runtime — only the toolchains you already use to build the app.
+
+| Suite | What it covers | Run it |
+|---|---|---|
+| **Native + Assembly** (`tests/native/`, ctest) | Every SSE2/AVX2 kernel against a C++ reference at lengths 0–4099 with misaligned pointers; `memcpy` guard bytes; overlap handling; CPUID/OS feature consistency; topology, storage and fan enumeration; argument validation; the regression for the SIMD loop that hung on fewer than 4 iterations | `cmake -S native -B native/build-tests -DBUILD_NATIVE_TESTS=ON && cmake --build native/build-tests && ctest --test-dir native/build-tests --output-on-failure` |
+| **C#** (`backend/SystemMonitor.Tests`) | Analytics maths and JSON shape, torn/malformed snapshot lines, empty history, a full 86,400-row day, cancellation, the bounded "all time" query, and the managed native wrappers against plain C# reference implementations | `SYSTEMINFO_NATIVE_DIR=native/build-tests dotnet run --project backend/SystemMonitor.Tests` |
+| **Process supervisor** (`frontend/src-tauri/supervisor-tests`) | Starting services concurrently, `status()` never blocking during startup (the original window-freeze bug), a crashed child reported immediately, a busy port not mistaken for a healthy service, stale-process cleanup, cancellation, no leaked children | `cd frontend/src-tauri/supervisor-tests && cargo test` |
+
+CI runs all three through the reusable `tests.yml` workflow (Linux, plus Windows/MSVC for the native and C# suites) on every pull request and branch push, and `release.yml` will not build an installer until it passes. `./build.sh` runs the native and C# suites locally.
 
 ---
 
@@ -386,7 +413,7 @@ This is a manual step you run after cutting a release — it isn't wired into CI
 - **GPU:** Windows reports every detected adapter via `Win32_VideoController` with live per-engine utilization; Linux's GPU path goes through the native engine's `get_gpu_vendor()`/`get_amd_gpu_usage_percent()` (AMD sysfs), a narrower path than the Windows one.
 - **Battery:** implemented on both platforms; the Windows IOCTL path and DXGI-linked GPU code have **not been hardware-verified** — no Windows/`dotnet` toolchain was available in the environment that most recently wrote/extended them. Windows native cross-compilation (via `mingw-w64`) was verified in isolation, but not the same as a Windows-hosted build.
 - **Storage health:** disk capacity/usage only — full SMART health needs root and is not implemented on either platform.
-- **Testing:** no automated test suite exists yet; the `tests/` directory is currently an empty placeholder.
+- **Testing:** the native/Assembly layer, the C# analytics and native wrappers, and the Rust process supervisor have automated tests (see [Tests](#-tests)). There are no frontend tests, and nothing exercises an installed build automatically.
 
 See [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) for the full, itemized list of what has and hasn't been hardware-verified.
 

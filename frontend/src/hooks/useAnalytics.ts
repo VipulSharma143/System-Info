@@ -10,7 +10,7 @@ interface AnalyticsState {
   trend: TrendResponse | null;
   bottlenecks: BottlenecksResponse | null;
   stats: StatsResponse | null;
-  unavailable: boolean; // Python analytics service down/unreachable — mirrors
+  unavailable: boolean; // analytics unavailable (backend unreachable or history unreadable) — mirrors
   // the graceful-degradation pattern already used for hardware reads
   loading: boolean;
 }
@@ -37,7 +37,7 @@ export function useAnalytics(windowMinutes: number = DEFAULT_WINDOW_MINUTES) {
         fetch(`${API_BASE}/api/analytics/stats?${params}`),
       ]);
 
-      // AnalyticsEndpoints.cs returns 503 when the Python service is
+      // AnalyticsEndpoints.cs returns 503 when the snapshot history can't be read, or when the backend is
       // unreachable — treat that as "unavailable", not an error state.
       if (trendRes.status === 503 || bottlenecksRes.status === 503 || statsRes.status === 503) {
         setState((prev) => ({ ...prev, unavailable: true, loading: false }));

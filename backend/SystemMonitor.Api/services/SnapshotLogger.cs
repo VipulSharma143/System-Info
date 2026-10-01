@@ -52,8 +52,8 @@ public static class SnapshotLogger
 
             var obj = new JsonObject
             {
-                // ISO-8601 UTC with a trailing "Z" — matches what the Python
-                // analytics side already parses via fromisoformat().
+                // ISO-8601 UTC with a trailing "Z" — read back by AnalyticsService (DateTime parses it
+                // directly, including the 7-digit fractional seconds).
                 ["timestamp"] = timestamp.ToString("o"),
                 ["cpuUsedPercent"] = cpu?.UsedPercent ?? 0,
                 ["network"] = networkArray

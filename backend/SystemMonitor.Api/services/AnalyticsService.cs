@@ -4,8 +4,9 @@ using SystemMonitor.Api.Interface;
 
 namespace SystemMonitor.Api.Services;
 
-// In-process replacement for the former Python/FastAPI analytics service.
-// Same maths, same thresholds, same JSON shape (snake_case, and the same
+// Trend, bottleneck and summary analysis over the local snapshot history.
+// Originally a separate Python/FastAPI service; moved in-process (see PROJECT_STATUS.md,
+// "Why analytics moved from Python to C#"). Same maths, same thresholds, same JSON shape (snake_case, and the same
 // "no snapshots" short-circuit the frontend already handles) — so
 // /api/analytics/* is a drop-in and nothing outside this file changed for the UI.
 //
@@ -249,7 +250,7 @@ public sealed class AnalyticsService
         return v.Count == 0 ? null : new StatSummary(Math.Round(v.Average(), 2), Math.Round(v.Min(), 2), Math.Round(v.Max(), 2), v.Count);
     }
 
-    // Same text shape as Python's isoformat() ("+00:00" suffix) so existing
+    // ISO-8601 with a "+00:00" suffix (the shape the UI has always received) so existing
     // consumers (Date parsing, nearest-timestamp lookup) see identical strings.
     private static string Iso(DateTime utc) => utc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.ffffffzzz", System.Globalization.CultureInfo.InvariantCulture);
 

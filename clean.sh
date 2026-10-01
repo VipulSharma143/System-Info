@@ -31,8 +31,6 @@
 #   - Native CMake/build output
 #   - Native compiled libraries
 #   - Tauri target output
-#   - Python __pycache__
-#   - Python bytecode
 #   - pytest/mypy/ruff caches
 #   - Project logs
 #   - Temporary/editor files
@@ -162,7 +160,7 @@ log "Cleanup started."
 # 1. Safety checks
 # ============================================================
 
-step "1/9 — Safety checks"
+step "1/8 — Safety checks"
 
 if [ ! -d "$PROJECT_ROOT/.git" ]; then
     fail "This does not appear to be a Git project."
@@ -177,7 +175,7 @@ ok "Git repository detected."
 # 2. Frontend / Node.js cleanup
 # ============================================================
 
-step "2/9 — Cleaning frontend dependencies and build output"
+step "2/8 — Cleaning frontend dependencies and build output"
 
 # ------------------------------------------------------------
 # Node dependencies
@@ -225,7 +223,7 @@ ok "Frontend cleanup completed."
 # 3. .NET cleanup
 # ============================================================
 
-step "3/9 — Cleaning .NET build artifacts"
+step "3/8 — Cleaning .NET build artifacts"
 
 # ------------------------------------------------------------
 # IMPORTANT:
@@ -281,7 +279,7 @@ ok ".NET build artifacts cleaned."
 # 4. Native C++ cleanup
 # ============================================================
 
-step "4/9 — Cleaning native C++ build artifacts"
+step "4/8 — Cleaning native C++ build artifacts"
 
 # ------------------------------------------------------------
 # Standard native build directory
@@ -365,7 +363,7 @@ ok "Native C++ artifacts cleaned."
 # 5. Tauri cleanup
 # ============================================================
 
-step "5/9 — Cleaning Tauri build artifacts"
+step "5/8 — Cleaning Tauri build artifacts"
 
 if [ -d "$PROJECT_ROOT/frontend/src-tauri" ]; then
 
@@ -394,69 +392,10 @@ else
 fi
 
 # ============================================================
-# 6. Python cleanup
+# 6. Logs and temporary files
 # ============================================================
 
-step "6/9 — Cleaning Python caches"
-
-# ------------------------------------------------------------
-# Python __pycache__ directories
-# ------------------------------------------------------------
-
-while IFS= read -r -d '' directory; do
-    remove_path \
-        "$directory" \
-        "Python __pycache__ directory"
-done < <(
-    find "$PROJECT_ROOT" \
-        -path "$PROJECT_ROOT/.git" -prune -o \
-        -type d \
-        -name "__pycache__" \
-        -print0 2>/dev/null
-)
-
-# ------------------------------------------------------------
-# Python compiled bytecode
-# ------------------------------------------------------------
-
-while IFS= read -r -d '' file; do
-    remove_path \
-        "$file" \
-        "Python compiled bytecode"
-done < <(
-    find "$PROJECT_ROOT" \
-        -path "$PROJECT_ROOT/.git" -prune -o \
-        -type f \
-        \( \
-            -name "*.pyc" \
-            -o -name "*.pyo" \
-        \) \
-        -print0 2>/dev/null
-)
-
-# ------------------------------------------------------------
-# Python tool caches
-# ------------------------------------------------------------
-
-remove_path \
-    "$PROJECT_ROOT/.pytest_cache" \
-    "Project pytest cache"
-
-remove_path \
-    "$PROJECT_ROOT/.mypy_cache" \
-    "Project MyPy cache"
-
-remove_path \
-    "$PROJECT_ROOT/.ruff_cache" \
-    "Project Ruff cache"
-
-ok "Python caches cleaned."
-
-# ============================================================
-# 7. Logs and temporary files
-# ============================================================
-
-step "7/9 — Cleaning logs and temporary files"
+step "6/8 — Cleaning logs and temporary files"
 
 # ------------------------------------------------------------
 # Remove project logs
@@ -504,10 +443,10 @@ done < <(
 ok "Temporary files cleaned."
 
 # ============================================================
-# 8. Search for remaining generated artifacts
+# 7. Search for remaining generated artifacts
 # ============================================================
 
-step "8/9 — Scanning for remaining generated artifacts"
+step "7/8 — Scanning for remaining generated artifacts"
 
 FOUND_GENERATED=0
 
@@ -534,7 +473,6 @@ check_remaining() {
 check_remaining "node_modules" "node_modules directory"
 check_remaining "bin" ".NET bin directory"
 check_remaining "obj" ".NET obj directory"
-check_remaining "__pycache__" "Python cache directory"
 check_remaining "target" "Rust/Tauri target directory"
 check_remaining "dist" "frontend distribution directory"
 
@@ -549,10 +487,10 @@ else
 fi
 
 # ============================================================
-# 9. Final repository validation
+# 8. Final repository validation
 # ============================================================
 
-step "9/9 — Final cleanup validation"
+step "8/8 — Final cleanup validation"
 
 # ------------------------------------------------------------
 # Critical files that must survive cleanup
@@ -648,7 +586,6 @@ echo "  - ALL .NET obj directories" | tee -a "$CLEAN_LOG"
 echo "  - native CMake/build artifacts" | tee -a "$CLEAN_LOG"
 echo "  - native compiled libraries" | tee -a "$CLEAN_LOG"
 echo "  - Tauri target/build artifacts" | tee -a "$CLEAN_LOG"
-echo "  - Python caches and bytecode" | tee -a "$CLEAN_LOG"
 echo "  - project logs" | tee -a "$CLEAN_LOG"
 echo "  - temporary/editor files" | tee -a "$CLEAN_LOG"
 echo "" | tee -a "$CLEAN_LOG"

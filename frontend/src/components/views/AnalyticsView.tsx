@@ -19,7 +19,7 @@ interface AnalyticsViewProps {
 
   The range selector drives useAnalytics' window parameter, which swaps the
   existing polling loop's range rather than starting a second loop. History
-  here comes from the local JSONL snapshot store via the Python service; if
+  here comes from the local JSONL snapshot store via the backend's AnalyticsService; if
   that service is down the page degrades to an explanatory state instead of
   a raw error, because live monitoring is genuinely unaffected by it.
 */

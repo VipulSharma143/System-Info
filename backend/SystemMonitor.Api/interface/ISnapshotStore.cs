@@ -1,7 +1,7 @@
 namespace SystemMonitor.Api.Interface;
 
 // One row of historical data. Json is a single pre-serialized snapshot line
-// (the same shape the Python analytics service already parses) — kept as a
+// (the shape AnalyticsService parses) — kept as a
 // raw string rather than a typed model since the snapshot schema is owned by
 // SnapshotLogger and consumed opaquely by storage.
 public record SystemSnapshot(DateTime TimestampUtc, string Json);
