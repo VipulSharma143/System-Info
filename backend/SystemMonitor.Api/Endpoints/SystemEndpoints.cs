@@ -44,16 +44,15 @@ return provider.GetBattery();
 })
 .WithName("GetBatteryUsage");
 
-app.MapGet("/api/system/all", async (ISystemInfoProvider provider, SystemMonitorBackgroundService sampler) =>
+app.MapGet("/api/system/all", async (SystemSnapshotService snapshots, CancellationToken ct) =>
 {
-var ram = await provider.GetRamAsync();
-var cpu = sampler.GetCachedCpu() ?? new CpuInfo(0);
-var processes = await provider.GetProcessesAsync();
-var disks = provider.GetDisks();
-var network = sampler.GetCachedNetwork() ?? new List<NetworkInfo>();
-var battery = provider.GetBattery();
-
-return new { ram, cpu, processes, disks, network, battery };
+    // One failing subsystem (GPU/battery/disk/...) never fails the request:
+    // it is reported in "unavailable" and the rest is returned. Only "RAM has
+    // never been readable" is a 503, since the UI cannot render without it.
+    var snap = await snapshots.GetAsync(ct);
+    return snap is null
+        ? Results.Problem("System information is not available yet.", statusCode: 503)
+        : Results.Ok(snap);
 })
 .WithName("GetAllSystemInfo");
 

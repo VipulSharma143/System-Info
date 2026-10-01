@@ -4,7 +4,7 @@
 
 **Fast-load technical reference for AI coding agents — stack, structure, endpoints, known traps, and behavioral contracts, so you don't have to scan every folder before making a change**
 
-`React 19` · `TypeScript` · `.NET 10` · `Tauri 2 / Rust` · `C++17` · `x86-64 Assembly` · `Python / FastAPI` · `Local JSON Lines`
+`React 19` · `TypeScript` · `.NET 10` · `Tauri 2 / Rust` · `C++17` · `x86-64 Assembly` · `Local JSON Lines`
 
 </div>
 
@@ -36,15 +36,15 @@ Real-time hardware telemetry (CPU/RAM/disk/network/processes/battery/GPU/system 
 | Layer | Tech |
 |---|---|
 | Frontend | React 19, TypeScript, Vite 8, Tailwind 4, sweetalert2 (alerts), lucide-react (icons) — no router, no Redux, state lives in custom hooks |
-| Desktop shell | Tauri 2 (Rust, `win32job` on Windows) — native window, spawns/supervises backend+analytics as child processes |
+| Desktop shell | Tauri 2 (Rust, `win32job` on Windows) — native window, spawns/supervises the backend as a child process |
 | Backend | C#, .NET 10 Minimal API. No auth (loopback-only, single user). No ORM. |
 | Native engine | C++17 (CMake), called via P/Invoke — CPU benchmark, GPU vendor detect, diagnostics |
-| Perf demo | x86-64 NASM (scalar + SIMD/SSE2) CPU benchmark, called from C++ |
-| Analytics | Python 3.10+/FastAPI + uvicorn (port 8001) — trend/bottleneck/stats over local snapshot files |
+| Assembly | x86-64 NASM: benchmark loops + SSE2/AVX2 vector kernels (`vector_kernels.asm`: add, dot, int32 sum) behind runtime CPUID/XGETBV dispatch in `simd_dispatch.cpp`; every kernel is verified against a C++ reference by `si_kernel_selftest()` |
+| Analytics | `AnalyticsService.cs` (in-process; was Python/FastAPI on :8001) — trend/bottleneck/stats over local snapshot files, 5 s result cache |
 | Storage | **No database.** Append-only local JSON Lines: `data/snapshots/{yyyy}/{MM}/{dd}.jsonl`. (Previously MongoDB Atlas, before that PostgreSQL was the original target — both replaced deliberately for offline capability. Don't reintroduce a DB without discussion.) |
 | CI/CD | One workflow, `.github/workflows/release.yml`: `version → build-windows + build-linux (parallel) → release`. Triggered by a new top `CHANGELOG.md` entry. |
 
-**Prerequisites for local dev:** .NET SDK 10.0+, Node.js 20.x+, Python 3.10+, CMake 3.10+, NASM, Rust (stable) + Tauri 2 CLI (only needed for the desktop shell itself).
+**Prerequisites for local dev:** .NET SDK 10.0+, Node.js 20.x+, CMake 3.10+, NASM, Rust (stable) + Tauri 2 CLI (only needed for the desktop shell itself).
 
 ## 📁 Structure
 
@@ -63,12 +63,10 @@ backend/SystemMonitor.Api/
   Native/                 NativeInterop.cs (P/Invoke bridge)
 native/                  C++ engine: include/native_engine.h (C ABI), src/{windows,linux}_provider.cpp, src/common.cpp
 assembly/                NASM benchmarks: benchmark_loop.asm, simd_loop.asm, get_constant.asm
-analytics/               analytics_service.py (FastAPI: /health,/stats,/trend,/bottlenecks), trend_analysis.py,
-                         bottleneck_detection.py, analyze_snapshots.py, run_analytics.py (PyInstaller entry)
 scripts/                 sync-version.mjs, check-version.mjs, archive-changelog.mjs, make-update-manifest.mjs
-launcher/, packaging/linux/, SystemInfo.iss, README-WINDOWS-INSTALLER.md, GITHUB-ACTIONS-SETUP.md
-                         DEPRECATED — pre-Tauri approach, kept only as rollback reference. Don't build on these.
-database/, docs/, tests/  Empty placeholders. No test suite exists yet.
+tests/native/            C++/Assembly tests (ctest). Rust supervisor tests: frontend/src-tauri/tests/supervisor.rs.
+packaging/linux/         only systeminfo.png (icon source). The AppImage's AppRun is generated inline by release.yml.
+database/, docs/         Empty placeholders.
 ```
 
 ## 🏗️ Architecture
@@ -78,7 +76,7 @@ Two independent hardware-reading paths — intentional, not duplication:
 2. `/api/native/*` → C++ engine → Assembly. Used for CPU benchmarking, GPU vendor/AMD-usage detect (Linux's only GPU source), diagnostics.
 
 Live metrics: frontend polls `GET /api/system/all` → `SystemMonitorBackgroundService` (cached CPU/network) + `ISystemInfoProvider` (RAM/disk/battery on demand).
-History: background service appends every sample to `.jsonl` → frontend Analytics tab → .NET proxies to Python analytics (graceful 503 if down) → Python reads `.jsonl` directly, skipping malformed lines rather than failing.
+History: background service appends every sample to `.jsonl` → frontend Analytics tab → `AnalyticsService` (in-process) reads `.jsonl` directly, skipping malformed lines rather than failing.
 
 ### 📊 Metrics: Windows source vs Linux source
 
@@ -96,7 +94,7 @@ History: background service appends every sample to `.jsonl` → frontend Analyt
 
 ## 🪟 Desktop shell (Tauri 2) details
 
-Window: 1280×820 default, 980×650 minimum, both platforms. `process.rs` spawns backend (`:5132`) and analytics (`:8001`) as managed child processes, polling each `/health` (400ms interval, 30s timeout) before reporting ready — same platform-agnostic code path on both OSes, no per-platform launcher. Data dir resolution: `%LOCALAPPDATA%\SystemInfo` (Win) / `~/.local/share/SystemInfo` (Linux). `ServiceControls.tsx` (Tauri-only, not shown under plain `npm run dev`) exposes Stop (halt services, keep window) and Exit (stop + close); the native window's `X` button does the same full shutdown as Exit. Orphan hardening: Windows uses `win32job` Job Objects (`KILL_ON_JOB_CLOSE`) so a PyInstaller-extracted interpreter process dies even on an app crash; Linux collapses to plain `Child::kill()` (no onefile-extraction indirection to guard against there).
+Window: 1280×820 default, 980×650 minimum, both platforms. `supervisor.rs` (Tauri-free lifecycle core, unit-tested) + `process.rs` (resource lookup, command building) start the backend (`:5132`) — the supervisor is generic over a list of services and starts them **concurrently**, polling `/health` every 100 ms; a child that dies during startup is reported immediately, a busy port is detected before spawn, a pid file lets the next launch reap leftovers (Linux). The 45 s timeout is an upper bound only. `get_service_status` is lock-free and must stay non-blocking — sync Tauri commands run on the UI thread, and holding a lock across the readiness wait froze the window once. `start_services`/`stop_services` are async + `spawn_blocking` for the same reason. Stage timings land in `<data>/logs/startup.log`. Data dir resolution: `%LOCALAPPDATA%\SystemInfo` (Win) / `~/.local/share/SystemInfo` (Linux). `ServiceControls.tsx` (Tauri-only, not shown under plain `npm run dev`) exposes Stop (halt services, keep window) and Exit (stop + close); the native window's `X` button does the same full shutdown as Exit. Orphan hardening: Windows uses `win32job` Job Objects (`KILL_ON_JOB_CLOSE`) so the backend dies even on an app crash; Linux uses the pid file + `/proc/<pid>/exe` check to reap leftovers.
 
 ## 🔄 In-app updates (since 2.2.0)
 
@@ -104,7 +102,7 @@ Checks GitHub Releases a few seconds after load and every 6h while open; `Update
 
 ## 🔌 API (backend on :5132, or whatever `apiConfig.ts` resolves)
 
-`GET /health` · `/api/system/{all,cpu,ram,disk,network,processes,battery,info,gpu}` · `/api/analytics/{stats,trend,bottlenecks}?minutes=` · `/api/speed-test` (implemented, unused — frontend does it client-side against Cloudflare) · `/api/native/{cpuinfo,cpu,cputemp,gpu,battery,fan,test,benchmark,asmtest,simd-benchmark}`
+`GET /health` · `/api/system/{all,cpu,ram,disk,network,processes,battery,info,gpu}` · `/api/analytics/{stats,trend,bottlenecks}?minutes=` · `/api/speed-test` (implemented, unused — frontend does it client-side against Cloudflare) · `/api/native/{cpuinfo,cpufeatures,kernels,topology,storage,fans,memory-bandwidth,cpu,cputemp,gpu,battery,fan,test,benchmark,asmtest,simd-benchmark}`. `/api/system/all` now isolates each subsystem (per-section timeout, last-good RAM, additive `unavailable` array) via `SystemSnapshotService`
 
 CORS locked to `localhost:5173` (Vite dev), `tauri.localhost` (Win WebView2), `tauri://localhost` (Linux Tauri). No auth token — CORS is the only real boundary.
 
@@ -112,11 +110,13 @@ CORS locked to `localhost:5173` (Vite dev), `tauri.localhost` (Win WebView2), `t
 
 ```bash
 ./setup.sh                                  # first-time (Linux full / Windows dev-only via setup.ps1)
-./start-all.sh                              # dev: backend+analytics+frontend together (start-all.ps1 on Windows)
+./start-all.sh                              # dev: backend+frontend together (start-all.ps1 on Windows)
 cd backend/SystemMonitor.Api && dotnet run  # :5132
-cd analytics && python -m uvicorn analytics_service:app --port 8001
 cd frontend && npm run dev                  # :5173
 cd frontend && npm run tauri dev            # actual desktop shell, dev mode
+cmake -S native -B native/build -DBUILD_NATIVE_TESTS=ON && cmake --build native/build && (cd native/build && ctest --output-on-failure)   # native + assembly tests
+cd frontend/src-tauri/supervisor-tests && cargo test   # process-supervision tests (needs python3 as a fake service, ports 18101-18152)
+dotnet run --project backend/SystemMonitor.Tests   # analytics + storage + native wrapper tests (SYSTEMINFO_NATIVE_DIR=<native build dir>)
 ./build.sh                                  # fail-fast full validation build (native → backend → frontend)
 ./clean.sh                                  # strip build artifacts (node_modules/dist/bin/obj/caches) before archiving/sharing
 ```
@@ -124,13 +124,13 @@ Data dir: `./data` (dev) · `%LOCALAPPDATA%\SystemInfo\data` (Win packaged) · `
 
 ## 🔢 Versioning & release
 
-Single source: top `## [x.y.z]` entry in `CHANGELOG.md`. Synced to 5 files: `frontend/package.json`, `frontend/src-tauri/tauri.conf.json`, `frontend/src-tauri/Cargo.toml`, `Directory.Build.props`, `SystemInfo.iss`.
+Single source: top `## [x.y.z]` entry in `CHANGELOG.md`. Synced to 4 files: `frontend/package.json`, `frontend/src-tauri/tauri.conf.json`, `frontend/src-tauri/Cargo.toml`, `Directory.Build.props`.
 ```bash
-node scripts/sync-version.mjs   # propagate CHANGELOG.md top version → all 5 files
+node scripts/sync-version.mjs   # propagate CHANGELOG.md top version → all 4 files
 node scripts/check-version.mjs  # verify sync (CI runs this)
 node scripts/archive-changelog.mjs [--keep N]  # manual, post-release: move old entries to CHANGELOG_ARCHIVE.md (default keeps 2 newest); never affects release detection, which only reads the top entry
 ```
-Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job parses it and checks the tag doesn't already exist → `build-windows` + `build-linux` (parallel, each builds native engine → self-contained backend publish → embeds frontend into `wwwroot` → PyInstaller-freezes analytics → `tauri build`) → `release` (only if both succeed) creates the git tag + GitHub Release atomically, attaches installers + `latest.json`. **Never hand-create a git tag** — see traps below.
+Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job parses it and checks the tag doesn't already exist → `build-windows` + `build-linux` (parallel, each builds native engine → self-contained backend publish → embeds frontend into `wwwroot` → `tauri build`), after the reusable `tests.yml` workflow (native/Assembly ctest on Linux+Windows, C# tests, Rust supervisor tests) has passed → `release` (only if both succeed) creates the git tag + GitHub Release atomically, attaches installers + `latest.json`. **Never hand-create a git tag** — see traps below.
 
 ## 🐛 Known traps (don't repeat these)
 
@@ -142,13 +142,13 @@ Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job
 
 ## ⚠️ Unverified / known-limited (check `PROJECT_STATUS.md` before assuming these work)
 
-Windows battery IOCTL detail + DXGI-linked GPU reads — implemented, not hardware-verified (no Windows/dotnet toolchain in the environment that most recently extended them; Windows cross-compilation via mingw-w64 was verified in isolation only). GPU detection is split across two unreconciled code paths (Windows structured provider vs. Linux native-engine path — see Architecture above). Multi-GPU engine-to-adapter attribution on Windows (parses `_phys_N_` from perf-counter instance names) is unverified against real dual-GPU hardware. No retention/TTL on snapshot storage (grows unbounded — accepted tradeoff, not a bug to silently fix). No automated test suite; `tests/`, `docs/`, `database/` are empty placeholders. No `LICENSE` file.
+Windows battery IOCTL detail + DXGI-linked GPU reads — implemented, not hardware-verified (no Windows/dotnet toolchain in the environment that most recently extended them; Windows cross-compilation via mingw-w64 was verified in isolation only). GPU detection is split across two unreconciled code paths (Windows structured provider vs. Linux native-engine path — see Architecture above). Multi-GPU engine-to-adapter attribution on Windows (parses `_phys_N_` from perf-counter instance names) is unverified against real dual-GPU hardware. No retention/TTL on snapshot storage (grows unbounded — accepted tradeoff, not a bug to silently fix). Tests exist only for the native/Assembly layer and the Rust supervisor (not gated in CI yet); there are no backend or frontend tests. `docs/`, `database/` are empty placeholders. No `LICENSE` file.
 
 ## 📜 Behavioral contracts (do not break)
 
 - No fabricated hardware values, ever — `Unavailable` is always correct over a guess.
 - Fully offline: no account, no cloud backend, no database.
-- Windows Job Object hardening must keep guaranteeing no orphaned backend/analytics processes survive a crash.
+- Windows Job Object hardening must keep guaranteeing no orphaned backend process survives a crash.
 - Update install must cleanly stop all services first, restart fresh after (or restart again if cancelled/failed) — never straddle services across an update.
 - CORS stays restricted to the known Tauri/Vite-dev origins listed above — it's the only real access boundary this API has.
 

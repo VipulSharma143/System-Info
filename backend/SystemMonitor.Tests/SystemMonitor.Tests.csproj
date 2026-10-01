@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Dependency-free test runner (exit code != 0 on failure): no xunit/NuGet restore
+       needed, so it runs anywhere the .NET SDK does.  Run: dotnet run (from backend/SystemMonitor.Tests)
+       It compiles the pure analytics/storage sources directly instead of referencing the
+       API project, which pulls in Windows-only packages. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework Condition="'$(TestTfm)'==''">net10.0</TargetFramework>
+    <TargetFramework Condition="'$(TestTfm)'!=''">$(TestTfm)</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Compile Include="../SystemMonitor.Api/services/AnalyticsService.cs" Link="linked/AnalyticsService.cs" />
+    <Compile Include="../SystemMonitor.Api/services/LocalJsonSnapshotStore.cs" Link="linked/LocalJsonSnapshotStore.cs" />
+    <Compile Include="../SystemMonitor.Api/interface/ISnapshotStore.cs" Link="linked/ISnapshotStore.cs" />
+    <Compile Include="../SystemMonitor.Api/Native/NativeInterop.cs" Link="linked/NativeInterop.cs" />
+    <Compile Include="../SystemMonitor.Api/Native/NativeKernels.cs" Link="linked/NativeKernels.cs" />
+  </ItemGroup>
+</Project>

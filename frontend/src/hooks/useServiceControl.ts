@@ -5,14 +5,13 @@ export type ServiceHealth = 'stopped' | 'starting' | 'running' | 'unavailable';
 
 export interface ServiceStatus {
   backend: ServiceHealth;
-  analytics: ServiceHealth;
 }
 
-const UNKNOWN_STATUS: ServiceStatus = { backend: 'stopped', analytics: 'stopped' };
+const UNKNOWN_STATUS: ServiceStatus = { backend: 'stopped' };
 
-// Only meaningful inside the Tauri desktop shell — there is no backend/
-// analytics process to start, stop, or exit when this bundle is a plain
-// browser tab (the old launcher path). Components using this hook should
+// Only meaningful inside the Tauri desktop shell — there is no backend
+// process to start, stop, or exit when this bundle is a plain
+// browser tab (dev only). Components using this hook should
 // pair it with `isTauri()` to decide whether to render Start/Stop/Exit at
 // all (see ServiceControls.tsx), but every function here is still safe to
 // call outside Tauri — it just resolves to a no-op with the last known

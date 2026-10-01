@@ -29,6 +29,8 @@ else
 }
 builder.Services.AddSingleton<SystemMonitorBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemMonitorBackgroundService>());
+builder.Services.AddSingleton<SystemSnapshotService>();
+builder.Services.AddSingleton<AnalyticsService>();
 
 builder.Services.AddOpenApi();
 
@@ -49,15 +51,6 @@ builder.Services.AddCors(options =>
     });
 });
 
-// HttpClient for calling the Python analytics_service.py (FastAPI, localhost:8001).
-// Named client so the base address and any future auth/headers/timeouts live in
-// one place, same reasoning as keeping hardware-provider selection centralized here.
-builder.Services.AddHttpClient("AnalyticsService", client =>
-{
-    client.BaseAddress = new Uri("http://localhost:8001");
-    client.Timeout = TimeSpan.FromSeconds(10);
-});
-
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -65,14 +58,13 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
+// No HTTPS redirection: the backend only listens on plain loopback HTTP, so the
+// middleware could never find an https port and just logged a warning per request.
 app.UseCors("AllowFrontend");
 
 // Cheap, dependency-free readiness probe for the Tauri process manager
-// (src-tauri/src/process.rs) — deliberately NOT under /api/system so it
-// never touches ISystemInfoProvider or the background sampler. Mirrors
-// analytics_service.py's own /health endpoint, which the same process
-// manager already polls the same way.
+// (src-tauri/src/supervisor.rs) — deliberately NOT under /api/system so it
+// never touches ISystemInfoProvider or the background sampler.
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
    .WithName("HealthCheck");
 
@@ -93,5 +85,20 @@ if (!string.IsNullOrEmpty(webRootPath) && Directory.Exists(webRootPath))
     app.UseStaticFiles();
     app.MapFallbackToFile("index.html");
 }
+
+// Pay the first-call cost of WMI / performance counters now, in the background,
+// instead of on the first /api/system/all request the UI makes.
+_ = Task.Run(async () =>
+{
+    try
+    {
+        var provider = app.Services.GetRequiredService<ISystemInfoProvider>();
+        await provider.GetRamAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Provider warm-up failed (non-fatal).");
+    }
+});
 
 app.Run();

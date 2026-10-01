@@ -9,6 +9,22 @@
 
 namespace fs = std::filesystem;
 
+// Exceptions must never cross the extern "C" boundary into .NET (that is a
+// process crash). std::filesystem's throwing overloads raise on permission
+// errors, unreadable /sys nodes, or a directory vanishing mid-scan (hot-unplug),
+// so every listing and existence check goes through these error_code versions.
+static bool path_exists(const std::string& p) {
+    std::error_code ec;
+    return fs::exists(p, ec) && !ec;
+}
+static std::vector<fs::directory_entry> list_dir(const std::string& p) {
+    std::vector<fs::directory_entry> out;
+    std::error_code ec;
+    fs::directory_iterator it(p, fs::directory_options::skip_permission_denied, ec);
+    for (fs::directory_iterator end; !ec && it != end; it.increment(ec)) out.push_back(*it);
+    return out;
+}
+
 // ------------------------------------------------------------
 // Internal helpers
 // ------------------------------------------------------------
@@ -88,9 +104,9 @@ double get_cpu_temperature() {
 
 int get_gpu_vendor() {
     const std::string drmPath = "/sys/class/drm";
-    if (!fs::exists(drmPath)) return 0;
+    if (!path_exists(drmPath)) return 0;
 
-    for (const auto& entry : fs::directory_iterator(drmPath)) {
+    for (const auto& entry : list_dir(drmPath)) {
         std::string name = entry.path().filename().string();
         if (name.rfind("card", 0) != 0) continue;
         if (name.find('-') != std::string::npos) continue;
@@ -113,7 +129,7 @@ int get_gpu_vendor() {
 double get_amd_gpu_usage_percent() {
     const std::string drmPath = "/sys/class/drm";
 
-    for (const auto& entry : fs::directory_iterator(drmPath)) {
+    for (const auto& entry : list_dir(drmPath)) {
         std::string name = entry.path().filename().string();
         if (name.rfind("card", 0) != 0) continue;
         if (name.find('-') != std::string::npos) continue;
@@ -132,15 +148,15 @@ double get_amd_gpu_usage_percent() {
 
 int get_fan_rpm() {
     const std::string hwmonPath = "/sys/class/hwmon";
-    if (!fs::exists(hwmonPath)) return -1;
+    if (!path_exists(hwmonPath)) return -1;
 
-    for (const auto& entry : fs::directory_iterator(hwmonPath)) {
+    for (const auto& entry : list_dir(hwmonPath)) {
         std::string fanPath = entry.path().string() + "/fan1_input";
         std::ifstream file(fanPath);
         if (!file.is_open()) continue;
 
-        int rpm;
-        file >> rpm;
+        int rpm = -1;
+        if (!(file >> rpm)) continue;   // unreadable/garbled node: try the next hwmon, don't return junk
         return rpm;
     }
 
@@ -148,13 +164,14 @@ int get_fan_rpm() {
 }
 
 int get_battery_info_json(char* bufferOut, int bufferSize) {
+    if (!bufferOut || bufferSize <= 0) return -1;
     const std::string psPath = "/sys/class/power_supply";
     std::string batteryDir;
 
     // Dynamic discovery — same lesson as get_gpu_vendor(): don't assume BAT0.
     // This machine reports BAT1; another might report BAT0 or CMB1.
-    if (fs::exists(psPath)) {
-        for (const auto& entry : fs::directory_iterator(psPath)) {
+    if (path_exists(psPath)) {
+        for (const auto& entry : list_dir(psPath)) {
             std::ifstream typeFile(entry.path().string() + "/type");
             if (!typeFile.is_open()) continue;
             std::string type;

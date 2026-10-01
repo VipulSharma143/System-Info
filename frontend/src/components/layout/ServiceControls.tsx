@@ -15,7 +15,7 @@ export default function ServiceControls() {
 
   if (!isTauri()) return null;
 
-  const { label, color, filled } = summarize(status.backend, status.analytics);
+  const { label, color, filled } = summarize(status.backend);
 
   // start/stop reject if the desktop shell can't complete the request. Nothing
   // used to surface that; now the user gets a plain-language alert and the
@@ -52,7 +52,7 @@ export default function ServiceControls() {
           icon={Play}
           collapseLabel
           onClick={() => void run(start, 'serviceStart')}
-          disabled={pending || (status.backend === 'running' && status.analytics !== 'stopped')}
+          disabled={pending || status.backend === 'running' || status.backend === 'starting'}
           title="Start or resume monitoring services"
         >
           Start
@@ -63,7 +63,7 @@ export default function ServiceControls() {
           icon={Square}
           collapseLabel
           onClick={() => void run(stop, 'serviceStop')}
-          disabled={pending || (status.backend === 'stopped' && status.analytics === 'stopped')}
+          disabled={pending || status.backend === 'stopped'}
           title="Stop monitoring services (keeps the window open)"
         >
           Stop
@@ -84,21 +84,15 @@ export default function ServiceControls() {
   );
 }
 
-function summarize(
-  backend: ServiceHealth,
-  analytics: ServiceHealth
-): { label: string; color: string; filled: boolean } {
-  if (backend === 'running' && analytics === 'running') {
-    return { label: 'Running', color: 'var(--accent)', filled: true };
+function summarize(backend: ServiceHealth): { label: string; color: string; filled: boolean } {
+  switch (backend) {
+    case 'running':
+      return { label: 'Running', color: 'var(--accent)', filled: true };
+    case 'starting':
+      return { label: 'Starting…', color: 'var(--warn)', filled: true };
+    case 'unavailable':
+      return { label: 'Backend unavailable', color: 'var(--warn)', filled: true };
+    default:
+      return { label: 'Stopped', color: 'var(--text-muted)', filled: false };
   }
-  if (backend === 'stopped' && analytics === 'stopped') {
-    return { label: 'Stopped', color: 'var(--text-muted)', filled: false };
-  }
-  if (backend === 'starting' || analytics === 'starting') {
-    return { label: 'Starting…', color: 'var(--warn)', filled: true };
-  }
-  if (backend === 'running' && (analytics === 'unavailable' || analytics === 'stopped')) {
-    return { label: 'Partial — analytics unavailable', color: 'var(--warn)', filled: true };
-  }
-  return { label: 'Stopped', color: 'var(--text-muted)', filled: false };
 }

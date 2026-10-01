@@ -4,7 +4,7 @@
 #
 # Checks every prerequisite this project needs, offers to install
 # whatever's missing (Linux/apt-based systems), builds the native
-# engine, installs frontend/analytics dependencies, creates the local
+# engine, installs frontend dependencies, creates the local
 # data directory (no database account needed), checks the ports
 # start-all.sh will need, and finally offers to launch everything via
 # start-all.sh.
@@ -51,8 +51,6 @@ check_cmd() {
 check_cmd dotnet   "dotnet-sdk-10.0"
 check_cmd node     "nodejs"
 check_cmd npm      "npm"
-check_cmd python3  "python3"
-check_cmd pip3     "python3-pip"
 check_cmd cmake    "cmake"
 check_cmd nasm     "nasm"
 check_cmd gcc      "build-essential"
@@ -103,18 +101,7 @@ fi
 
 echo ""
 
-# --- 5. Analytics dependencies ---
-echo "Checking analytics dependencies..."
-if python3 -c "import fastapi, uvicorn" &> /dev/null; then
-    ok "fastapi and uvicorn already installed."
-else
-    pip3 install fastapi uvicorn --break-system-packages --quiet
-    ok "Python analytics dependencies installed."
-fi
-
-echo ""
-
-# --- 6. Local data directory ---
+# --- 5. Local data directory ---
 # No database account, connection string, or cloud cluster needed — all
 # history is stored on this machine. SYSTEM_INFO_DATA_DIR can override the
 # location; otherwise it resolves to the platform default (see
@@ -131,9 +118,8 @@ fi
 
 echo ""
 
-# --- 7. Port check ---
-# start-all.sh needs 5173 (frontend) and 8001 (analytics) free, and now
-# fails fast if they aren't. Catching that here, at setup time, is more
+# --- 6. Port check ---
+# start-all.sh needs 5173 (Vite dev server) free and fails fast if it isn't. Catching that here, at setup time, is more
 # useful than only discovering it the moment you try to launch.
 echo "Checking ports start-all.sh will need..."
 port_in_use() {
@@ -149,7 +135,7 @@ port_owner() {
     fi
 }
 PORT_WARNING=false
-for port in 5173 8001; do
+for port in 5173; do
     if port_in_use "$port"; then
         warn "Port $port is currently in use by $(port_owner "$port")."
         PORT_WARNING=true
@@ -158,7 +144,7 @@ done
 if [ "$PORT_WARNING" = true ]; then
     echo "        start-all.sh will refuse to start until the port(s) above are freed."
 else
-    ok "Ports 5173 and 8001 are free."
+    ok "Port 5173 is free."
 fi
 
 echo ""
@@ -167,7 +153,7 @@ echo " Setup complete."
 echo "=================================================="
 echo ""
 
-# --- 8. Offer to launch everything ---
+# --- 7. Offer to launch everything ---
 if [ "$PORT_WARNING" = true ]; then
     echo "Resolve the port conflict above before launching."
 elif ask_yes_no "Start the application now (./start-all.sh)?"; then

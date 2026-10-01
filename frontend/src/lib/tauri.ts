@@ -1,7 +1,6 @@
-// The same frontend/dist bundle ships two ways: inside the Tauri desktop
-// app, and (still, for now — see launcher/Program.cs's deprecation note)
-// embedded in the backend's wwwroot and opened in a regular browser tab by
-// the old C# launcher. `isTauri()` is the one runtime check that tells the
+// The same frontend/dist bundle runs two ways: inside the Tauri desktop
+// app (production), and embedded in the backend's wwwroot / served by Vite
+// and opened in a plain browser tab (development only). `isTauri()` is the one runtime check that tells the
 // rest of the app which world it's in, so nothing else has to guess.
 //
 // `__TAURI_INTERNALS__` is injected into `window` by the Tauri webview

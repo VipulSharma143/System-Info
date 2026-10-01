@@ -101,10 +101,10 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
   );
 
   // "Services starting" only means something inside the Tauri desktop
-  // shell, where the backend/analytics processes are spawned by this app
+  // shell, where the backend process is spawned by this app
   // and their readiness is reported via the real services-status event
   // (useServiceControl). On the Linux browser-tab path, start-all.sh
-  // already started all three processes before the page even loaded, so
+  // already started the backend and dev server before the page even loaded, so
   // there's no separate "starting services" phase to represent here —
   // treat it as instantly satisfied rather than faking a check.
   const servicesReady = !isTauri() || serviceStatus.backend === 'running';

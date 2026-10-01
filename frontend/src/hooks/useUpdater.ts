@@ -17,7 +17,7 @@ import { showAlert } from '../lib/alerts';
 
     1. download  — services keep running, the dashboard stays live, progress
                    is reported through `progress`.
-    2. stop      — `stop_services` shuts backend + analytics down cleanly, so
+    2. stop      — `stop_services` shuts the backend down cleanly, so
                    no process is holding files the installer must replace
                    (Windows locks running .exe files; Linux would otherwise
                    keep running the old binaries).

@@ -11,7 +11,7 @@
 #   5. Restore/build .NET backend
 #   6. Install/check frontend dependencies
 #   7. Build frontend
-#   8. Validate Python analytics service
+#   8. Run tests (native/Assembly ctest, analytics)
 #   9. If EVERYTHING passes -> run ./start-all.sh
 #
 # The script intentionally fails fast.
@@ -161,8 +161,6 @@ require_directory "backend/SystemMonitor.Api"
 require_directory "frontend"
 require_directory "frontend/src"
 
-require_directory "analytics"
-
 require_directory "native"
 
 require_file "start-all.sh"
@@ -174,8 +172,6 @@ require_file "backend/SystemMonitor.Api/Program.cs"
 require_file "frontend/package.json"
 require_file "frontend/tsconfig.json"
 require_file "frontend/vite.config.ts"
-
-require_file "analytics/analytics_service.py"
 
 require_file "native/build.sh"
 
@@ -190,7 +186,6 @@ step "2/8 — Checking build prerequisites"
 require_command dotnet
 require_command node
 require_command npm
-require_command python3
 require_command cmake
 require_command gcc
 require_command g++
@@ -222,12 +217,10 @@ fi
 NODE_VERSION="$(node --version)"
 NPM_VERSION="$(npm --version)"
 DOTNET_VERSION="$(dotnet --version)"
-PYTHON_VERSION="$(python3 --version 2>&1)"
 
 log "Node:    $NODE_VERSION"
 log "npm:     $NPM_VERSION"
 log ".NET:    $DOTNET_VERSION"
-log "Python:  $PYTHON_VERSION"
 
 ok "Environment validation passed."
 
@@ -367,48 +360,29 @@ done
 ok "Speed test frontend files validated."
 
 # ============================================================
-# 7. Python analytics service
+# 7. Tests (native/Assembly kernels + in-process analytics)
 # ============================================================
 
-step "7/8 — Validating Python analytics service"
+step "7/8 — Running tests"
 
-cd "$PROJECT_ROOT/analytics"
-
-log "Checking Python syntax..."
-
-if run_command python3 -m py_compile analytics_service.py; then
-    ok "Python syntax validation passed."
+NATIVE_TEST_DIR="$PROJECT_ROOT/native/build-tests"
+log "Building and running native/Assembly tests (ctest)..."
+if run_command cmake -S "$PROJECT_ROOT/native" -B "$NATIVE_TEST_DIR" -DBUILD_NATIVE_TESTS=ON \
+    && run_command cmake --build "$NATIVE_TEST_DIR" \
+    && (cd "$NATIVE_TEST_DIR" && run_command ctest --output-on-failure); then
+    ok "Native/Assembly tests passed."
 else
-    fail "Python syntax validation failed."
+    fail "Native/Assembly tests failed (see $BUILD_LOG)."
     exit 1
 fi
 
-log "Checking required Python modules..."
-
-if python3 - <<'PY' >> "$BUILD_LOG" 2>&1
-import fastapi
-import uvicorn
-print("fastapi:", fastapi.__version__)
-print("uvicorn:", uvicorn.__version__)
-PY
-then
-    ok "Required Python modules are available."
+log "Running analytics tests..."
+if run_command dotnet run --project "$PROJECT_ROOT/backend/SystemMonitor.Tests"; then
+    ok "Analytics tests passed."
 else
-    fail "Required Python analytics dependencies are missing."
-    echo "Run: pip3 install fastapi uvicorn --break-system-packages"
+    fail "Analytics tests failed (see $BUILD_LOG)."
     exit 1
 fi
-
-log "Checking analytics application import..."
-
-if run_command python3 -c "from analytics_service import app; print(app)"; then
-    ok "Analytics application imports successfully."
-else
-    fail "Analytics application failed to import."
-    exit 1
-fi
-
-ok "Analytics service validation passed."
 
 # ============================================================
 # 8. Final validation

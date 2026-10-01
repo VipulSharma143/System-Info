@@ -1,57 +1,38 @@
-//! Owns the lifecycle of the two child services SystemInfo depends on:
+//! Tauri-facing layer over `supervisor.rs`: resolves the packaged backend executable
+//! from the app's resource directory, builds the child `Command`s (platform
+//! flags, environment, log redirection) and exposes the small API that
+//! `commands.rs` / `lib.rs` use. All lifecycle logic lives in supervisor.rs.
 //!
-//!   - SystemMonitor.Api(.exe)  — the ASP.NET backend, port 5132
-//!   - analytics(.exe)          — the Python/FastAPI analytics service, port 8001
+//! Production path resolution order for each executable:
+//!   1. `<resource_dir>/backend/<exe>`             (installed app)
+//!   2. dev build output under the repo (`tauri dev` only; never reached in a
+//!      packaged app because step 1 succeeds)
+//! Nothing here depends on PATH, the current directory, or a global runtime.
 //!
-//! This is the direct Rust successor to `launcher/Program.cs`: same startup
-//! sequence (start backend, wait for it, start analytics, wait for it,
-//! non-fatal if analytics doesn't come up), same idea of "own every process
-//! you start and kill it on the way out" — just driven by Tauri's window
-//! lifecycle instead of a console app that opens a browser tab and then
-//! blocks in a sleep loop.
-//!
-//! Windows orphan-process hardening (spec section 21): PyInstaller's
-//! `--onefile` build extracts itself to a temp directory at startup and
-//! launches the *real* interpreter as a child of the process we spawned —
-//! so `Child::kill()` on the PID we hold only kills the onefile bootstrap,
-//! not necessarily the process actually serving :8001. To guarantee nothing
-//! survives us, every child we spawn is assigned to its own Windows Job
-//! Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: dropping the
-//! Job (explicit Stop, Exit, X-close, or an unexpected crash of this app —
-//! the OS closes our handles for us either way) kills every process in that
-//! job, direct child or grandchild. `win32job` is the de facto standard safe
-//! wrapper for this Win32 API (used across the Rust ecosystem for exactly
-//! this "don't leak subprocesses" problem). On Linux this collapses to a
-//! plain `Child::kill()` — the dev-only platform for this project, and
-//! `analytics_service.py`/`SystemMonitor.Api` aren't onefile-bootstrapped
-//! there.
+//! Windows: the child is created with CREATE_NO_WINDOW (no console flash) and
+//! placed in a kill-on-close Job Object (see supervisor.rs), so a crash of
+//! this app cannot leave the backend process behind.
+//! Linux: no terminal environment is assumed; a pid file lets the next launch
+//! reap a process left over by an uncleanly terminated run.
 
 use serde::Serialize;
 use std::fs::OpenOptions;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::process::{Command, Stdio};
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
-// Needed for `.creation_flags(CREATE_NO_WINDOW)` below — Windows-only,
-// since `Command` has no such method on other platforms.
+use crate::supervisor::{self, Launch, Service, Supervisor};
+
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
 const BACKEND_PORT: u16 = 5132;
-const ANALYTICS_PORT: u16 = 8001;
-const BACKEND_URL: &str = "http://127.0.0.1:5132";
-const ANALYTICS_URL: &str = "http://127.0.0.1:8001";
-const READY_TIMEOUT: Duration = Duration::from_secs(30);
-const POLL_INTERVAL: Duration = Duration::from_millis(400);
+/// Upper bound only. Readiness is detected by polling every 100 ms and a
+/// crashed child is reported immediately, so this is never the normal path.
+const BACKEND_TIMEOUT: Duration = Duration::from_secs(45);
 
-// Windows API constant (winbase.h): tells CreateProcess not to allocate a
-// console for a console-subsystem child. Without this, spawning
-// SystemMonitor.Api.exe / analytics.exe — both console-subsystem builds —
-// from this GUI-subsystem app pops up a visible (empty, since stdout/stderr
-// are already redirected to log files below) console window per process.
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -61,350 +42,158 @@ pub enum ServiceHealth {
     Stopped,
     Starting,
     Running,
-    /// Process/health check didn't come up in time. Non-fatal — mirrors the
-    /// graceful-degradation the backend already applies to a dead analytics
-    /// service (AnalyticsEndpoints.cs returns 503 rather than erroring).
-    /// Not yet constructed on the Rust side (hence the dead-code warning
-    /// without this attribute) but IS part of the real cross-language
-    /// contract: frontend/src/hooks/useServiceControl.ts's ServiceHealth
-    /// type already includes 'unavailable', and ServiceControls.tsx already
-    /// branches on analytics === 'unavailable' to show "Partial — analytics
-    /// unavailable". Reserved for when a service fails its readiness check
-    /// but the app should stay open in a degraded state rather than exiting.
-    #[allow(dead_code)]
     Unavailable,
 }
 
 #[derive(Clone, Serialize)]
 pub struct ServiceStatus {
     pub backend: ServiceHealth,
-    pub analytics: ServiceHealth,
 }
 
-/// A spawned child plus (on Windows) the Job Object guarding it. Dropping
-/// this drops the Job, which — because of KILL_ON_JOB_CLOSE — kills the
-/// child and anything it spawned, even if we never see those descendants.
-struct Guarded {
-    child: Child,
-    #[cfg(windows)]
-    _job: win32job::Job,
+impl From<supervisor::ServiceHealth> for ServiceHealth {
+    fn from(h: supervisor::ServiceHealth) -> Self {
+        match h {
+            supervisor::ServiceHealth::Stopped => Self::Stopped,
+            supervisor::ServiceHealth::Starting => Self::Starting,
+            supervisor::ServiceHealth::Running => Self::Running,
+            supervisor::ServiceHealth::Unavailable => Self::Unavailable,
+        }
+    }
 }
 
-impl Guarded {
-    fn spawn(mut command: Command) -> io::Result<Self> {
-        let child = command.spawn()?;
-
-        #[cfg(windows)]
-        {
-            use std::os::windows::io::AsRawHandle;
-            let job = win32job::Job::create().map_err(|e| {
-                io::Error::other(format!("failed to create Windows job object: {e}"))
-            })?;
-            let mut info = job
-                .query_extended_limit_info()
-                .map_err(|e| io::Error::other(format!("failed to query job limits: {e}")))?;
-            info.limit_kill_on_job_close();
-            job.set_extended_limit_info(&info)
-                .map_err(|e| io::Error::other(format!("failed to set job limits: {e}")))?;
-            job.assign_process(child.as_raw_handle() as isize)
-                .map_err(|e| io::Error::other(format!("failed to assign process to job: {e}")))?;
-            return Ok(Self { child, _job: job });
-        }
-
-        #[cfg(not(windows))]
-        {
-            Ok(Self { child })
-        }
-    }
-
-    /// Kill the direct child and (on Windows) let the Job drop clean up any
-    /// descendants. Best-effort: a process that's already gone is not an
-    /// error here.
-    fn kill(mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        // `self` drops here, dropping `_job` on Windows too.
-    }
-
-    fn is_alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+impl From<supervisor::ServiceStatus> for ServiceStatus {
+    fn from(s: supervisor::ServiceStatus) -> Self {
+        Self { backend: s.first().copied().map_or(ServiceHealth::Stopped, Into::into) }
     }
 }
 
 pub struct ServiceManager {
-    backend: Mutex<Option<Guarded>>,
-    analytics: Mutex<Option<Guarded>>,
+    sup: Supervisor,
 }
 
 impl ServiceManager {
     pub fn new() -> Self {
-        Self {
-            backend: Mutex::new(None),
-            analytics: Mutex::new(None),
-        }
+        Self { sup: Supervisor::new(vec![Service::new("backend", BACKEND_PORT, leak(exe_name("SystemMonitor.Api")))]) }
     }
 
-    /// Full startup sequence: start backend, wait for readiness, start
-    /// analytics, wait for readiness (non-fatal). Safe to call again after
-    /// `stop()` — that's exactly what the Start/Resume button does. Also
-    /// safe to call when a service is already running: it's left alone
-    /// rather than restarted, so clicking Start twice doesn't spawn
-    /// duplicate processes.
-    pub fn start(&self, app: &AppHandle) -> ServiceStatus {
+    /// Blocking: returns once the backend is ready or definitively failed.
+    /// Must be called from a worker thread (lib.rs setup thread, or the
+    /// `spawn_blocking` in commands.rs) — never from the UI thread.
+    /// `on_change` fires on every state change so the UI can update at once.
+    pub fn start(&self, app: &AppHandle, on_change: &(dyn Fn(ServiceStatus) + Sync)) -> ServiceStatus {
         let log_dir = data_root().join("logs");
         let _ = std::fs::create_dir_all(&log_dir);
-
-        {
-            let mut backend = self.backend.lock().unwrap();
-            let needs_start = match backend.as_mut() {
-                Some(g) => !g.is_alive(),
-                None => true,
-            };
-            if needs_start {
-                match spawn_backend(app, &log_dir) {
-                    Ok(child) => {
-                        *backend = Some(child);
-                        wait_for_http(&format!("{BACKEND_URL}/health"), READY_TIMEOUT);
-                    }
-                    Err(e) => {
-                        log_line(&log_dir, "backend.log", &format!("[tauri] failed to start backend: {e}"));
-                    }
-                }
-            }
-        }
-
-        {
-            let mut analytics = self.analytics.lock().unwrap();
-            let needs_start = match analytics.as_mut() {
-                Some(g) => !g.is_alive(),
-                None => true,
-            };
-            if needs_start {
-                match spawn_analytics(app, &log_dir) {
-                    Ok(child) => {
-                        *analytics = Some(child);
-                        if !wait_for_http(&format!("{ANALYTICS_URL}/health"), READY_TIMEOUT) {
-                            log_line(
-                                &log_dir,
-                                "analytics.log",
-                                "[tauri] analytics did not become ready in time; continuing without it.",
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        log_line(&log_dir, "analytics.log", &format!("[tauri] failed to start analytics: {e}"));
-                    }
-                }
-            }
-        }
-
-        self.status()
+        let backend = Launch { command: backend_command(app, &log_dir), timeout: BACKEND_TIMEOUT };
+        self.sup.start(&log_dir, vec![backend], &|s| on_change(s.into())).into()
     }
 
-    /// Stops both services but does NOT touch the app/window — this is the
-    /// UI's "Stop" button, distinct from `exit()` below. See the
-    /// STOP-vs-EXIT table in the migration spec.
     pub fn stop(&self) -> ServiceStatus {
-        if let Some(g) = self.backend.lock().unwrap().take() {
-            g.kill();
-        }
-        if let Some(g) = self.analytics.lock().unwrap().take() {
-            g.kill();
-        }
-        self.status()
+        self.sup.stop(&data_root().join("logs")).into()
     }
 
-    /// Live status, based on an actual health probe rather than "do we hold
-    /// a Child handle" — a handle can outlive a crashed process, and we
-    /// never want the UI to keep reporting "Running" for something that
-    /// silently died (spec section 50).
+    /// Non-blocking; never performs network I/O. Safe to call from any thread.
     pub fn status(&self) -> ServiceStatus {
-        let backend_alive = self
-            .backend
-            .lock()
-            .unwrap()
-            .as_mut()
-            .is_some_and(Guarded::is_alive);
-        let analytics_alive = self
-            .analytics
-            .lock()
-            .unwrap()
-            .as_mut()
-            .is_some_and(Guarded::is_alive);
-
-        let backend = if backend_alive && probe_http(&format!("{BACKEND_URL}/health")) {
-            ServiceHealth::Running
-        } else if backend_alive {
-            ServiceHealth::Starting
-        } else {
-            ServiceHealth::Stopped
-        };
-
-        let analytics = if analytics_alive && probe_http(&format!("{ANALYTICS_URL}/health")) {
-            ServiceHealth::Running
-        } else if analytics_alive {
-            ServiceHealth::Starting
-        } else {
-            ServiceHealth::Stopped
-        };
-
-        ServiceStatus { backend, analytics }
+        self.sup.status().into()
     }
 }
 
-/// Called from the window close handler and the Exit command. Identical to
-/// `stop()` — kept as a separate name so call sites read as intent
-/// ("shutting down for good") rather than the user-facing Stop action, even
-/// though the mechanics are the same.
+/// Called from the window close handler and the Exit command.
 pub fn shutdown(manager: &ServiceManager) {
     manager.stop();
 }
 
-fn spawn_backend(app: &AppHandle, log_dir: &Path) -> io::Result<Guarded> {
-    let exe = resolve_backend_exe(app)?;
+fn exe_name(base: &str) -> String {
+    if cfg!(windows) { format!("{base}.exe") } else { base.to_string() }
+}
+
+// Executable names live for the whole process; leaking two tiny strings once
+// avoids threading lifetimes through the manager for no benefit.
+fn leak(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+
+fn backend_command(app: &AppHandle, log_dir: &Path) -> io::Result<Command> {
+    let exe = resolve_exe(app, "backend", &exe_name("SystemMonitor.Api"), || {
+        find_in_bin_output(&exe_name("SystemMonitor.Api"), &dev_repo_root().join("backend").join("SystemMonitor.Api").join("bin"))
+    })?;
     let data_dir = data_root().join("data");
     std::fs::create_dir_all(&data_dir)?;
 
     let mut cmd = Command::new(&exe);
-    #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    if let Some(dir) = exe.parent() {
-        cmd.current_dir(dir);
-    }
+    prepare(&mut cmd, &exe);
     cmd.env("ASPNETCORE_URLS", format!("http://127.0.0.1:{BACKEND_PORT}"))
         .env("ASPNETCORE_ENVIRONMENT", "Production")
+        .env("DOTNET_NOLOGO", "1")
+        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        // Loopback desktop app: workstation non-concurrent GC keeps memory and
+        // startup cost low; there is no server-GC workload here.
+        .env("DOTNET_gcServer", "0")
         .env("SYSTEM_INFO_DATA_DIR", &data_dir)
+        .stdin(Stdio::null())
         .stdout(log_file(log_dir, "backend.log")?)
         .stderr(log_file(log_dir, "backend.log")?);
-
-    Guarded::spawn(cmd)
+    Ok(cmd)
 }
 
-fn spawn_analytics(app: &AppHandle, log_dir: &Path) -> io::Result<Guarded> {
-    let exe = resolve_analytics_exe(app)?;
-    let data_dir = data_root().join("data");
-    std::fs::create_dir_all(&data_dir)?;
-
-    let mut cmd = Command::new(&exe);
+/// Platform flags + working directory for the child.
+fn prepare(cmd: &mut Command, exe: &Path) {
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);
     }
-    cmd.args(["--port", &ANALYTICS_PORT.to_string(), "--host", "127.0.0.1"])
-        .env("SYSTEM_INFO_DATA_DIR", &data_dir)
-        .stdout(log_file(log_dir, "analytics.log")?)
-        .stderr(log_file(log_dir, "analytics.log")?);
-
-    Guarded::spawn(cmd)
 }
 
-/// `%LOCALAPPDATA%\SystemInfo` on Windows, `~/.local/share/SystemInfo` on
-/// Linux — deliberately the exact same path `AppDataPath.cs` and
-/// `analytics_service.py` already fall back to on their own, so the
-/// `SYSTEM_INFO_DATA_DIR` we inject here isn't introducing a new location,
-/// just making the three processes agree on it explicitly instead of each
-/// re-deriving it independently (same reasoning `launcher/Program.cs` used).
+/// `%LOCALAPPDATA%\SystemInfo` on Windows, `$XDG_DATA_HOME` or
+/// `~/.local/share/SystemInfo` on Linux — the same location AppDataPath.cs
+/// falls back to, so the app and the backend agree.
+/// Runtime user data is never written under the install directory.
 fn data_root() -> PathBuf {
     #[cfg(windows)]
-    {
-        if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            return PathBuf::from(local).join("SystemInfo");
-        }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        return PathBuf::from(local).join("SystemInfo");
     }
     #[cfg(not(windows))]
     {
-        if let Some(home) = dirs_home() {
-            return home.join(".local").join("share").join("SystemInfo");
+        if let Some(xdg) = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()) {
+            return PathBuf::from(xdg).join("SystemInfo");
+        }
+        if let Some(home) = std::env::var_os("HOME").filter(|v| !v.is_empty()) {
+            return PathBuf::from(home).join(".local").join("share").join("SystemInfo");
         }
     }
-    // Last-resort fallback so a missing env var can't panic the app.
     std::env::temp_dir().join("SystemInfo")
 }
 
-#[cfg(not(windows))]
-fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
-}
-
 fn log_file(dir: &Path, name: &str) -> io::Result<Stdio> {
-    let path = dir.join(name);
-    let file = OpenOptions::new().create(true).append(true).open(path)?;
+    let file = OpenOptions::new().create(true).append(true).open(dir.join(name))?;
     Ok(Stdio::from(file))
 }
 
-fn log_line(dir: &Path, name: &str, line: &str) {
-    if let Ok(mut f) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join(name))
-    {
-        use std::io::Write;
-        let _ = writeln!(f, "{line}");
-    }
-}
-
-/// Resolves the packaged backend executable. In a bundled/installed app
-/// this is the `resources/backend/**` payload declared in tauri.conf.json's
-/// `bundle.resources` (see the CI packaging step). In `tauri dev`, no
-/// resources are staged, so we fall back to the local `dotnet publish`/
-/// `dotnet build` output next to the source tree — see README for the dev
-/// workflow this expects.
-fn resolve_backend_exe(app: &AppHandle) -> io::Result<PathBuf> {
-    let exe_name = if cfg!(windows) {
-        "SystemMonitor.Api.exe"
-    } else {
-        "SystemMonitor.Api"
-    };
-
+fn resolve_exe(
+    app: &AppHandle,
+    folder: &str,
+    exe: &str,
+    dev_fallback: impl FnOnce() -> Option<PathBuf>,
+) -> io::Result<PathBuf> {
+    let mut tried = Vec::new();
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let candidate = resource_dir.join("backend").join(exe_name);
+        let candidate = resource_dir.join(folder).join(exe);
         if candidate.exists() {
             return Ok(candidate);
         }
+        tried.push(candidate);
     }
-
-    find_in_bin_output(exe_name, &dev_repo_root().join("backend").join("SystemMonitor.Api").join("bin"))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!(
-                    "{exe_name} not found in app resources or in backend/SystemMonitor.Api/bin \
-                     (dev mode). Run `dotnet build backend/SystemMonitor.Api` first, or `tauri build` \
-                     to package resources."
-                ),
-            )
-        })
-}
-
-fn resolve_analytics_exe(app: &AppHandle) -> io::Result<PathBuf> {
-    let exe_name = if cfg!(windows) { "analytics.exe" } else { "analytics" };
-
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let candidate = resource_dir.join("analytics").join(exe_name);
-        if candidate.exists() {
-            return Ok(candidate);
-        }
+    if let Some(dev) = dev_fallback() {
+        return Ok(dev);
     }
-
-    let dev_candidate = dev_repo_root().join("analytics").join("dist").join(exe_name);
-    if dev_candidate.exists() {
-        return Ok(dev_candidate);
-    }
-
     Err(io::Error::new(
         io::ErrorKind::NotFound,
-        format!(
-            "{exe_name} not found in app resources or in analytics/dist (dev mode). \
-             Run the PyInstaller build first (see analytics/requirements-build.txt), \
-             or `tauri build` to package resources."
-        ),
+        format!("{exe} not found. Looked in: {tried:?} and the dev build output. In a packaged app this means the installer is missing the {folder} resources."),
     ))
 }
 
-/// `frontend/src-tauri` -> repo root, for locating dev-mode build output.
-/// Resources are the production path; this is only ever consulted when
-/// `resource_dir()` has nothing, i.e. `tauri dev`.
+/// Dev-only: `frontend/src-tauri` -> repo root.
 fn dev_repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -413,10 +202,8 @@ fn dev_repo_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Debug/Release and target-framework folder names vary across machines and
-/// .NET versions, so rather than hardcoding
-/// `bin/Debug/net10.0/SystemMonitor.Api.exe`, walk `bin/` for the requested
-/// file and take whichever match was built most recently.
+/// Dev-only: newest matching file under `bin/` regardless of Debug/Release or
+/// target-framework folder names.
 fn find_in_bin_output(file_name: &str, bin_dir: &Path) -> Option<PathBuf> {
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
     let mut stack = vec![bin_dir.to_path_buf()];
@@ -428,35 +215,11 @@ fn find_in_bin_output(file_name: &str, bin_dir: &Path) -> Option<PathBuf> {
                 stack.push(path);
             } else if path.file_name().and_then(|n| n.to_str()) == Some(file_name) {
                 let modified = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
-                if best.as_ref().is_none_or(|(t, _)| modified > *t) {
+                if best.as_ref().map_or(true, |(t, _)| modified > *t) {
                     best = Some((modified, path));
                 }
             }
         }
     }
-    best.map(|(_, path)| path)
-}
-
-/// Blocks until `url` answers with a non-5xx status or `timeout` elapses.
-/// Direct Rust translation of `launcher/Program.cs`'s `WaitForHttp` — same
-/// "listening isn't the same as ready" reasoning (spec section 14).
-fn wait_for_http(url: &str, timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if probe_http(url) {
-            return true;
-        }
-        std::thread::sleep(POLL_INTERVAL);
-    }
-    false
-}
-
-fn probe_http(url: &str) -> bool {
-    ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .get(url)
-        .call()
-        .map(|resp| resp.status() < 500)
-        .unwrap_or(false)
+    best.map(|(_, p)| p)
 }

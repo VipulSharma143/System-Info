@@ -1,11 +1,11 @@
 # start-all.ps1 — System Info DEVELOPER launcher
 #
 # DEV-ONLY. Starts the three services via their dev commands (dotnet run,
-# npm run dev, python -m uvicorn) for local development.
+# npm run dev) for local development.
 #
 # This is NO LONGER what ships as SystemInfo.exe — the production launcher
 # is launcher/Program.cs, a self-contained .NET executable that starts the
-# already-built backend/SystemMonitor.Api.exe and analytics/analytics.exe
+# already-built backend/SystemMonitor.Api.exe
 # directly, with no dev toolchain required. See
 # .github/workflows/build-windows-installer.yml for the production build.
 #
@@ -14,7 +14,7 @@
 #   - Validate required application folders/files
 #   - Validate local data directory
 #   - Check required ports
-#   - Start backend, analytics, and frontend in order
+#   - Start backend and frontend in order
 #   - Wait for every service to become ready
 #   - Write useful logs
 #   - Clean up child jobs when the launcher exits
@@ -178,14 +178,11 @@ if (
 $LogDir = Join-Path -Path $ProjectRoot -ChildPath "logs"
 
 $BackendDir = Join-Path -Path $ProjectRoot -ChildPath "backend\SystemMonitor.Api"
-$AnalyticsDir = Join-Path -Path $ProjectRoot -ChildPath "analytics"
 $FrontendDir = Join-Path -Path $ProjectRoot -ChildPath "frontend"
 
 $BackendProject = Join-Path -Path $BackendDir -ChildPath "SystemMonitor.Api.csproj"
-$AnalyticsService = Join-Path -Path $AnalyticsDir -ChildPath "analytics_service.py"
 $FrontendPackage = Join-Path -Path $FrontendDir -ChildPath "package.json"
 
-$AnalyticsPort = 8001
 $FrontendPort = 5173
 
 $Jobs = @()
@@ -219,7 +216,6 @@ catch {
 }
 
 $BackendLog = Join-Path -Path $LogDir -ChildPath "backend.log"
-$AnalyticsLog = Join-Path -Path $LogDir -ChildPath "analytics.log"
 $FrontendLog = Join-Path -Path $LogDir -ChildPath "frontend.log"
 
 # ============================================================
@@ -452,20 +448,12 @@ Require-Path `
     -Description "backend directory"
 
 Require-Path `
-    -Path $AnalyticsDir `
-    -Description "analytics directory"
-
-Require-Path `
     -Path $FrontendDir `
     -Description "frontend directory"
 
 Require-Path `
     -Path $BackendProject `
     -Description "backend project"
-
-Require-Path `
-    -Path $AnalyticsService `
-    -Description "analytics service"
 
 Require-Path `
     -Path $FrontendPackage `
@@ -481,7 +469,6 @@ Write-Host ""
 Write-Host "[CHECK] Checking required runtimes..."
 
 Require-Command "dotnet"
-Require-Command "python"
 Require-Command "npm"
 
 Write-Host "[OK] Required runtimes are available."
@@ -518,7 +505,7 @@ Write-Host "[CHECK] Checking required ports..."
 
 $PortConflict = $false
 
-foreach ($Port in @($FrontendPort, $AnalyticsPort)) {
+foreach ($Port in @($FrontendPort)) {
 
     if (Port-InUse -Port $Port) {
 
@@ -540,7 +527,7 @@ if ($PortConflict) {
 }
 
 Write-Host `
-    ("[OK] Ports {0} and {1} are free." -f $FrontendPort, $AnalyticsPort)
+    ("[OK] Port {0} is free." -f $FrontendPort)
 
 # ============================================================
 # 10. Clear old logs
@@ -548,11 +535,6 @@ Write-Host `
 
 Remove-Item `
     -LiteralPath $BackendLog `
-    -Force `
-    -ErrorAction SilentlyContinue
-
-Remove-Item `
-    -LiteralPath $AnalyticsLog `
     -Force `
     -ErrorAction SilentlyContinue
 
@@ -566,7 +548,7 @@ Remove-Item `
 # ============================================================
 
 Write-Host ""
-Write-Host "[1/3] Starting backend (.NET)..."
+Write-Host "[1/2] Starting backend (.NET)..."
 
 $BackendJob = Start-Job -ScriptBlock {
 
@@ -682,63 +664,11 @@ Write-Host `
     ("[OK] Backend is up on port {0}." -f $BackendPort)
 
 # ============================================================
-# 12. Start analytics
+# 12. Start frontend
 # ============================================================
 
 Write-Host ""
-Write-Host "[2/3] Starting analytics service (Python)..."
-
-$AnalyticsJob = Start-Job -ScriptBlock {
-
-    param(
-        [string]$Directory,
-        [string]$LogFile,
-        [int]$Port
-    )
-
-    $ErrorActionPreference = "Continue"
-
-    try {
-        Set-Location -LiteralPath $Directory
-
-        python -m uvicorn `
-            analytics_service:app `
-            --port $Port `
-            --ws none *> $LogFile
-    }
-    catch {
-        $_ | Out-File `
-            -FilePath $LogFile `
-            -Append `
-            -Encoding utf8
-    }
-
-} -ArgumentList $AnalyticsDir, $AnalyticsLog, $AnalyticsPort
-
-$Jobs += $AnalyticsJob
-
-Write-Host "      Waiting for analytics service..."
-
-$AnalyticsReady = Wait-ForHttp `
-    -Uri ("http://localhost:{0}/health" -f $AnalyticsPort) `
-    -TimeoutSeconds 30
-
-if (-not $AnalyticsReady) {
-
-    Fail-WithLog `
-        -Service "Analytics service" `
-        -LogFile $AnalyticsLog
-}
-
-Write-Host `
-    ("[OK] Analytics service is up on port {0}." -f $AnalyticsPort)
-
-# ============================================================
-# 13. Start frontend
-# ============================================================
-
-Write-Host ""
-Write-Host "[3/3] Starting frontend (React)..."
+Write-Host "[2/2] Starting frontend (React)..."
 
 $FrontendJob = Start-Job -ScriptBlock {
 
@@ -787,7 +717,7 @@ Write-Host `
     ("[OK] Frontend is up on port {0}." -f $FrontendPort)
 
 # ============================================================
-# 14. Final status
+# 13. Final status
 # ============================================================
 
 Write-Host ""
@@ -797,7 +727,6 @@ Write-Host "=================================================="
 Write-Host ""
 Write-Host (" Frontend:   http://localhost:{0}" -f $FrontendPort)
 Write-Host (" Backend:    http://localhost:{0}" -f $BackendPort)
-Write-Host (" Analytics:  http://localhost:{0}" -f $AnalyticsPort)
 Write-Host ""
 Write-Host (" Application: {0}" -f $ProjectRoot)
 Write-Host (" Logs:        {0}" -f $LogDir)
@@ -807,7 +736,7 @@ Write-Host "=================================================="
 Write-Host ""
 
 # ============================================================
-# 15. Keep launcher alive
+# 14. Keep launcher alive
 # ============================================================
 
 try {

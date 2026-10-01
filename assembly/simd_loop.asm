@@ -1,7 +1,7 @@
 ; ============================================================
 ; simd_loop.asm — scalar vs SIMD (SSE2) comparison
-; Both versions do the same total work (add + xor per element)
-; so throughput can be compared fairly.
+; Both versions do the same total work (add + xor per element).
+; SSE2 is part of the x86-64 baseline, so no runtime check is needed here.
 ; ============================================================
 
 default rel
@@ -25,25 +25,27 @@ run_benchmark_loop_scalar_compare:
     mov r9, ARG1
     xor rax, rax
     xor rcx, rcx
-
+    test r9, r9             ; iterations <= 0 -> nothing to do
+    jle .done
 .loop:
     add rax, rcx
     xor rax, rcx
     inc rcx
     cmp rcx, r9
     jl .loop
-
+.done:
     ret
 
 run_benchmark_loop_simd:
     mov r9, ARG1
+    xor eax, eax
+    mov rcx, r9
+    shr rcx, 2              ; number of 4-lane blocks
+    jz .done                ; FIX: fewer than 4 iterations used to wrap rcx to 2^64 and hang
+
     pxor xmm0, xmm0
     movdqu xmm1, [counter_init]
     movdqu xmm2, [increment_vec]
-
-    mov rcx, r9
-    shr rcx, 2
-
 .loop:
     paddd xmm0, xmm1
     pxor xmm0, xmm1
@@ -56,7 +58,7 @@ run_benchmark_loop_simd:
     pshufd xmm3, xmm0, 0xB1
     paddd xmm0, xmm3
     movd eax, xmm0
-
+.done:
     ret
 
 %ifidn __OUTPUT_FORMAT__, elf64

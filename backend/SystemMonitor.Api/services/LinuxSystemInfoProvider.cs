@@ -104,30 +104,43 @@ public async Task<List<ProcessInfo>> GetProcessesAsync()
     {
         var drives = new List<DiskInfo>();
 
+        // The native enumerator lists only block-device-backed filesystems (it reads
+        // /proc/mounts, skips loop/squashfs/pseudo mounts and collapses bind mounts).
+        // DriveInfo then supplies the label/type for exactly those. If the native
+        // library cannot answer, fall back to DriveInfo with RAM/network mounts excluded.
+        Dictionary<string, string>? realMounts = null;   // mount point -> filesystem type
+        try
+        {
+            var vols = NativeHardware.GetStorageVolumes();
+            if (vols.Count > 0) realMounts = vols.GroupBy(v => v.Mount).ToDictionary(g => g.Key, g => g.First().FileSystem, StringComparer.Ordinal);
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { /* fall back below */ }
+
         foreach (var d in DriveInfo.GetDrives())
         {
             try
             {
-                if (!d.IsReady) continue;
-                if (d.TotalSize <= 0) continue;
-
-                if (d.DriveFormat is "tmpfs" or "devtmpfs" or "overlay" or "squashfs" or "proc" or "sysfs" or "cgroup" or "cgroup2")
+                if (realMounts is not null ? !realMounts.ContainsKey(d.Name) : d.DriveType is DriveType.Ram or DriveType.Network or DriveType.CDRom or DriveType.Unknown)
+                    continue;
+                if (!d.IsReady || d.TotalSize <= 0) continue;
+                if (realMounts is null && d.DriveFormat is "tmpfs" or "devtmpfs" or "overlay" or "squashfs" or "proc" or "sysfs" or "cgroup" or "cgroup2" or "udev")
                     continue;
 
                 drives.Add(new DiskInfo(
                     Name: d.Name,
                     VolumeLabel: d.VolumeLabel,
                     DriveType: d.DriveType.ToString(),
-                    DriveFormat: d.DriveFormat,
+                    // .NET misidentifies some filesystems (ext4 reported as ext3); /proc/mounts is authoritative.
+                    DriveFormat: realMounts is not null && realMounts.TryGetValue(d.Name, out var fsType) ? fsType : d.DriveFormat,
                     TotalGB: Math.Round(d.TotalSize / 1024.0 / 1024 / 1024, 1),
                     FreeGB: Math.Round(d.AvailableFreeSpace / 1024.0 / 1024 / 1024, 1),
                     UsedGB: Math.Round((d.TotalSize - d.AvailableFreeSpace) / 1024.0 / 1024 / 1024, 1),
                     UsedPercent: Math.Round((1.0 - (double)d.AvailableFreeSpace / d.TotalSize) * 100, 1)
                 ));
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // drive became unavailable mid-read — skip it
+                // unmounted/permission-restricted mid-read: skip this one volume, keep the rest
             }
         }
 
@@ -175,43 +188,48 @@ public async Task<List<ProcessInfo>> GetProcessesAsync()
     // it's a single-pass sysfs read, same shape as GetDisks().
     public BatteryInfo GetBattery()
     {
-        var buffer = new StringBuilder(512);
-        NativeInterop.GetBatteryInfoJson(buffer, buffer.Capacity);
+        static BatteryInfo None(string note) => new(
+            Available: false, Status: null, CapacityPercent: null, CycleCount: null,
+            CycleCountNote: null, DesignCapacityMah: null, FullCapacityMah: null,
+            NowCapacityMah: null, HealthPercent: null, VoltageNow: null, PowerWatts: null,
+            Model: null, Manufacturer: null, Note: note);
+
+        // 2 KB: a long manufacturer/model string must not truncate the JSON mid-token.
+        var buffer = new StringBuilder(2048);
+        if (NativeInterop.GetBatteryInfoJson(buffer, buffer.Capacity) < 0)
+            return None("Battery information could not be read");
 
         using var doc = JsonDocument.Parse(buffer.ToString());
         var root = doc.RootElement;
 
-        bool present = root.GetProperty("present").GetBoolean();
-        if (!present)
-        {
-            return new BatteryInfo(
-                Available: false, Status: null, CapacityPercent: null, CycleCount: null,
-                CycleCountNote: null, DesignCapacityMah: null, FullCapacityMah: null,
-                NowCapacityMah: null, HealthPercent: null, VoltageNow: null, PowerWatts: null,
-                Model: null, Manufacturer: null,
-                Note: "No battery detected on this system"
-            );
-        }
+        // Every field is optional: sysfs exposes different attributes per vendor/driver
+        // (charge_* vs energy_*, no cycle_count, no voltage...). A missing one is "unknown", not an error.
+        double? Num(string name) => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : null;
+        string? Text(string name) => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        // The native layer reports 0 when an attribute is absent; for capacities and voltage 0 is never a real reading.
+        double? Positive(double? v) => v is > 0 ? v : null;
 
-        long cycleCount = root.GetProperty("cycleCount").GetInt64();
-        double healthPercent = root.GetProperty("healthPercent").GetDouble();
+        if (!(root.TryGetProperty("present", out var present) && present.ValueKind == JsonValueKind.True))
+            return None("No battery detected on this system");
+
+        var cycles = Num("cycleCount");
+        var health = Num("healthPercent");
+        var power = Num("powerWatts");
 
         return new BatteryInfo(
             Available: true,
-            Status: root.GetProperty("status").GetString(),
-            CapacityPercent: (int)root.GetProperty("capacityPercent").GetInt64(),
-            CycleCount: cycleCount,
-            CycleCountNote: cycleCount == 0
-                ? "Firmware reports 0 — not all hardware tracks cycle count reliably"
-                : null,
-            DesignCapacityMah: Math.Round(root.GetProperty("designCapacityMah").GetDouble(), 0),
-            FullCapacityMah: Math.Round(root.GetProperty("fullCapacityMah").GetDouble(), 0),
-            NowCapacityMah: Math.Round(root.GetProperty("nowCapacityMah").GetDouble(), 0),
-            HealthPercent: healthPercent >= 0 ? Math.Round(healthPercent, 1) : null,
-            VoltageNow: root.GetProperty("voltageNow").GetDouble(),
-            PowerWatts: Math.Round(root.GetProperty("powerWatts").GetDouble(), 1),
-            Model: root.GetProperty("model").GetString(),
-            Manufacturer: root.GetProperty("manufacturer").GetString(),
+            Status: Text("status"),
+            CapacityPercent: Num("capacityPercent") is { } cp ? (int)Math.Round(cp) : null,
+            CycleCount: cycles is >= 0 ? (long)cycles : null,
+            CycleCountNote: cycles == 0 ? "Firmware reports 0 — not all hardware tracks cycle count reliably" : null,
+            DesignCapacityMah: Positive(Num("designCapacityMah")) is { } dc ? Math.Round(dc, 0) : null,
+            FullCapacityMah: Positive(Num("fullCapacityMah")) is { } fc ? Math.Round(fc, 0) : null,
+            NowCapacityMah: Positive(Num("nowCapacityMah")) is { } nc ? Math.Round(nc, 0) : null,
+            HealthPercent: health is >= 0 ? Math.Round(health.Value, 1) : null,
+            VoltageNow: Positive(Num("voltageNow")),
+            PowerWatts: power is { } w ? Math.Round(w, 1) : null,
+            Model: Text("model"),
+            Manufacturer: Text("manufacturer"),
             Note: null
         );
     }
@@ -295,6 +313,9 @@ public async Task<List<ProcessInfo>> GetProcessesAsync()
         // case. A machine that omits "physical id" (some VMs/containers) is
         // treated as a single implicit socket.
         int? physicalCores = null;
+        try { physicalCores = NativeHardware.GetCpuTopology()?.PhysicalCores; }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { /* fall back to /proc/cpuinfo */ }
+        if (physicalCores is null)
         try
         {
             var lines = File.ReadAllLines("/proc/cpuinfo");

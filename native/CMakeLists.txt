@@ -17,10 +17,13 @@ endif()
 
 add_library(systemmonitor_native SHARED
     src/common.cpp
+    src/simd_dispatch.cpp
+    src/hardware_info.cpp
     ${PLATFORM_SOURCE}
     ../assembly/get_constant.asm
     ../assembly/benchmark_loop.asm
     ../assembly/simd_loop.asm
+    ../assembly/vector_kernels.asm
 )
 
 if(NOT WIN32)
@@ -30,4 +33,14 @@ else()
     # DXGI (CreateDXGIFactory), which only MSVC honors. Declaring it here too
     # means the link doesn't silently depend on a compiler-specific pragma.
     target_link_libraries(systemmonitor_native dxgi)
+endif()
+
+# Native tests: cmake -DBUILD_NATIVE_TESTS=ON .. && cmake --build . && ctest --output-on-failure
+option(BUILD_NATIVE_TESTS "Build native engine tests" OFF)
+if(BUILD_NATIVE_TESTS)
+    enable_testing()
+    add_executable(kernel_selftest ../tests/native/kernel_selftest.cpp)
+    target_link_libraries(kernel_selftest systemmonitor_native)
+    add_test(NAME kernel_selftest COMMAND kernel_selftest)
+    set_tests_properties(kernel_selftest PROPERTIES TIMEOUT 60)
 endif()

@@ -15,9 +15,9 @@ import { isTauri } from './tauri';
 //      URLs can't reach it. Tauri's Rust side always starts the backend on
 //      a fixed port (see src-tauri/src/process.rs) specifically so the
 //      frontend can address it with a fixed, known URL here.
-//   3. Embedded in the backend's own wwwroot, opened in a browser by the
-//      legacy launcher (launcher/Program.cs) — same-origin, so a relative
-//      path always reaches whatever port Kestrel actually bound to.
+//   3. Embedded in the backend's own wwwroot and opened directly in a browser
+//      (no Tauri) — same-origin, so a relative path always reaches whatever
+//      port Kestrel actually bound to.
 const DEV_BACKEND_URL = 'http://localhost:5132';
 const TAURI_BACKEND_URL = 'http://127.0.0.1:5132';
 
@@ -29,10 +29,9 @@ export const API_BASE = import.meta.env.DEV
 
 // How long the frontend keeps retrying quietly before treating a failed
 // startup fetch as a real error. Chosen to exceed Tauri's own backend
-// readiness wait (READY_TIMEOUT = 30s in src-tauri/src/process.rs) with
-// headroom — that Rust code shows the window immediately and starts the
-// backend on a background thread, so on a slow cold start the frontend can
-// legitimately be polling an not-yet-listening backend for up to ~30
-// seconds. Shared by useSystemMetrics, useSystemGpu, and useSystemInfo so
+// readiness wait (BACKEND_TIMEOUT = 45s in src-tauri/src/process.rs) with
+// headroom. That upper bound is only reached when something is badly wrong:
+// the supervisor polls every 100 ms and reports a crashed child immediately.
+// The window shows at once and the backend starts on a background thread. Shared by useSystemMetrics, useSystemGpu, and useSystemInfo so
 // their startup budgets can't drift out of sync with each other.
-export const STARTUP_GRACE_MS = 35_000;
+export const STARTUP_GRACE_MS = 50_000;

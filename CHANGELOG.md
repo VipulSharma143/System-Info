@@ -12,6 +12,28 @@ All notable changes to SystemInfo are documented here.
 
 ### Known Issues
 
+## [2.3.0] - 2026-09-29
+
+### Added
+- Native CPU topology (physical/logical cores, packages), storage-volume and fan-sensor enumeration, and a memory-bandwidth benchmark, exposed as `/api/native/topology`, `/api/native/storage`, `/api/native/fans` and `/api/native/memory-bandwidth`.
+- x86-64 Assembly SSE2/AVX2 kernels for int32 min/max, memcpy and a 64-bit XOR checksum, with CPUID/XGETBV runtime dispatch, plus `/api/native/cpufeatures` and `/api/native/kernels` (self-test against a C++ reference and throughput).
+- `/api/system/all` reports an additive `unavailable` list naming subsystems that could not be read.
+- Test suites for the native/Assembly layer, the C# analytics and managed wrappers, and the Tauri process supervisor; a reusable `tests.yml` workflow that gates the release builds.
+
+### Changed
+- Analytics now runs inside the .NET backend. The Python/FastAPI service, its PyInstaller build, port 8001 and the analytics process are gone; `/api/analytics/*` routes and responses are unchanged. The app starts one fewer process and ships no Python runtime.
+- Service supervision rewritten: the backend is started on a worker thread, a crashed child is reported immediately instead of after a timeout, a busy port is detected before launching, and leftover processes from a previous crash are cleaned up on Linux. Start/stop no longer run on the UI thread.
+- Linux storage lists only real block-device volumes; Linux battery parsing tolerates missing fields and no longer reports 0 for unknown capacities; Windows skips network and optical drives so a disconnected share cannot stall the storage view; both platforms read physical core count from the native layer first.
+- Removed obsolete pre-Tauri files (`launcher/`, `SystemInfo.iss`, old installer docs, legacy Linux `AppRun`/desktop file). Version sync now covers four files.
+
+### Fixed
+- The window could freeze on launch while the backend was starting (a lock held across the readiness wait blocked the UI thread).
+- `run_benchmark_loop_simd` and the SIMD comparison no longer hang for fewer than 4 iterations.
+- Native Linux filesystem and battery code no longer throws across the C ABI on unreadable `/sys` entries.
+
+### Known Issues
+- Installers (Windows NSIS, Linux `.deb`, AppImage) have not been exercised on real machines for this release; check startup logs under the app's data directory (`logs/startup.log`) after installing.
+- Analytics over multi-day windows reads every snapshot line on a cache miss and can take several seconds.
 
 ## [2.2.2] - 2026-09-25
 

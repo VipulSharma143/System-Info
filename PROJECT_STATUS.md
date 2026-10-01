@@ -4,7 +4,7 @@
 
 **13 phases tracked · 11 fully done · 1 split by platform · 1 continuous ("maintenance & extensibility") · 1 discipline: prove every layer before building the next one**
 
-`Linux Mint (primary dev)` · `Windows (Tauri desktop target)` · `.NET 10` · `React 19 + TypeScript` · `C++17` · `x86-64 Assembly` · `Python / FastAPI` · `Rust (Tauri 2)` · `Local JSON Lines`
+`Linux Mint (primary dev)` · `Windows (Tauri desktop target)` · `.NET 10` · `React 19 + TypeScript` · `C++17` · `x86-64 Assembly` · · `Rust (Tauri 2)` · `Local JSON Lines`
 
 </div>
 
@@ -49,7 +49,7 @@ flowchart TB
     PROV -->|Windows| WINP["WMI (Win32_ComputerSystem/BIOS/OS/VideoController)\nPerformanceCounter incl. GPU Engine\nBattery IOCTL"]
     PROV -->|Linux| LINP["/proc, /sys, DMI sysfs, /etc/os-release"]
     API -- P/Invoke --> CPP[C++ Native Engine] --> ASM[x86-64 Assembly]
-    API -- HTTP proxy, graceful 503 --> PY[Python Analytics / FastAPI]
+    API -- reads .jsonl --> AN[AnalyticsService in-process]
     API -- appends --> STORE[(Local JSONL files)]
     PY -- reads --> STORE
 ```
@@ -73,7 +73,7 @@ This is the fifth architectural shape the project has taken (see [Historical Arc
 | `GetGpus()` (Linux) | ⬜ | Returns empty — Linux GPU detection lives in the native engine's `/api/native/gpu` path instead, not yet unified into this interface |
 | Native P/Invoke bridge (`Native/NativeInterop.cs`) | ✅ | Calls into `libsystemmonitor_native.so`/`.dll` |
 | CORS | ✅ | `http://localhost:5173` (Vite dev), `http://tauri.localhost` (Tauri 2 WebView2), `tauri://localhost` (non-Windows Tauri targets) |
-| `HttpClient("AnalyticsService")` | ✅ | Named client, `http://localhost:8001`, 10s timeout |
+
 | `GET /health` | ✅ | Dependency-free readiness probe for the Tauri process manager; deliberately outside `/api/system` |
 | Static frontend hosting | ✅ | `UseStaticFiles` + `MapFallbackToFile("index.html")` against `wwwroot`, only when it exists (skipped in dev, where Vite serves the frontend separately) |
 
@@ -103,10 +103,10 @@ This is the fifth architectural shape the project has taken (see [Historical Arc
 | Component | Status | Notes |
 |---|:-:|---|
 | `frontend/src-tauri/` (Tauri 2 shell) | ✅ | Native window (`tauri.conf.json`: 1280×820, resizable, min 980×650) |
-| `process.rs` service lifecycle | ✅ | Spawns backend (`:5132`) and analytics (`:8001`) as children, polls `/health` on each (30s timeout, 400ms interval) |
-| Windows Job Object orphan hardening | ✅ (Windows only) | Each child gets its own Job with `KILL_ON_JOB_CLOSE`, specifically to catch a PyInstaller `--onefile` bootstrap's extracted interpreter process, which a plain `Child::kill()` can miss |
+| `process.rs` service lifecycle | ✅ | Spawns the backend (`:5132`) as a child (supervisor is generic over a service list and starts them concurrently), polls `/health` (45s upper bound, 100ms interval) |
+| Windows Job Object orphan hardening | ✅ (Windows only) | Each child gets its own Job with `KILL_ON_JOB_CLOSE`, so the backend dies with the app even on a crash |
 | `commands.rs` — `start_services`/`stop_services`/`get_service_status`/`exit_app` | ✅ | The *entire* frontend-facing process-control surface; no `tauri-plugin-shell`, no generic command-execution capability |
-| `CREATE_NO_WINDOW` on spawned children | ✅ | Backend and analytics no longer open visible console windows on Windows (fixed in `2.1.1`) |
+| `CREATE_NO_WINDOW` on spawned children | ✅ | The backend no longer open visible console windows on Windows (fixed in `2.1.1`) |
 | `ureq` for readiness polling | ✅ | Deliberately not `reqwest`+`tokio` — these are short, blocking, local calls from a background thread, not hot-path async work |
 
 ---
@@ -154,7 +154,7 @@ No retention/TTL policy exists yet — `data/snapshots/` grows unbounded (docume
 | Health | `GET /health` | Static, no dependencies |
 | System (live) | `GET /api/system/{all,cpu,ram,disk,network,processes,battery}` | `ISystemInfoProvider` + `SystemMonitorBackgroundService` cache |
 | System (static) | `GET /api/system/info`, `GET /api/system/gpu` | `ISystemInfoProvider.GetSystemIdentity()` / `.GetGpus()` |
-| Analytics | `GET /api/analytics/{stats,trend,bottlenecks}` | Proxies to `analytics_service.py` (FastAPI, `:8001`), graceful `503` if unreachable |
+| Analytics | `GET /api/analytics/{stats,trend,bottlenecks}` | Computed in-process by `AnalyticsService.cs` from the JSONL history (5 s cache); 503 only if the data directory is unreadable |
 | Native diagnostics | `GET /api/native/{test,cpuinfo,cpu,cputemp,gpu,battery,fan,benchmark,asmtest,simd-benchmark}` | P/Invoke into the C++/Assembly native engine |
 | Speed test | `GET /api/speed-test` | Server-side Cloudflare-based measurement — **implemented, not currently called by the frontend** (see [Speed Test](#-speed-test)) |
 
@@ -176,7 +176,7 @@ Application/source languages present in the repository, by area:
 | Backend API | C# |
 | Desktop shell (Tauri) | Rust |
 | Native hardware engine | C++, x86-64 Assembly (NASM), CMake |
-| Analytics service | Python |
+| Analytics service | C# (in-process) |
 | Automation / dev scripts | Bourne Shell, PowerShell |
 
 ---
@@ -185,7 +185,7 @@ Application/source languages present in the repository, by area:
 
 **Before:** a whole-repository Inno Setup installer (`SystemInfo.iss`) requiring Node/npm/Python/pip/the .NET SDK on the end-user machine → replaced by a self-contained `dotnet publish` plus a C# console launcher (`launcher/Program.cs`) that started the services and opened a browser tab → replaced again by the current Tauri 2 model.
 
-**Now:** CI stages the backend/analytics build output into `frontend/src-tauri/resources/` and runs `tauri build`, which produces both the app and its NSIS installer in one step. Inno Setup and the C# launcher remain in the repository, clearly marked deprecated in their own file headers, as a rollback reference only.
+**Now:** CI stages the backend build output into `frontend/src-tauri/resources/` and runs `tauri build`, which produces both the app and its NSIS installer in one step. Inno Setup and the C# launcher remain in the repository, clearly marked deprecated in their own file headers, as a rollback reference only.
 
 `setup.ps1` and `start-all.ps1`'s own header comments still reference `build-windows-installer.yml` and `launcher/Program.cs` as "the production build" — that is now stale documentation inside those (unmodified, dev-only) scripts; the actual production Windows build path today is `release.yml`'s `build-windows` job.
 
@@ -203,13 +203,18 @@ push to main (with a new top CHANGELOG.md entry)
    │ version │  parses CHANGELOG.md's top "## [x.y.z]" entry,
    └────┬────┘  checks whether that tag already exists
         │
-   ┌────┴─────────────────┐
+   ┌────┴────┐
+   ▼         │
+┌───────┐    │  tests.yml: ctest (Linux + Windows/MSVC),
+│ tests │    │  C# tests, Rust supervisor tests
+└───┬───┘    │
+    └────┬───┘
+   ┌─────┴────────────────┐
    ▼                       ▼
 ┌───────────────┐   ┌───────────────┐
 │ build-windows │   │  build-linux  │
 │ native → .NET │   │ native → .NET │
 │ → frontend →  │   │ → frontend →  │
-│ PyInstaller → │   │ PyInstaller → │
 │ tauri build   │   │ tauri build   │
 │ (NSIS)        │   │ (deb/AppImage)│
 └───────┬───────┘   └───────┬───────┘
@@ -220,7 +225,7 @@ push to main (with a new top CHANGELOG.md entry)
               └───────────┘  CHANGELOG.md, publishes GitHub Release
 ```
 
-Both build jobs now follow the same shape: native engine → self-contained backend publish → frontend build → PyInstaller-frozen analytics → stage all three as Tauri resources → `tauri build`. Both validate the staged resources are present and non-empty, and that `tauri.conf.json` doesn't leak the runner's absolute checkout path, before uploading their installer artifact(s). The `release` job's release-notes extraction (`awk` against `## [$VERSION]`) requires that version's section to still be present in `CHANGELOG.md` — i.e. release before archiving it with `scripts/archive-changelog.mjs`, not after.
+Both build jobs now follow the same shape: native engine → self-contained backend publish → frontend build → stage the backend as a Tauri resource → `tauri build`, after the `tests` job has passed. Both validate the staged resources are present and non-empty, and that `tauri.conf.json` doesn't leak the runner's absolute checkout path, before uploading their installer artifact(s). The `release` job's release-notes extraction (`awk` against `## [$VERSION]`) requires that version's section to still be present in `CHANGELOG.md` — i.e. release before archiving it with `scripts/archive-changelog.mjs`, not after.
 
 ---
 
@@ -303,7 +308,7 @@ Shape 5 (current — Linux Tauri migration): the same Tauri 2 shell now
   packages Linux too. release.yml's build-linux job stopped staging
   start-all.sh into /opt/systeminfo (the source of the sudo-for-logs and
   system-uvicorn problems) and instead publishes a self-contained
-  linux-x64 backend + PyInstaller-frozen analytics binary, stages both as
+  linux-x64 backend (the PyInstaller analytics binary that was frozen here at the time has since been removed), stages it as
   Tauri resources exactly like build-windows, and runs `tauri build`
   against targets ["nsis","deb","appimage"] (Tauri skips whichever aren't
   buildable on the current host). packaging/linux/AppRun and
@@ -352,7 +357,7 @@ Technologies that are **historical only** and must not appear in current setup i
 | Process list latency (parallelized) | 661ms (was 947ms) |
 | Frontend requests per poll cycle | 1 (`/api/system/all`), + 1 independent GPU poll (`/api/system/gpu`) on its own interval |
 | Dashboard navigation extra fetches | 0 across 14 tab switches (pre-GPU-panel baseline; not re-measured since) |
-| Languages in the pipeline | 7 (TypeScript, Rust for the Tauri shell, C#, C++, x86-64 Assembly, Python, plus Shell/PowerShell automation) |
+| Languages in the pipeline | 6 (TypeScript, Rust for the Tauri shell, C#, C++, x86-64 Assembly, plus Shell/PowerShell automation) |
 | Historical storage verified against | 727+ real snapshots (originally MongoDB Atlas; storage layer has since moved to local JSONL) |
 
 ---
@@ -363,7 +368,7 @@ Technologies that are **historical only** and must not appear in current setup i
 - [ ] Verify the AMD GPU sysfs path on real hardware
 - [ ] Verify multi-GPU engine-to-adapter attribution (`_phys_N_` parsing) on a real dual-GPU Windows laptop
 - [ ] Reconcile the two GPU detection paths (`ISystemInfoProvider.GetGpus()` vs. the native engine's `/api/native/gpu`) into one, and extend `GetGpus()` to Linux
-- [ ] Port `trend_analysis.py`'s battery/CPU/network trend logic into `analytics_service.py` so it's reachable from the dashboard (it currently only runs as a standalone CLI script against a file path that no longer exists)
+- [x] ~~Port `trend_analysis.py` into the analytics service~~ — superseded: the Python analytics service was removed and its CPU/network analysis now lives in `AnalyticsService.cs` (battery trends were never part of the HTTP contract and are not ported).
 - [ ] Verify the Linux Tauri packaging (`tauri build` producing `.deb`/`.AppImage`) end to end on real GitHub Actions infrastructure and a real Linux install, beyond this pass's own review of the workflow file
 - [ ] Add a retention/TTL policy for `data/snapshots/`
 - [ ] Implement full SMART storage health (needs root)
@@ -379,3 +384,29 @@ Technologies that are **historical only** and must not appear in current setup i
 See [`README.md`](./README.md) for the project overview and setup instructions.
 
 </div>
+
+
+---
+
+## 2026-09-29 engineering audit (startup, backend, native, assembly)
+
+**Verified in this session (Linux sandbox):** native library builds and cross-compiles to a Windows PE DLL (mingw); native `ctest` passes; Assembly kernels pass the reference self-test on both the SSE2 and AVX2 paths and the test was shown to fail when a bug is injected; supervisor integration tests (6) pass; `process.rs` type-checks against a stub of the Tauri APIs it uses.
+**Not verified (no .NET SDK, no Tauri/WebKit toolchain, no Windows machine here):** C# changes, full `tauri build`, any installer, any real Windows execution (including the win64 Assembly ABI, which was assembled and linked but not run).
+
+Root causes found in source: (1) `ServiceManager::start` held the backend mutex through the whole readiness wait while the UI's `get_service_status` (a sync command, i.e. UI thread) needed the same mutex — the window froze until the backend answered; (2) a child that crashed during startup was only noticed after the full 30 s timeout; (3) a stale process on the fixed port would satisfy the `/health` check for a service that never started; (4) analytics only started after the backend was ready although it does not depend on it; (5) Linux had no orphan protection after an uncleanly killed run; (6) `run_benchmark_loop_simd` hung forever for n < 4 (counter underflow).
+
+Changed: supervisor/process split (see README), async commands, `ureq` dependency removed, log rotation + `startup.log` timings; `SystemSnapshotService` for `/api/system/all`; sampler failures logged instead of swallowed; provider warm-up at startup; ReadyToRun publish; HTTPS redirection removed; new CPU-feature detection and SSE2/AVX2 kernels with dispatch and self-test; removed dead pre-Tauri files; version sync reduced to 4 files.
+
+Open: none of the above has run in a real installer yet.
+
+
+## 2026-09-29 follow-up: Python removed, native layer completed
+
+- **Analytics is in-process C#.** `AnalyticsService.cs` reproduces the former Python maths (least-squares slope, sustained-run detection, episode classification) with the same JSON shape; `/api/analytics/*` routes are unchanged. Deleted: `analytics/`, the proxy, the `HttpClient`, port 8001, every PyInstaller/pip step in CI and all Python handling in the dev scripts. Tauri now supervises one process. Tested by `backend/SystemMonitor.Tests` (41 analytics checks incl. torn lines, empty history, 86,400-row day ~0.7-1.1 s cold).
+- **Frontend contract change (logic only, no visual change):** `ServiceStatus` is `{ backend }`; the analytics field is gone.
+- **Assembly:** added SSE2/AVX2 int32 min/max, memcpy and 64-bit XOR checksum next to add/dot/sum, behind CPUID+XGETBV dispatch. Self-test checks every kernel against a C++ reference at lengths 0..4099 with misaligned pointers and memcpy guard bytes; each kernel was mutation-tested.
+- **Native C++:** `si_get_cpu_topology`, `si_get_storage_volume`, `si_get_fan`, `si_memory_bandwidth`; exception-free Linux filesystem access; argument guards. Linux values matched `nproc`/`lscpu`/`df`.
+- **Providers:** Linux disks list only real block volumes (RAM mounts removed, filesystem type from /proc/mounts); Linux battery parser is tolerant of missing sysfs fields and no longer reports 0 for unknown capacities; Windows skips network/optical drives before `IsReady` (can block for tens of seconds on a dead share); both providers read physical cores from the native topology first.
+- **CI:** new reusable `tests.yml` (Linux + Windows/MSVC) gates both build jobs.
+- **Verified here:** native ctest (Linux native; Windows x64 build under Wine), 458 C#/native-wrapper checks on .NET 8, 6 supervisor tests, `tsc -b` clean, real backend executed on Linux and all endpoints exercised.
+- **Not verified:** any installer; `tauri build`; the Windows-only C# (WMI provider, compiled only by CI); Windows native tests on real Windows/MSVC; measured before/after startup.

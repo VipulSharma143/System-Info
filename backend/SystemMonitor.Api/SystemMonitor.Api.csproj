@@ -13,6 +13,11 @@
 <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
 <PublishSingleFile>false</PublishSingleFile>
 <InvariantGlobalization>true</InvariantGlobalization>
+<!-- Ahead-of-time compile (ReadyToRun) the published app so the first requests
+     don't pay JIT cost: cuts cold-start time of the self-contained backend. Only
+     applies to `dotnet publish -r <rid>`; dev builds are unaffected. -->
+<PublishReadyToRun>true</PublishReadyToRun>
+<TieredPGO>false</TieredPGO>
 </PropertyGroup>
 
 <ItemGroup>

@@ -108,6 +108,11 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
         {
             try
             {
+                // DriveType is answered locally by the OS. IsReady is NOT: on a mapped network
+                // drive whose server is unreachable it can block for tens of seconds, so never
+                // call it for network/optical/RAM/unknown drives. Only local volumes belong in
+                // a hardware storage view.
+                if (d.DriveType is not (DriveType.Fixed or DriveType.Removable)) continue;
                 if (!d.IsReady) continue;
                 if (d.TotalSize <= 0) continue;
 
@@ -387,7 +392,8 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
         // returns one instance per physical CPU package — a typical consumer
         // machine has exactly one, but this sums NumberOfCores across every
         // instance returned so multi-socket systems aren't undercounted.
-        int? physicalCores = null;
+        int? physicalCores = NativePhysicalCores();
+        if (physicalCores is null)
         try
         {
             using var searcher = new ManagementObjectSearcher(
@@ -727,5 +733,13 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
         }
 
         return result.OrderByDescending(e => e.UsagePercent).Take(20).ToList();
+    }
+
+    // Physical core count from the native topology call (one syscall, no WMI round-trip).
+    // Null when the native library is missing or the OS does not report it, so callers fall back.
+    private static int? NativePhysicalCores()
+    {
+        try { return NativeHardware.GetCpuTopology()?.PhysicalCores; }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { return null; }
     }
 }

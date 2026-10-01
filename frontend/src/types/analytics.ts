@@ -10,7 +10,7 @@ export interface DirectionalTrend {
   per_minute: number;
 }
 
-// IMPORTANT: analytics_service.py short-circuits with
+// IMPORTANT: AnalyticsService.cs short-circuits with
 //   { "message": "no snapshots found in requested window", "count": 0 }
 // when the requested window contains no history — cpu_trend and
 // network_trend_rx are absent entirely in that case. That is the NORMAL

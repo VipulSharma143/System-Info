@@ -49,4 +49,59 @@ public static class NativeInterop
         int nameBufferSize,
         out long dedicatedBytes,
         out long sharedSystemBytes);
+
+    // ---- CPU features + Assembly kernels (native/src/simd_dispatch.cpp) ----
+    // Every 64-bit quantity crosses the boundary as C# long (== C++ long long);
+    // nothing here narrows to int. Feature bits mirror SI_FEAT_* in native_engine.h.
+    public const long FeatSse = 1L << 0, FeatSse2 = 1L << 1, FeatSse3 = 1L << 2, FeatSsse3 = 1L << 3,
+        FeatSse41 = 1L << 4, FeatSse42 = 1L << 5, FeatAvx = 1L << 6, FeatAvx2 = 1L << 7, FeatFma = 1L << 8;
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_get_cpu_features")]
+    public static extern long GetCpuFeatures();
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_get_cpu_vendor")]
+    public static extern int GetCpuVendor(StringBuilder vendorOut, int bufferSize);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_active_isa")]
+    public static extern int GetActiveIsa();
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_kernel_selftest")]
+    public static extern int KernelSelfTest();
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_kernel_benchmark")]
+    public static extern int KernelBenchmark(long elements, int repeats,
+        out double addGBps, out double dotGBps, out double sumGBps);
+
+    // ---- Assembly kernels behind the C++ dispatcher (span-friendly `ref` signatures; all blittable) ----
+    [DllImport("systemmonitor_native", EntryPoint = "si_vec_add_f32")]
+    internal static extern void VecAddF32(in float a, in float b, ref float output, long n);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_dot_f32")]
+    internal static extern float DotF32(in float a, in float b, long n);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_sum_i32")]
+    internal static extern long SumI32(in int a, long n);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_minmax_i32")]
+    internal static extern long MinMaxI32(in int a, long n, out int min, out int max);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_memcpy")]
+    internal static extern int MemCopy(ref byte dst, in byte src, long n);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_xor_u64")]
+    internal static extern ulong XorU64(in ulong a, long nwords);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_memory_bandwidth")]
+    public static extern int MemoryBandwidth(long bytes, int repeats, out double copyGBps, out double readGBps);
+
+    // ---- topology / storage / fans (hardware_info.cpp). 64-bit byte counts stay `long`. ----
+    [DllImport("systemmonitor_native", EntryPoint = "si_get_cpu_topology")]
+    public static extern int GetCpuTopology(out int physicalCores, out int logicalCores, out int packages);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_get_storage_volume")]
+    public static extern int GetStorageVolume(int index, StringBuilder mountOut, int mountSize,
+        StringBuilder fsOut, int fsSize, out long totalBytes, out long freeBytes);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_get_fan")]
+    public static extern int GetFan(int index, StringBuilder labelOut, int labelSize, out int rpm);
 }

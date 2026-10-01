@@ -20,6 +20,8 @@ run_benchmark_loop:
     mov r9, ARG1           ; stash iterations somewhere neither convention uses
     xor rax, rax           ; accumulator
     xor rcx, rcx           ; counter (safe now — arg already copied out of rcx)
+    test r9, r9            ; iterations <= 0 -> nothing to do
+    jle .done
 
 .loop:
     add rax, rcx
@@ -29,6 +31,7 @@ run_benchmark_loop:
     cmp rcx, r9
     jl .loop
 
+.done:
     ret
 
 %ifidn __OUTPUT_FORMAT__, elf64

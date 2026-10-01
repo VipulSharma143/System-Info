@@ -31,7 +31,7 @@ export default function BottleneckTimeline({ bottlenecks, findNearest }: Bottlen
   const [openRow, setOpenRow] = useState<string | null>(null);
 
   const sustained: LabeledEpisode[] = [
-    // Every array here is optional: analytics_service.py returns only
+    // Every array here is optional: AnalyticsService.cs returns only
     // { message, count: 0 } when the window holds no history, which is the
     // normal fresh-install state. Default to [] rather than letting an
     // undefined .map() blank the whole dashboard.

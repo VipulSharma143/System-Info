@@ -187,8 +187,108 @@ public static class NativeEndpoints
             };
         })
         .WithName("RunSimdComparison");
+
+        // Only features the CPU really reports (and the OS has enabled) are listed.
+        app.MapGet("/api/native/cpufeatures", () =>
+        {
+            try
+            {
+                long mask = NativeInterop.GetCpuFeatures();
+                var vendor = new System.Text.StringBuilder(16);
+                NativeInterop.GetCpuVendor(vendor, vendor.Capacity);
+
+                var all = new (string Name, long Bit)[]
+                {
+                    ("SSE", NativeInterop.FeatSse), ("SSE2", NativeInterop.FeatSse2), ("SSE3", NativeInterop.FeatSse3),
+                    ("SSSE3", NativeInterop.FeatSsse3), ("SSE4.1", NativeInterop.FeatSse41), ("SSE4.2", NativeInterop.FeatSse42),
+                    ("AVX", NativeInterop.FeatAvx), ("AVX2", NativeInterop.FeatAvx2), ("FMA", NativeInterop.FeatFma),
+                };
+                return Results.Ok(new
+                {
+                    vendor = vendor.ToString(),
+                    features = all.Where(f => (mask & f.Bit) != 0).Select(f => f.Name).ToArray(),
+                    activeKernelIsa = NativeInterop.GetActiveIsa() == 2 ? "AVX2" : "SSE2",
+                });
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+            {
+                app.Logger.LogWarning(ex, "Native CPU feature detection is unavailable.");
+                return Results.Problem("Native engine does not provide CPU feature detection.", statusCode: 503);
+            }
+        })
+        .WithName("GetNativeCpuFeatures");
+
+        // Verifies the Assembly kernels against the C++ reference on this CPU and
+        // reports their throughput. selfTestPassed=false must never be ignored.
+        app.MapGet("/api/native/kernels", () =>
+        {
+            try
+            {
+                int failed = NativeInterop.KernelSelfTest();
+                bool ok = NativeInterop.KernelBenchmark(1 << 20, 20, out double add, out double dot, out double sum) == 1;
+                return Results.Ok(new
+                {
+                    selfTestPassed = failed == 0,
+                    selfTestFailureMask = failed,
+                    isa = NativeInterop.GetActiveIsa() == 2 ? "AVX2" : "SSE2",
+                    throughputGBps = ok ? new { vectorAdd = Math.Round(add, 1), dotProduct = Math.Round(dot, 1), sumInt32 = Math.Round(sum, 1) } : null,
+                });
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+            {
+                app.Logger.LogWarning(ex, "Native kernels are unavailable.");
+                return Results.Problem("Native engine does not provide the vector kernels.", statusCode: 503);
+            }
+        })
+        .WithName("RunNativeKernels");
+
+        // CPU topology from the OS scheduler/sysfs. physicalCores/packages are null (not 0) when the OS
+        // does not expose them, e.g. some VMs and containers.
+        app.MapGet("/api/native/topology", () => NativeCall(app, "CPU topology", () =>
+            NativeHardware.GetCpuTopology() is { } t ? Results.Ok(t) : Results.Problem("CPU topology is not available on this system.", statusCode: 503)))
+            .WithName("GetNativeCpuTopology");
+
+        app.MapGet("/api/native/storage", () => NativeCall(app, "storage", () => Results.Ok(NativeHardware.GetStorageVolumes())))
+            .WithName("GetNativeStorage");
+
+        // Empty list = no fan sensors exposed (normal on desktops without hwmon fans, VMs, and Windows).
+        app.MapGet("/api/native/fans", () => NativeCall(app, "fan sensors", () => Results.Ok(NativeHardware.GetFans())))
+            .WithName("GetNativeFans");
+
+        // Sustained memory throughput via the Assembly copy/read kernels. Uses a 128 MB buffer (beyond
+        // typical L3). ~1 s of work, so it is deliberately not part of any polled endpoint.
+        app.MapGet("/api/native/memory-bandwidth", async (CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await Task.Run(() =>
+                    NativeInterop.MemoryBandwidth(128L << 20, 4, out var copy, out var read) == 1
+                        ? new { copyGBps = Math.Round(copy, 1), readGBps = Math.Round(read, 1), bufferMB = 128 }
+                        : null, ct);
+                return result is null
+                    ? Results.Problem("Not enough free memory to run the bandwidth test.", statusCode: 503)
+                    : Results.Ok(result);
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+            {
+                app.Logger.LogWarning(ex, "Native memory bandwidth benchmark is unavailable.");
+                return Results.Problem("Native engine does not provide the bandwidth benchmark.", statusCode: 503);
+            }
+        })
+        .WithName("RunNativeMemoryBandwidth");
     }
 
     
 
+
+    // Every native call can fail to load (missing/old library): report 503 with a log line, never a 500 stack trace.
+    private static IResult NativeCall(WebApplication app, string what, Func<IResult> call)
+    {
+        try { return call(); }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            app.Logger.LogWarning(ex, "Native {What} is unavailable.", what);
+            return Results.Problem($"Native engine does not provide {what}.", statusCode: 503);
+        }
+    }
 }

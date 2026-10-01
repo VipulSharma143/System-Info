@@ -1,5 +1,6 @@
 mod commands;
 mod process;
+mod supervisor;
 
 use tauri::{Emitter, Manager, WindowEvent};
 
@@ -24,23 +25,22 @@ pub fn run() {
             commands::diagnose_update_check,
         ])
         .setup(|app| {
-            // Startup sequence (spec section 11): start backend, wait for
-            // readiness, start analytics, wait for readiness. Run off the
-            // main thread so the window still appears immediately instead
-            // of blocking on the ~seconds-long health-check loop — the
-            // React UI already has a "Connecting to backend…" state for
-            // exactly this window (App.tsx), and the sidebar/top bar show
-            // "Starting" until the first "services-status" event lands.
+            // Startup: the window is already visible; services start on a
+            // worker thread and the UI
+            // is told about every state change via "services-status", so the
+            // dashboard can appear the moment the backend is ready.
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 let manager = app_handle.state::<ServiceManager>();
-                let status = manager.start(&app_handle);
-                let _ = app_handle.emit("services-status", status);
+                let emit = |s: process::ServiceStatus| {
+                    let _ = app_handle.emit("services-status", s);
+                };
+                manager.start(&app_handle, &emit);
             });
 
             // Native X close button (spec section 16 / RULE 8): stop both
             // services before the window actually closes, so Task Manager
-            // never shows a leftover SystemMonitor.Api.exe/analytics.exe
+            // never shows a leftover SystemMonitor.Api.exe
             // after the app is gone. `prevent_close` + manual `app.exit()`
             // turns the otherwise-immediate close into "clean up, then
             // close" without blocking the UI thread on the whole shutdown.

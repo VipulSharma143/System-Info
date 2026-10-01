@@ -40,8 +40,6 @@
 # The cleanup scans the ENTIRE project, not only backend/.
 # This catches directories such as:
 #
-#   launcher/bin
-#   launcher/obj
 #   backend/SystemMonitor.Api/bin
 #   backend/SystemMonitor.Api/obj
 #
@@ -237,7 +235,6 @@ step "3/9 — Cleaning .NET build artifacts"
 # This catches:
 #
 #   backend/**/bin
-#   launcher/bin
 #   future-project/bin
 #
 # .git is explicitly excluded.
@@ -261,7 +258,6 @@ done < <(
 # This catches:
 #
 #   backend/**/obj
-#   launcher/obj
 #   future-project/obj
 #
 # .git is explicitly excluded.
@@ -294,6 +290,22 @@ step "4/9 — Cleaning native C++ build artifacts"
 remove_path \
     "$PROJECT_ROOT/native/build" \
     "Native build directory"
+
+remove_path \
+    "$PROJECT_ROOT/native/build-tests" \
+    "Native test build directory"
+
+remove_path \
+    "$PROJECT_ROOT/backend/SystemMonitor.Tests/bin" \
+    "Test project bin"
+
+remove_path \
+    "$PROJECT_ROOT/backend/SystemMonitor.Tests/obj" \
+    "Test project obj"
+
+remove_path \
+    "$PROJECT_ROOT/frontend/src-tauri/supervisor-tests/target" \
+    "Supervisor test build output"
 
 # ------------------------------------------------------------
 # Alternative CMake build directories
@@ -438,18 +450,6 @@ remove_path \
     "$PROJECT_ROOT/.ruff_cache" \
     "Project Ruff cache"
 
-remove_path \
-    "$PROJECT_ROOT/analytics/.pytest_cache" \
-    "Analytics pytest cache"
-
-remove_path \
-    "$PROJECT_ROOT/analytics/.mypy_cache" \
-    "Analytics MyPy cache"
-
-remove_path \
-    "$PROJECT_ROOT/analytics/.ruff_cache" \
-    "Analytics Ruff cache"
-
 ok "Python caches cleaned."
 
 # ============================================================
@@ -570,8 +570,6 @@ CRITICAL_FILES=(
     "frontend/package.json"
     "frontend/tsconfig.json"
     "frontend/vite.config.ts"
-
-    "analytics/analytics_service.py"
 
     "native/build.sh"
 )

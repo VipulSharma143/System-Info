@@ -4,7 +4,7 @@
 
 **A cross-platform system-monitoring desktop application — live hardware telemetry, historical trend analysis, and a native Tauri desktop shell on both Windows and Linux, built across six languages with no database and no cloud dependency.**
 
-`React 19` · `TypeScript` · `.NET 10` · `Tauri 2 / Rust` · `C++17` · `x86-64 Assembly` · `Python / FastAPI`
+`React 19` · `TypeScript` · `.NET 10` · `Tauri 2 / Rust` · `C++17` · `x86-64 Assembly`
 
 [Features](#-features) · [Architecture](#-architecture) · [Tech Stack](#-tech-stack--why) · [API](#-api-reference) · [Getting Started](#-getting-started) · [Building](#-building--packaging) · [Project Status](./PROJECT_STATUS.md) · [Agent Guide](./AGENT.md)
 
@@ -33,10 +33,10 @@ There is no backend cloud service, no account, and no external database. Everyth
 - **System identity** — computer name, manufacturer, model, BIOS version, Windows edition/build, architecture, and uptime — read from `Win32_ComputerSystem`/`Win32_BIOS`/`Win32_OperatingSystem` on Windows, DMI sysfs + `/etc/os-release` on Linux.
 - **GPU detection** — every display adapter detected (multi-GPU laptops included), with driver info, resolution/refresh rate, and live per-engine utilization (3D, Copy, VideoDecode, …) rather than one fabricated "GPU usage" number.
 - **Real battery telemetry on Windows** — charge, charging state, voltage, remaining/full capacity, and cycle count read via the battery class driver's IOCTL interface (`IOCTL_BATTERY_QUERY_TAG`/`_INFORMATION`/`_STATUS`) — the same interface `powercfg /batteryreport` uses.
-- **Historical analytics** — CPU/network trend charts, bottleneck-episode detection, and summary stats over selectable windows (1h / 6h / 24h / 7d), served by a Python/FastAPI microservice reading the local snapshot files.
+- **Historical analytics** — CPU/network trend charts, bottleneck-episode detection, and summary stats over selectable windows (1h / 6h / 24h / 7d), computed in-process by the .NET backend from the local snapshot files (no separate service).
 - **Network speed test** — client-side download/upload/ping test against Cloudflare's public speed-test endpoints.
 - **Local, file-based storage** — append-only JSON Lines snapshots, no database to install, configure, or lose connectivity to.
-- **Native Windows desktop app** — a real window (not a browser tab) that owns the backend/analytics process lifecycle, with Start / Stop / Exit controls and orphan-process hardening via Windows Job Objects.
+- **Native Windows desktop app** — a real window (not a browser tab) that owns the backend process lifecycle, with Start / Stop / Exit controls and orphan-process hardening via Windows Job Objects.
 - **No hardware values are ever fabricated.** Anything the OS doesn't expose is reported as `Unavailable`, never guessed, defaulted to `0`, or silently omitted — enforced consistently across every metric, on both platforms.
 
 ---
@@ -60,14 +60,14 @@ flowchart TB
     PROV -->|Linux| LINP["/proc · /sys"]
 
     API -- "P/Invoke" --> CPP["C++ Native Engine"] --> ASM["x86-64 Assembly\n(NASM, scalar + SIMD)"]
-    API -- "HTTP proxy, graceful 503" --> PY["Python Analytics\n(FastAPI)"]
+    API -- "reads .jsonl" --> AN["AnalyticsService\n(in-process)"]
     API -- "appends" --> STORE[("Local JSON Lines\ndata/snapshots/")]
     PY -- "reads" --> STORE
 ```
 
 **Request flow, live metrics:** the frontend polls `GET /api/system/all` once per cycle → the API's `SystemMonitorBackgroundService` returns already-cached CPU/network samples and calls `ISystemInfoProvider` for RAM/disk/battery on demand → the platform-specific provider (Windows: WMI + `PerformanceCounter`; Linux: `/proc`, `/sys`) does the actual read.
 
-**Request flow, history:** the same background service appends every sample to a local JSON Lines file → the frontend's Analytics tab calls the .NET API → the API proxies to the Python analytics service (with a graceful `503` if it isn't running) → the Python service reads and aggregates the `.jsonl` files directly.
+**Request flow, history:** the same background service appends every sample to a local JSON Lines file → the frontend's Analytics tab calls the .NET API → `AnalyticsService` (in the same process) reads and aggregates the `.jsonl` files directly, skipping malformed lines, with a 5-second result cache.
 
 **Two separate hardware-reading paths exist by design:** most live metrics (`/api/system/*`) go through `ISystemInfoProvider` in C#, talking to the OS directly (WMI/PerformanceCounter on Windows, `/proc`/`/sys` on Linux). A second, independent native C++/Assembly engine (`/api/native/*`) exists for CPU benchmarking (scalar + SIMD), GPU vendor/AMD-usage detection, and diagnostic hardware reads. The dashboard's dedicated GPU panel and CPU/RAM/battery cards currently read through the C# provider path, not the native engine.
 
@@ -79,11 +79,11 @@ flowchart TB
 |---|---|---|---|
 | **Frontend** | React 19, TypeScript, Vite 8 | Dashboard UI, metric polling, visualization | Fast dev loop (Vite), type-safe data contracts across seven views |
 | **Styling** | Tailwind CSS 4 | Utility-first styling, shared design tokens | One spacing/type/color scale reused across every panel (`Primitives.tsx`) instead of per-component CSS |
-| **Desktop Shell (Windows)** | Tauri 2, Rust, `win32job` | Native window, backend/analytics process lifecycle, orphan-process prevention | Real OS window instead of a browser tab; Rust gives safe, low-overhead process management with no Electron-sized runtime |
-| **Backend** | C#, .NET 10 Web API (Minimal APIs) | REST endpoints, platform-provider dispatch, snapshot writes, analytics proxy | Strong typing and WMI/`PerformanceCounter` access on Windows without native interop for most metrics |
+| **Desktop Shell (Windows)** | Tauri 2, Rust, `win32job` | Native window, backend process lifecycle, orphan-process prevention | Real OS window instead of a browser tab; Rust gives safe, low-overhead process management with no Electron-sized runtime |
+| **Backend** | C#, .NET 10 Web API (Minimal APIs) | REST endpoints, platform-provider dispatch, snapshot writes, in-process analytics | Strong typing and WMI/`PerformanceCounter` access on Windows without native interop for most metrics |
 | **Native Engine** | C++17, CMake | Kernel/OS-level hardware reads exposed via P/Invoke; CPU benchmarking | Direct OS-level access (DXGI, sysfs) where a managed API isn't sufficient or fast enough |
 | **Performance Demo** | x86-64 Assembly (NASM) | Scalar & SIMD (SSE2) CPU benchmarking, called from the C++ engine | Ground-truth performance baseline the C++/C# layers are measured against |
-| **Analytics** | Python 3.10+, FastAPI, uvicorn | Trend analysis, bottleneck detection, stats aggregation over historical snapshots | Fast to iterate on for numeric/statistical work; runs as an independent, restartable process |
+| **Analytics** | C# (`AnalyticsService`) | Trend analysis, bottleneck detection, stats aggregation over historical snapshots | Was a Python/FastAPI service; moved in-process so there is no second runtime to ship, no extra port and no extra process to start |
 | **Storage** | Local JSON Lines files | Historical snapshot persistence | No database to install, configure, or fail to connect to — see [Storage](#-storage--historical-data) below for the MongoDB → local-file migration |
 | **Build / Release** | GitHub Actions (`release.yml`), Tauri's NSIS bundler, `appimagetool`, `dpkg-deb` | CI builds for both platforms, version-tag-driven GitHub Releases | Single workflow, four jobs (`version` → `build-windows` / `build-linux` → `release`), triggered by pushing a new `CHANGELOG.md` entry |
 
@@ -120,28 +120,20 @@ System Info/
 │   ├── include/native_engine.h      # Cross-platform C ABI (extern "C")
 │   └── src/                         # common.cpp, windows_provider.cpp, linux_provider.cpp
 │
-├── assembly/                        # x86-64 NASM — scalar + SIMD (SSE2) CPU benchmarks
+├── assembly/                        # x86-64 NASM — benchmark loops + SSE2/AVX2 kernels
+│                                     # (vector add, dot, int32 sum/min/max, memcpy, XOR checksum)
 │
-├── analytics/                       # Python 3.10+ / FastAPI analytics microservice
-│   ├── analytics_service.py         # /health, /stats, /trend, /bottlenecks
-│   ├── trend_analysis.py, bottleneck_detection.py, analyze_snapshots.py
-│   └── run_analytics.py             # PyInstaller entrypoint for analytics.exe
-│
-├── launcher/                        # DEPRECATED — pre-Tauri browser-launching production
-│                                     # launcher, kept as a rollback reference only
-│
-├── packaging/linux/                 # DEPRECATED — pre-Tauri AppImage/.deb desktop file, icon,
-│                                     # AppRun; kept as reference, icon source only is still used
-│                                     # to generate frontend/src-tauri/icons/
+├── packaging/linux/systeminfo.png   # Source art used to generate frontend/src-tauri/icons/
+├── tests/native/                    # C++/Assembly tests (ctest) — see "Tests" below
 ├── scripts/                         # sync-version.mjs, check-version.mjs,
 │                                     # archive-changelog.mjs (see below)
 ├── .github/workflows/release.yml    # The single CI/CD pipeline (version → build → release)
 │
-├── setup.sh / setup.ps1             # First-time prerequisite install + local data dir setup
-├── start-all.sh / start-all.ps1     # DEV-ONLY: start backend + analytics + frontend together
+├── setup.sh / setup.ps1             # DEV-ONLY: first-time developer prerequisite install
+├── start-all.sh / start-all.ps1     # DEV-ONLY: run backend + Vite together in a browser tab
+│                                     # (the installed app never uses these; Tauri starts everything itself)
 ├── build.sh                         # Fail-fast full build/validation
 ├── clean.sh                         # Strip build artifacts before archiving/sharing the repo
-├── SystemInfo.iss                   # DEPRECATED — pre-Tauri Inno Setup installer script
 │
 ├── CHANGELOG.md                     # Recent version history (source of truth for the app
 │                                     # version — see Version Management below)
@@ -206,12 +198,12 @@ CORS is restricted to `http://localhost:5173` (Vite dev), `http://tauri.localhos
 
 On both Windows and Linux, `frontend/src-tauri/` wraps the React frontend in a real, resizable desktop window (1280×820 default, 980×650 minimum) instead of opening a browser tab.
 
-- **`process.rs`** — spawns the backend (`:5132`) and analytics service (`:8001`) as managed child processes, polling each one's `/health` endpoint (400ms interval, 30s timeout) before the app reports itself ready. Executable resolution and the local data directory (`%LOCALAPPDATA%\SystemInfo` on Windows, `~/.local/share/SystemInfo` on Linux) are handled by the same platform-agnostic code path — no per-platform launcher.
+- **`supervisor.rs` / `process.rs`** — `supervisor.rs` is the Tauri-independent lifecycle core (spawn, readiness, exit detection, stale-process cleanup, cancellation) and has its own integration tests; `process.rs` resolves the packaged executables from the app's resource directory, builds the child commands (`CREATE_NO_WINDOW` on Windows, log redirection, environment) and exposes the manager. Backend (`:5132`) and analytics (`:8001`) start **concurrently**; each is polled on `/health` every 100 ms, a child that exits during startup is reported immediately (not after a timeout), a port already held by another program is detected before spawning, and a pid file lets the next launch reap a process left by an uncleanly terminated run. `get_service_status` never blocks and never does network I/O — the old implementation held a lock during the readiness wait, which froze the window on slow cold starts. The 45 s/60 s timeouts are upper bounds only. Timing per stage is written to `logs/startup.log` under the data directory.
 - **`commands.rs`** — the *only* surface the frontend has onto process control: `start_services`, `stop_services`, `get_service_status`, `exit_app`. There is no generic "run this command" entry point, and the app deliberately does not use `tauri-plugin-shell` — the frontend has no shell/command-execution capability at all.
-- **Orphan-process hardening** — on Windows, each child process is assigned to its own Windows Job Object (`win32job` crate, `KILL_ON_JOB_CLOSE`), so an interpreter process extracted by a PyInstaller `--onefile` bootstrap (which plain `Child::kill()` can miss) is guaranteed to die with it, including on an unexpected crash of the app itself. On Linux this collapses to a plain `Child::kill()` — the backend and analytics binaries aren't onefile-bootstrapped there, so there's no extraction-process indirection to guard against.
+- **Orphan-process hardening** — on Windows, each child process is assigned to its own Windows Job Object (`win32job` crate, `KILL_ON_JOB_CLOSE`), so the backend and anything it spawns is guaranteed to die with the app, including on an unexpected crash of the app itself. On Linux a pid file lets the next launch reap a leftover backend (verified by checking `/proc/<pid>/exe`, so a reused pid is never killed).
 - **Service controls** — `ServiceControls.tsx` (rendered only inside the Tauri shell) exposes **Stop** (halts services, keeps the window open), **Exit** (stops services and closes the app), and the native window's `X` button performs the same full shutdown as Exit.
 
-Linux distribution: the production `.deb`/`.AppImage` install the Tauri-bundled app directly — no `sudo`, no system-wide `uvicorn`/Python packages, no browser, and no manual `localhost:5173` step. `packaging/linux/AppRun` and `systeminfo.desktop` are pre-Tauri artifacts kept only for reference (clearly marked deprecated in their own headers) — `tauri build` generates its own desktop entry and bundles its own AppImage runtime now. `start-all.sh` remains the Linux **dev-only** equivalent of `start-all.ps1` (see [Platform-Specific Behavior](#-platform-specific-behavior--limitations)).
+Linux distribution: the production `.deb`/`.AppImage` install the Tauri-bundled app directly — no `sudo`, no Python or other runtime, no browser, and no manual `localhost:5173` step. The pre-Tauri `AppRun`/`systeminfo.desktop` were deleted; the AppImage's `AppRun` is generated inline by `release.yml`. `start-all.sh` remains the Linux **dev-only** equivalent of `start-all.ps1` (see [Platform-Specific Behavior](#-platform-specific-behavior--limitations)).
 
 ---
 
@@ -223,7 +215,7 @@ System Info updates itself from its own GitHub Releases — no reinstalling by h
 
 - A few seconds after the dashboard loads (and every 6 hours while it stays open) the app checks for a newer release. If one exists, the **Updates** tab gets a green dot and a dismissible banner appears.
 - The **Updates** tab shows the installed version's release notes, the new version's release notes, a **Check for updates** button, download progress, and an optional *install automatically at startup* switch (off by default).
-- **Install** = download (services keep running) → stop backend + analytics → install → relaunch → every service starts fresh. If the install is cancelled or fails, services are started again.
+- **Install** = download (services keep running) → stop the backend → install → relaunch → every service starts fresh. If the install is cancelled or fails, services are started again.
 
 **How it works**
 
@@ -260,7 +252,7 @@ npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or
 
 ## 📈 Storage & Historical Data
 
-**Before:** snapshot history was written to and read from **MongoDB Atlas** — `SnapshotLogger.cs` wrote documents, `analytics_service.py` queried Mongo directly, and a `MONGO_URI` connection string had to be configured before analytics would work at all.
+**Before:** snapshot history was written to and read from **MongoDB Atlas** — `SnapshotLogger.cs` wrote documents, the Python analytics service queried Mongo directly, and a `MONGO_URI` connection string had to be configured before analytics would work at all.
 
 **Why it changed:** MongoDB Atlas added an external dependency, an account, and a network requirement to what is otherwise a fully local, offline-capable application — and mid-project the target was originally PostgreSQL before the team settled on Mongo Atlas as what was available at the time.
 
@@ -272,7 +264,7 @@ npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or
 | Windows (packaged) | `%LOCALAPPDATA%\SystemInfo\data` |
 | Linux (packaged) | `~/.local/share/SystemInfo/data` |
 
-`analytics_service.py` reads these `.jsonl` files directly for the requested date range; malformed lines are logged and skipped rather than crashing the request. There is currently **no retention/TTL policy** — the snapshot directory grows unbounded over time (a known, documented trade-off, not a bug).
+`AnalyticsService` reads these `.jsonl` files directly for the requested date range; malformed lines are logged and skipped rather than crashing the request. There is currently **no retention/TTL policy** — the snapshot directory grows unbounded over time (a known, documented trade-off, not a bug).
 
 ---
 
@@ -282,7 +274,6 @@ npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or
 
 - **.NET SDK:** 10.0+
 - **Node.js:** 20.x+
-- **Python:** 3.10+
 - **Build tools:** CMake 3.10+, NASM
 - **For the desktop shell (Windows and Linux):** Rust (stable), the Tauri 2 CLI
 
@@ -290,7 +281,7 @@ npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or
 
 ```bash
 # Linux — checks/installs prerequisites, builds the native engine,
-# installs frontend/analytics dependencies, creates the local data dir
+# installs frontend dependencies, creates the local data dir
 ./setup.sh
 ```
 ```powershell
@@ -301,13 +292,13 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 ### Running in development
 
 ```bash
-# Linux/dev: starts backend + analytics + frontend together, waiting for
+# Linux/dev: starts backend + frontend together, waiting for
 # each to actually respond before starting the next (dotnet run / npm run
-# dev / uvicorn directly — a dev-only stand-in for the Tauri shell below)
+# dev directly — a dev-only stand-in for the Tauri shell below)
 ./start-all.sh
 ```
 ```powershell
-# Windows dev-only equivalent (dotnet run / npm run dev / uvicorn directly)
+# Windows dev-only equivalent (dotnet run / npm run dev directly)
 powershell -ExecutionPolicy Bypass -File start-all.ps1
 ```
 
@@ -315,7 +306,6 @@ Or run each service individually:
 
 ```bash
 cd backend/SystemMonitor.Api && dotnet run
-cd analytics && python -m uvicorn analytics_service:app --port 8001
 cd frontend && npm install && npm run dev
 ```
 
@@ -340,25 +330,26 @@ cd frontend && npm run tauri dev
 **Now:** CI (`.github/workflows/release.yml`) builds and packages both platforms in one workflow, triggered by a push containing a new top `CHANGELOG.md` entry:
 
 1. **`version`** — parses `CHANGELOG.md`'s top `## [x.y.z]` entry, checks whether that tag already exists.
-2. **`build-windows`** — builds the native C++ engine, publishes the .NET backend self-contained, embeds the built frontend into its `wwwroot`, freezes the analytics service with PyInstaller, stages both as Tauri resources, and runs `tauri build` to produce the NSIS installer.
-3. **`build-linux`** — builds the same native/backend/frontend/analytics stack (self-contained `linux-x64` backend, PyInstaller-frozen analytics), stages both as Tauri resources, and runs `tauri build` to produce the AppImage and `.deb` — the same Tauri packaging path as Windows, just targeting different bundlers.
+2. **`tests`** — the reusable `tests.yml` workflow (native + Assembly `ctest` on Linux and Windows/MSVC, the C# test project, the Rust supervision tests). Both builds `needs:` it, so a failing test stops the release before any installer is built.
+3. **`build-windows`** — builds the native C++ engine, publishes the .NET backend self-contained, embeds the built frontend into its `wwwroot`, stages the backend as a Tauri resource, and runs `tauri build` to produce the NSIS installer.
+4. **`build-linux`** — builds the same native/backend/frontend stack (self-contained `linux-x64` backend), stages it as a Tauri resource, and runs `tauri build` to produce the AppImage and `.deb` — the same Tauri packaging path as Windows, just targeting different bundlers.
 4. **`release`** — downloads all three build artifacts, extracts that version's section out of `CHANGELOG.md` for the release notes, and publishes a GitHub Release with the version tag.
 
-`launcher/Program.cs`, `SystemInfo.iss`, `setup.ps1`, and `start-all.ps1` remain in the repository — clearly marked deprecated/dev-only in their own file headers — as a rollback reference, not as part of the current build. `README-WINDOWS-INSTALLER.md` and `GITHUB-ACTIONS-SETUP.md` document that older Inno-Setup-based path and predate the current Tauri pipeline.
+The pre-Tauri artifacts (`launcher/`, `SystemInfo.iss`, `SystemInfo.ico`, `README-WINDOWS-INSTALLER.md`, `GITHUB-ACTIONS-SETUP.md`, `packaging/linux/AppRun`, `systeminfo.desktop`) were removed on 2026-09-29 — nothing in the build referenced them. `setup.*` and `start-all.*` remain as developer-only tooling.
 
 ---
 
 ## 🔢 Version Management
 
-Five version-bearing files are kept in lockstep from a single source — `CHANGELOG.md`'s top entry:
+Four version-bearing files are kept in lockstep from a single source — `CHANGELOG.md`'s top entry:
 
 ```
 frontend/package.json · frontend/src-tauri/tauri.conf.json · frontend/src-tauri/Cargo.toml
-Directory.Build.props (.NET) · SystemInfo.iss
+Directory.Build.props (.NET)
 ```
 
 ```bash
-node scripts/sync-version.mjs      # propagates CHANGELOG.md's top version to all five files
+node scripts/sync-version.mjs      # propagates CHANGELOG.md's top version to all four files
 node scripts/check-version.mjs     # fails loudly if any of them drift — this is what CI runs
 ```
 
@@ -380,7 +371,7 @@ This is a manual step you run after cutting a release — it isn't wired into CI
 | Script | Purpose |
 |---|---|
 | `setup.sh` / `setup.ps1` | First-time prerequisite install + local data directory setup (Linux full / Windows dev-only) |
-| `start-all.sh` / `start-all.ps1` | Dev-only: start backend + analytics + frontend together, waiting for readiness at each step. Production on both platforms uses the Tauri shell (`process.rs`) instead |
+| `start-all.sh` / `start-all.ps1` | Dev-only: start backend + frontend together, waiting for readiness at each step. Production on both platforms uses the Tauri shell (`process.rs`) instead |
 | `build.sh` | Fail-fast full build/validation across every layer |
 | `clean.sh` | Strip generated build artifacts (`node_modules`, `dist`, `bin`/`obj`, caches) before archiving or sharing the repo — never removes source, `.git`, or config |
 | `scripts/sync-version.mjs` | Propagate `CHANGELOG.md`'s top version to all five version-bearing files |

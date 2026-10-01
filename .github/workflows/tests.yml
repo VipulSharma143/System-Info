@@ -1,0 +1,90 @@
+# Tests for everything that can be verified without building installers:
+#   * native C++ + Assembly kernels (ctest): every SSE2/AVX2 kernel vs. a C++ reference,
+#     boundary lengths, misaligned pointers, hardware enumeration, argument validation
+#   * C# analytics, snapshot storage and the managed wrappers over the native kernels
+#   * Rust process-supervision logic against fake services (Linux only)
+#
+# Runs on every pull request and on pushes to any branch except main. On main the
+# release workflow calls this same file (workflow_call) and waits for it before building.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y nasm cmake build-essential
+
+      - name: Native + Assembly tests (ctest)
+        run: |
+          set -e
+          cmake -S native -B native/build-tests -DCMAKE_BUILD_TYPE=Release -DBUILD_NATIVE_TESTS=ON
+          cmake --build native/build-tests --parallel
+          ctest --test-dir native/build-tests --output-on-failure
+
+      - name: C# tests (analytics, storage, native wrappers)
+        run: |
+          set -e
+          export SYSTEMINFO_NATIVE_DIR="$PWD/native/build-tests"
+          dotnet run --project backend/SystemMonitor.Tests -c Release
+
+      - name: Process supervision tests (Rust, no Tauri toolchain needed)
+        working-directory: frontend/src-tauri/supervisor-tests
+        run: cargo test
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install NASM
+        shell: pwsh
+        run: choco install nasm -y
+
+      - name: Native + Assembly tests (ctest) — Windows x64 ABI, MSVC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PATH = "C:\Program Files\NASM;$env:PATH"
+          cmake -S native -B native/build-tests -A x64 -DBUILD_NATIVE_TESTS=ON
+          cmake --build native/build-tests --config Release --parallel
+          ctest --test-dir native/build-tests -C Release --output-on-failure
+
+      - name: C# tests (analytics, storage, native wrappers)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dll = Get-ChildItem -Path native/build-tests -Recurse -Filter "systemmonitor_native.dll" | Select-Object -First 1
+          if (-not $dll) { Write-Error "systemmonitor_native.dll was not produced."; exit 1 }
+          $env:SYSTEMINFO_NATIVE_DIR = $dll.DirectoryName
+          dotnet run --project backend/SystemMonitor.Tests -c Release

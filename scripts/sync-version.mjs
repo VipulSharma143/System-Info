@@ -46,9 +46,8 @@ function main() {
   patchJsonField(join(ROOT, 'frontend/src-tauri/tauri.conf.json'), version);
   patchCargoToml(join(ROOT, 'frontend/src-tauri/Cargo.toml'), version);
   patchDirectoryBuildProps(join(ROOT, 'Directory.Build.props'), version, fourPart);
-  patchInnoSetupScript(join(ROOT, 'SystemInfo.iss'), version);
 
-  console.log(`Synced version ${version} to package.json, tauri.conf.json, Cargo.toml, Directory.Build.props, SystemInfo.iss.`);
+  console.log(`Synced version ${version} to package.json, tauri.conf.json, Cargo.toml, Directory.Build.props.`);
 }
 
 function patchJsonField(path, version) {
@@ -80,15 +79,6 @@ function patchDirectoryBuildProps(path, version, fourPart) {
   updated = updated.replace(patterns[1], `<AssemblyVersion>${fourPart}</AssemblyVersion>`);
   updated = updated.replace(patterns[2], `<FileVersion>${fourPart}</FileVersion>`);
   writeFileSync(path, updated);
-}
-
-function patchInnoSetupScript(path, version) {
-  const original = readFileSync(path, 'utf-8');
-  const pattern = /#define MyAppVersion "[^"]*"/;
-  if (!pattern.test(original)) {
-    throw new Error(`Could not find "#define MyAppVersion ..." in ${path}`);
-  }
-  writeFileSync(path, original.replace(pattern, `#define MyAppVersion "${version}"`));
 }
 
 main();

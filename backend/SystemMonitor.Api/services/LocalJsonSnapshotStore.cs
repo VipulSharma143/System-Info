@@ -46,7 +46,12 @@ public class LocalJsonSnapshotStore : ISnapshotStore
     {
         var results = new List<SystemSnapshot>();
 
-        foreach (var date in EachDate(from.Date, to.Date))
+        // An open-ended lower bound (DateTime.MinValue / "all time") must not
+        // iterate ~740,000 non-existent days: clamp to the oldest day on disk.
+        var earliest = EarliestDataDate();
+        var start = earliest is null ? to.Date : (from.Date < earliest.Value ? earliest.Value : from.Date);
+
+        foreach (var date in EachDate(start, to.Date))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -79,6 +84,33 @@ public class LocalJsonSnapshotStore : ISnapshotStore
         }
 
         return Task.FromResult<IReadOnlyList<SystemSnapshot>>(results);
+    }
+
+    /// <summary>Oldest day that has a snapshot file, or null if there is no history yet.</summary>
+    private DateTime? EarliestDataDate()
+    {
+        try
+        {
+            foreach (var yearDir in Directory.EnumerateDirectories(_rootDir).OrderBy(d => d, StringComparer.Ordinal))
+            {
+                if (!int.TryParse(Path.GetFileName(yearDir), out var y)) continue;
+                foreach (var monthDir in Directory.EnumerateDirectories(yearDir).OrderBy(d => d, StringComparer.Ordinal))
+                {
+                    if (!int.TryParse(Path.GetFileName(monthDir), out var m)) continue;
+                    foreach (var file in Directory.EnumerateFiles(monthDir, "*.jsonl").OrderBy(f => f, StringComparer.Ordinal))
+                    {
+                        if (int.TryParse(Path.GetFileNameWithoutExtension(file), out var d)
+                            && y is >= 1 and <= 9999 && m is >= 1 and <= 12 && d is >= 1 and <= 31)
+                        {
+                            try { return new DateTime(y, m, d, 0, 0, 0, DateTimeKind.Utc); }
+                            catch (ArgumentOutOfRangeException) { /* e.g. 31 Feb: ignore stray file */ }
+                        }
+                    }
+                }
+            }
+        }
+        catch (DirectoryNotFoundException) { }
+        return null;
     }
 
     private static IEnumerable<DateTime> EachDate(DateTime from, DateTime to)

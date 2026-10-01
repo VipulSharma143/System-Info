@@ -1,17 +1,17 @@
 # setup.ps1 — System Info DEVELOPER setup wizard (Windows)
 #
 # DEV-ONLY. This is for setting up a development machine (installing
-# Node/Python/build tools, building native deps, running the dev servers).
+# Node/.NET/build tools, building native deps, running the dev servers).
 # It is NOT run by the installer anymore and is NOT required to use the
 # packaged application — SystemInfo-Setup.exe installs a fully self-contained
-# build (see .github/workflows/build-windows-installer.yml and
-# launcher/Program.cs) that needs none of this on the end user's PC.
+# build (see .github/workflows/release.yml, Tauri NSIS installer) that needs
+# none of this on the end user's PC.
 #
 # Run from an elevated PowerShell: powershell -ExecutionPolicy Bypass -File setup.ps1
 #
 # Windows equivalent of setup.sh. Checks prerequisites, offers to install
 # missing ones via winget, builds the native engine with the Visual Studio
-# generator, installs frontend/analytics deps, sets up local storage,
+# generator, installs frontend deps, sets up local storage,
 # checks ports, and offers to launch start-all.ps1.
 #
 # KNOWN GAP (flagging honestly, not hiding it): this assumes native/CMakeLists.txt
@@ -56,8 +56,6 @@ function Check-Cmd($cmd, $wingetId) {
 Check-Cmd "dotnet"  "Microsoft.DotNet.SDK.10"
 Check-Cmd "node"    "OpenJS.NodeJS.LTS"
 Check-Cmd "npm"     "OpenJS.NodeJS.LTS"
-Check-Cmd "python"  "Python.Python.3.12"
-Check-Cmd "pip"     "Python.Python.3.12"
 Check-Cmd "cmake"   "Kitware.CMake"
 Check-Cmd "nasm"    "NASM.NASM"
 
@@ -138,18 +136,6 @@ try {
 
 Write-Host ""
 
-# --- 5. Analytics dependencies ---
-Write-Host "Checking analytics dependencies..."
-$check = python -c "import fastapi, uvicorn" 2>&1
-if ($LASTEXITCODE -eq 0) {
-    Ok "fastapi and uvicorn already installed."
-} else {
-    pip install fastapi uvicorn --quiet
-    Ok "Python analytics dependencies installed."
-}
-
-Write-Host ""
-
 # --- 6. Local data directory ---
 # No database account, connection string, or cloud cluster needed — all
 # history is stored on this machine. SYSTEM_INFO_DATA_DIR can override the
@@ -165,7 +151,7 @@ Write-Host ""
 # --- 7. Port check ---
 Write-Host "Checking ports start-all.ps1 will need..."
 $PortWarning = $false
-foreach ($port in 5173, 8001) {
+foreach ($port in 5173) {
     $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
     if ($conn) {
         $pid_ = $conn[0].OwningProcess
@@ -177,7 +163,7 @@ foreach ($port in 5173, 8001) {
 if ($PortWarning) {
     Write-Host "        start-all.ps1 will refuse to start until the port(s) above are freed."
 } else {
-    Ok "Ports 5173 and 8001 are free."
+    Ok "Port 5173 is free."
 }
 
 Write-Host ""

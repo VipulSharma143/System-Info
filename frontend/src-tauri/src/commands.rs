@@ -3,22 +3,37 @@
 //! shell access") — these four commands are the entire API; there is no
 //! generic "run this command" entry point anywhere in the app.
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::process::{ServiceManager, ServiceStatus};
 
+// Sync Tauri commands run on the main (UI) thread. Anything that can wait —
+// starting services, stopping them (kill + wait) — is therefore async and
+// pushed onto a blocking worker so the window can never freeze on it.
+// `get_service_status` stays sync because it is now lock-free/non-blocking.
+
 #[tauri::command]
-pub fn start_services(app: AppHandle, manager: State<'_, ServiceManager>) -> ServiceStatus {
-    let status = manager.start(&app);
-    let _ = app.emit("services-status", status.clone());
-    status
+pub async fn start_services(app: AppHandle) -> Result<ServiceStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = app.state::<ServiceManager>();
+        let emit = |s: ServiceStatus| {
+            let _ = app.emit("services-status", s);
+        };
+        manager.start(&app, &emit)
+    })
+    .await
+    .map_err(|e| format!("start task failed: {e}"))
 }
 
 #[tauri::command]
-pub fn stop_services(app: AppHandle, manager: State<'_, ServiceManager>) -> ServiceStatus {
-    let status = manager.stop();
-    let _ = app.emit("services-status", status.clone());
-    status
+pub async fn stop_services(app: AppHandle) -> Result<ServiceStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let status = app.state::<ServiceManager>().stop();
+        let _ = app.emit("services-status", status.clone());
+        status
+    })
+    .await
+    .map_err(|e| format!("stop task failed: {e}"))
 }
 
 #[tauri::command]
@@ -27,13 +42,13 @@ pub fn get_service_status(manager: State<'_, ServiceManager>) -> ServiceStatus {
 }
 
 /// EXIT, as distinct from Stop — stops both services AND closes the app.
-/// See the STOP-vs-EXIT-vs-X-close table in the migration spec; the X-close
-/// path reuses this same manager through the window's CloseRequested
-/// handler in lib.rs rather than duplicating the shutdown sequence.
+/// Shutdown runs on a worker thread; the app exits when it completes.
 #[tauri::command]
-pub fn exit_app(app: AppHandle, manager: State<'_, ServiceManager>) {
-    crate::process::shutdown(&manager);
-    app.exit(0);
+pub fn exit_app(app: AppHandle) {
+    std::thread::spawn(move || {
+        crate::process::shutdown(&app.state::<ServiceManager>());
+        app.exit(0);
+    });
 }
 
 /// Runs the same update check the Updates tab runs, but returns the FULL

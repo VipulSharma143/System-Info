@@ -1,0 +1,17 @@
+# Standalone crate that compiles src/supervisor.rs WITHOUT Tauri, so the process
+# supervision logic can be tested with plain `cargo test` — no WebKit/GTK
+# toolchain, no ~500 crates. (Integration tests of the app crate itself would
+# have to build Tauri first.)  Needs python3 on PATH (used as a fake service)
+# and free loopback ports 18101-18152.
+[package]
+name = "supervisor-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
