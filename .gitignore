@@ -23,6 +23,8 @@ CMakeUserPresets.json
 ### DotnetCore ###
 # .NET Core build folders
 bin/
+# the supervisor test fake service lives in src/bin and must be tracked
+!frontend/src-tauri/supervisor-tests/src/bin/
 obj/
 
 # Common node modules locations
