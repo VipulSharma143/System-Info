@@ -143,5 +143,10 @@ finally { try { Directory.Delete(dir, true); } catch { } }
     failures += nf; checks += nc;
 }
 
+{
+    var (nf, nc) = MemoryTests.Run();
+    failures += nf; checks += nc;
+}
+
 Console.WriteLine(failures == 0 ? $"all {checks} checks passed" : $"{failures} of {checks} checks FAILED");
 return failures == 0 ? 0 : 1;

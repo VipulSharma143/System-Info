@@ -182,7 +182,9 @@ All endpoints are served by the .NET backend on `:5132` (or the port the fronten
 | `GET` | `/health` | Dependency-free readiness probe (used by the Tauri process manager) |
 | `GET` | `/api/system/all` | Consolidated live snapshot: CPU + RAM + processes + disk + network + battery in one call. Each subsystem is read with its own timeout; one that fails or hangs is named in an additive `unavailable` array while the rest is still returned. Concurrent requests share one scan (750 ms reuse) |
 | `GET` | `/api/system/cpu` | Cached CPU usage |
-| `GET` | `/api/system/ram` | RAM usage |
+| `GET` | `/api/system/ram` | Runtime RAM in bytes (`RamDetails`): total/used/available, free/cached/buffers, swap or page file, commit. A value the OS doesn't report is `null`, never 0; `source` says whether it came from the native engine or the managed fallback |
+| `GET` | `/api/system/memory/hardware` | Physical RAM: platform summary + one entry per populated module (SMBIOS Type 16/17). `available: false` (still HTTP 200) when the firmware tables can't be read — on Linux `/sys/firmware/dmi/tables/DMI` is root-only. Cached, since DIMMs don't change at runtime |
+| `GET` | `/api/system/memory/health` | ECC capability / enabled / corrected+uncorrected error counters (Linux EDAC). Each is `null` unless the platform actually reports it |
 | `GET` | `/api/system/disk` | Disk capacity/usage |
 | `GET` | `/api/system/network` | Cached network throughput |
 | `GET` | `/api/system/processes` | Running process list |
@@ -199,6 +201,19 @@ All endpoints are served by the .NET backend on `:5132` (or the port the fronten
 | `GET` | `/api/native/kernels` | Runs the Assembly self-test against the C++ reference on this CPU and reports kernel throughput (GB/s) |
 | `GET` | `/api/native/topology`, `/storage`, `/fans` | Physical/logical cores and packages (`null` when the OS doesn't expose them), real storage volumes with 64-bit sizes, fan tachometers (empty list when none exist) |
 | `GET` | `/api/native/memory-bandwidth` | Sustained copy and read bandwidth through the Assembly kernels (128 MB buffer, about a second of work — deliberately not polled) |
+
+### Physical memory modules on Linux (one-time setup)
+
+The RAM tab's *Memory platform* and *Memory modules* sections come from the firmware (SMBIOS). Linux only lets **root** read that table (`/sys/firmware/dmi/tables/DMI`), because it also contains the machine's serial number and UUID. The app deliberately does not run as root and never calls `dmidecode`, so on Linux these sections show "unavailable" until you run this once:
+
+```bash
+./native/build.sh                                  # builds the library and the helper
+sudo packaging/linux/install-smbios-snapshot.sh    # one time
+```
+
+Then restart the backend and reopen the RAM tab. The helper runs as root, copies **only the memory records** (SMBIOS Type 16/17: slots, capacity, speed, manufacturer, part and serial number of the memory modules) to `/var/lib/system-info/smbios-memory.bin`, and the app reads that file. Nothing else from the firmware table (machine serial, UUID, ...) is copied. A systemd service refreshes the file at every boot, and the app ignores a snapshot taken before the last restart, so it can never show modules that are no longer installed. Remove it with `sudo packaging/linux/install-smbios-snapshot.sh --uninstall`.
+
+Without systemd, or to refresh by hand: `sudo ./native/build/si_smbios_snapshot`. Windows needs no setup.
 
 **Speed test note:** the dashboard's `NetworkView` measures download/upload/ping directly from the browser against `speed.cloudflare.com`, so results aren't affected by a loopback hop through the local backend. `SpeedTestEndpoints.cs` implements the same measurement server-side but isn't currently called by the frontend.
 
@@ -399,7 +414,7 @@ Nothing needs Python or a scripting runtime — only the toolchains you already 
 
 | Suite | What it covers | Run it |
 |---|---|---|
-| **Native + Assembly** (`tests/native/`, ctest) | Every SSE2/AVX2 kernel against a C++ reference at lengths 0–4099 with misaligned pointers; `memcpy` guard bytes; overlap handling; CPUID/OS feature consistency; topology, storage and fan enumeration; argument validation; the regression for the SIMD loop that hung on fewer than 4 iterations | `cmake -S native -B native/build-tests -DBUILD_NATIVE_TESTS=ON && cmake --build native/build-tests && ctest --test-dir native/build-tests --output-on-failure` |
+| **Native + Assembly** (`tests/native/`, ctest) | Every SSE2/AVX2 kernel against a C++ reference at lengths 0–4099 with misaligned pointers; `memcpy` guard bytes; overlap handling; CPUID/OS feature consistency; topology, storage and fan enumeration; argument validation; the regression for the SIMD loop that hung on fewer than 4 iterations; the SMBIOS memory parser (Type 16/17: DDR3/4/5 mapping, capacities, empty slots, ranks, speeds, ECC, truncated/corrupt tables) against hand-built tables, and the Windows `RawSMBIOSData` header handling | `cmake -S native -B native/build-tests -DBUILD_NATIVE_TESTS=ON && cmake --build native/build-tests && ctest --test-dir native/build-tests --output-on-failure` |
 | **C#** (`backend/SystemMonitor.Tests`) | Analytics maths and JSON shape, torn/malformed snapshot lines, empty history, a full 86,400-row day, cancellation, the bounded "all time" query, and the managed native wrappers against plain C# reference implementations | `SYSTEMINFO_NATIVE_DIR=native/build-tests dotnet run --project backend/SystemMonitor.Tests` |
 | **Process supervisor** (`frontend/src-tauri/supervisor-tests`) | Starting services concurrently, `status()` never blocking during startup (the original window-freeze bug), a crashed child reported immediately, a busy port not mistaken for a healthy service, stale-process cleanup, cancellation, no leaked children | `cd frontend/src-tauri/supervisor-tests && cargo test` |
 

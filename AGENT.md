@@ -12,7 +12,7 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.3.0 · **License:** none — no `LICENSE` file exists in the repo.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.4.0 · **License:** none — no `LICENSE` file exists in the repo.
 
 ## 📖 What it is
 
@@ -50,7 +50,7 @@ Real-time hardware telemetry (CPU/RAM/disk/network/processes/battery/GPU/system 
 
 ```
 frontend/src/          React app: components/{views,common,layout}, hooks/, lib/ (apiConfig.ts!), types/
-  views/                OverviewView, AnalyticsView, ProcessesView, StorageView, NetworkView, BatteryView, SystemView, UpdatesView
+  views/                OverviewView, AnalyticsView, ProcessesView, RamView, StorageView, NetworkView, BatteryView, SystemView, UpdatesView
   common/                Shared design-system primitives: Panel, MetricCard, Sparkline, UsageBar, States, Table, Segmented, StatusIndicator
   hooks/                 useSystemMetrics, useSystemInfo, useSystemGpu, useAnalytics, useSpeedTest, useServiceControl, useUpdater, useTheme
 frontend/src-tauri/     Rust shell: supervisor.rs (Tauri-free lifecycle core), process.rs (resource lookup + command building), commands.rs
@@ -87,7 +87,9 @@ History: background service appends every sample to `.jsonl` → frontend Analyt
 | Metric | Windows | Linux |
 |---|---|---|
 | CPU | `PerformanceCounter` + native read | `/proc/stat`, `/proc/cpuinfo` |
-| RAM | `Win32_OperatingSystem` | `/proc/meminfo` |
+| RAM (runtime) | Native `GlobalMemoryStatusEx` + `GetPerformanceInfo` (WMI fallback) | Native `/proc/meminfo` (managed `/proc/meminfo` fallback) |
+| RAM (physical modules) | Raw SMBIOS Type 16/17 via `GetSystemFirmwareTable('RSMB')` (no admin; never wmic/PowerShell) — implemented, not run on real Windows | Raw SMBIOS Type 16/17 parsed natively from `/sys/firmware/dmi/tables/DMI` (root-only; never `dmidecode`) |
+| Memory health | None | EDAC counters under `/sys/devices/system/edac/mc*` |
 | Disk | `DriveInfo` (.NET, both platforms) — capacity/usage only, no SMART health (needs root, not implemented) |
 | Network | Windows network counters | `/proc/net/dev` |
 | Processes | .NET `Process` APIs | `/proc/[pid]/status` |
@@ -106,7 +108,7 @@ Checks GitHub Releases a few seconds after load and every 6h while open; `Update
 
 ## 🔌 API (backend on :5132, or whatever `apiConfig.ts` resolves)
 
-`GET /health` · `/api/system/{all,cpu,ram,disk,network,processes,battery,info,gpu}` · `/api/analytics/{stats,trend,bottlenecks}?minutes=` · `/api/speed-test` (implemented, unused — frontend does it client-side against Cloudflare) · `/api/native/{cpuinfo,cpufeatures,kernels,topology,storage,fans,memory-bandwidth,cpu,cputemp,gpu,battery,fan,test,benchmark,asmtest,simd-benchmark}`. `/api/system/all` now isolates each subsystem (per-section timeout, last-good RAM, additive `unavailable` array) via `SystemSnapshotService`
+`GET /health` · `/api/system/{all,cpu,ram,disk,network,processes,battery,info,gpu,memory/hardware,memory/health}` · `/api/analytics/{stats,trend,bottlenecks}?minutes=` · `/api/speed-test` (implemented, unused — frontend does it client-side against Cloudflare) · `/api/native/{cpuinfo,cpufeatures,kernels,topology,storage,fans,memory-bandwidth,cpu,cputemp,gpu,battery,fan,test,benchmark,asmtest,simd-benchmark}`. `/api/system/all` now isolates each subsystem (per-section timeout, last-good RAM, additive `unavailable` array) via `SystemSnapshotService`
 
 CORS locked to `localhost:5173` (Vite dev), `tauri.localhost` (Win WebView2), `tauri://localhost` (Linux Tauri). No auth token — CORS is the only real boundary.
 
@@ -146,11 +148,15 @@ Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job
 - **Don't reintroduce a second runtime or a second process for analytics** (Python, Node, anything frozen with PyInstaller-style tooling). It was tried, and cost a PyInstaller build per platform, a hidden-import failure mode that built cleanly but crashed on launch, a second port with its own health check and a proxy hop, and a Job Object workaround — all to run ~800 lines of arithmetic over files the backend already owns. Full account in `PROJECT_STATUS.md`.
 - **Never hold a lock across a readiness wait, and never block in a sync Tauri command.** Sync commands run on the UI thread; this froze the window on slow cold starts once. `get_service_status` must stay lock-free and do no I/O.
 - **Keep every native export exception-free and bounds-checked.** An exception crossing the `extern "C"` boundary into .NET kills the process. Use the `std::error_code` filesystem overloads, validate buffers, report unknown as `-1`/`0` return — never a fabricated zero.
+- **Linux physical RAM goes through a memory-only snapshot.** `/sys/firmware/dmi/tables/DMI` is root-only (it also holds the machine serial/UUID), so the app never reads it as an unprivileged user and never runs `dmidecode`. `si_smbios_snapshot` (root, built by `native/build.sh`, installed by `packaging/linux/install-smbios-snapshot.sh`) saves only Type 16/17 records to `/var/lib/system-info/smbios-memory.bin` with the boot id; `si_dmi_load_table_ex` reads the live table first, then that snapshot, and returns a reason code (`si_get_memory_hardware_status`) that `MemoryMapping.UnavailableNote` turns into the on-screen message. Never widen what the filter copies, and keep the stale-boot check. The snapshot code is covered by `smbios_loader_test`.
+- **The SMBIOS parser is shared and byte-buffer driven.** Don't add platform branches inside the Type 16/17 parsing; only `si_dmi_load_table` is platform-specific. Any parser change needs a case in `tests/native/smbios_parse_test.cpp` (hand-built tables; unknown stays `-1`/empty, never a fabricated 0). `smbios_loader_test` `#include`s `hardware_info.cpp`, so it is a standalone target and must not link `systemmonitor_native`.
 - **Assembly kernels must stay verified.** Any new or changed kernel needs a C++ reference and a case in `si_kernel_selftest()` covering n = 0, 1, odd lengths, tails and misaligned pointers; SSE2 is the only baseline — AVX2 is reachable only through the CPUID+XGETBV dispatcher.
 - **An unbounded query range is a trap.** `ISnapshotStore.QueryAsync(DateTime.MinValue, …)` is legal because the store clamps to the oldest day on disk; don't add code that iterates calendar days itself.
 - When zipping the repo for sharing, don't exclude `native/build*` — it also matches `native/build.sh`.
 
 ## ⚠️ Unverified / known-limited (check `PROJECT_STATUS.md` before assuming these work)
+
+Windows physical-RAM reader (`si_dmi_load_table` → `GetSystemFirmwareTable('RSMB')` → `si_dmi_extract_rsmb`) and the Windows C# runtime-RAM provider — the shared SMBIOS parser and the header-stripping are unit-tested (`smbios_parse_test`, `smbios_loader_test`, also run as Windows builds under Wine), but the live Windows API call has never returned a real table anywhere (Wine has no DMI source in the authoring sandbox). Linux physical RAM needs the one-time snapshot setup (see README) and degrades to an explained "unavailable" without it. The installer's systemd unit passes `systemd-analyze verify`, but the install/boot flow has not been run on a real systemd machine.
 
 Windows battery IOCTL detail + DXGI-linked GPU reads — implemented, not hardware-verified (no Windows/dotnet toolchain in the environment that most recently extended them; Windows cross-compilation via mingw-w64 was verified in isolation only). GPU detection is split across two unreconciled code paths (Windows structured provider vs. Linux native-engine path — see Architecture above). Multi-GPU engine-to-adapter attribution on Windows (parses `_phys_N_` from perf-counter instance names) is unverified against real dual-GPU hardware. No retention/TTL on snapshot storage (grows unbounded — accepted tradeoff, not a bug to silently fix). Automated tests exist for the native/Assembly layer, the C# analytics + native wrappers, and the Rust supervisor, and CI gates releases on them; there are no frontend tests and nothing automatically exercises an *installed* build — the 2.3.0 changes (supervisor rewrite, in-process analytics, new native functions) had not been run from a real installer when this was written. The Windows-only C# (WMI provider) has only ever been compiled by CI. `docs/`, `database/` are empty placeholders. No `LICENSE` file.
 

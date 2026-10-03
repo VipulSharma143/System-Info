@@ -7,11 +7,30 @@ public static class SystemEndpoints
 {
 public static void MapSystemEndpoints(this WebApplication app)
     {
-app.MapGet("/api/system/ram", async (ISystemInfoProvider provider) =>
+// Runtime RAM (OS-visible total/used/available, cache, swap/page file, commit). Physical module
+// data is deliberately a separate endpoint below: it is static firmware data with its own failure modes.
+app.MapGet("/api/system/ram", (ISystemInfoProvider provider, ILogger<ISystemInfoProvider> log) =>
         {
-return await provider.GetRamAsync();
+            try
+            {
+                return Results.Ok(provider.GetRamDetails());
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Runtime memory information could not be read.");
+                return Results.Problem("Memory information is not available.", statusCode: 503);
+            }
         })
         .WithName("GetRamUsage");
+
+// Physical RAM: platform summary + one entry per populated module. "Not readable on this machine" is a
+// normal 200 with available=false (so the UI can show partial data), not an error.
+app.MapGet("/api/system/memory/hardware", (MemoryHardwareService memory) => memory.GetHardware())
+        .WithName("GetMemoryHardware");
+
+// ECC capability / enabled / live error counters — kept apart from both of the above.
+app.MapGet("/api/system/memory/health", (MemoryHardwareService memory) => memory.GetHealth())
+        .WithName("GetMemoryHealth");
 app.MapGet("/api/system/cpu", (SystemMonitorBackgroundService sampler) =>
 {
 var cached = sampler.GetCachedCpu();

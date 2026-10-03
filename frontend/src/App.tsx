@@ -16,6 +16,7 @@ import StartupScreen, { buildStartupSteps } from './components/layout/StartupScr
 import OverviewView from './components/views/OverviewView';
 import AnalyticsView from './components/views/AnalyticsView';
 import ProcessesView from './components/views/ProcessesView';
+import RamView from './components/views/RamView';
 import StorageView from './components/views/StorageView';
 import NetworkView from './components/views/NetworkView';
 import BatteryView from './components/views/BatteryView';
@@ -34,6 +35,7 @@ const SECTIONS = [
   { id: 'overview', label: 'Overview' },
   { id: 'analytics', label: 'Analytics' },
   { id: 'processes', label: 'Processes' },
+  { id: 'ram', label: 'RAM' },
   { id: 'storage', label: 'Storage' },
   { id: 'network', label: 'Network' },
   { id: 'battery', label: 'Battery' },
@@ -47,6 +49,7 @@ const TITLES: Record<SectionId, { title: string; description: string }> = {
   overview: { title: 'Overview', description: 'System state at a glance' },
   analytics: { title: 'Analytics', description: 'Trends, stats, and bottleneck history' },
   processes: { title: 'Processes', description: 'Running processes by memory' },
+  ram: { title: 'RAM', description: 'Memory usage, installed modules, and health' },
   storage: { title: 'Storage', description: 'Drives, capacity, and usage' },
   network: { title: 'Network', description: 'Interfaces, traffic, and connection speed' },
   battery: { title: 'Battery', description: 'Charge, health, and power draw' },
@@ -223,6 +226,10 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
       </div>
       <div className={activeSection === 'processes' ? 'block' : 'hidden'}>
         <ProcessesView processes={data.processes} />
+      </div>
+      <div className={activeSection === 'ram' ? 'block' : 'hidden'}>
+        {/* Polls only while this tab is the visible one (the view stays mounted like the others). */}
+        <RamView active={activeSection === 'ram'} />
       </div>
       <div className={activeSection === 'storage' ? 'block' : 'hidden'}>
         <StorageView disks={data.disks} />

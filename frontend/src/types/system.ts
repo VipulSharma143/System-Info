@@ -120,3 +120,88 @@ disks: DiskInfo[];
 network: NetworkInfo[];
 battery: BatteryInfo;
 }
+
+// ---------------------------------------------------------------------------
+// RAM page models. Three separate endpoints, three separate shapes — physical
+// DIMM data and health counters are deliberately NOT folded into RamDetails.
+// Every nullable field means "the platform did not report it": render
+// "Not reported", never 0.
+// ---------------------------------------------------------------------------
+
+// GET /api/system/ram — runtime memory state (bytes).
+export interface RamDetails {
+  totalBytes: number;
+  usedBytes: number;
+  availableBytes: number;
+
+  freeBytes: number | null;
+  cachedBytes: number | null;
+  buffersBytes: number | null;
+
+  // Linux swap / Windows page file.
+  swapTotalBytes: number | null;
+  swapUsedBytes: number | null;
+
+  commitLimitBytes: number | null;
+  commitUsedBytes: number | null;
+
+  usedPercent: number;
+
+  source: 'native' | 'managed-fallback';
+  note: string | null;
+}
+
+// One populated physical module. Empty slots are never listed.
+export interface MemoryModule {
+  manufacturer: string | null;
+  partNumber: string | null;
+  serialNumber: string | null;
+  locator: string | null;
+  bankLocator: string | null;
+  formFactor: string | null;
+  memoryType: string | null;
+  capacityBytes: number | null;
+  speedMTs: number | null;
+  configuredSpeedMTs: number | null;
+  dataWidthBits: number | null;
+  totalWidthBits: number | null;
+  rank: number | null;
+  eccCapable: boolean | null;
+}
+
+export interface MemoryHardwareSummary {
+  installedBytes: number | null;
+  moduleCount: number | null;
+  slotCount: number | null;
+  emptySlots: number | null;
+  maxCapacityBytes: number | null;
+  maxModuleCapacityBytes: number | null;
+  memoryType: string | null;
+  formFactor: string | null;
+  configuredSpeedMTs: number | null;
+  maxSpeedMTs: number | null;
+  // Stays null until a platform provider can prove it; the UI shows "Unknown".
+  channelMode: string | null;
+  eccSupport: boolean | null;
+}
+
+// GET /api/system/memory/hardware. available=false is a normal outcome
+// (no access to firmware tables, unsupported platform), not an error.
+export interface MemoryHardwareInfo {
+  available: boolean;
+  summary: MemoryHardwareSummary | null;
+  modules: MemoryModule[];
+  source: 'smbios' | 'unavailable';
+  note: string | null;
+}
+
+// GET /api/system/memory/health. ECC capability, ECC enabled and live error
+// counters are three different facts with three different sources.
+export interface MemoryHealth {
+  eccSupport: boolean | null;
+  eccEnabled: boolean | null;
+  correctedErrors: number | null;
+  uncorrectedErrors: number | null;
+  source: 'edac' | 'unavailable';
+  note: string | null;
+}

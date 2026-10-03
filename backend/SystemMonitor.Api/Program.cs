@@ -30,6 +30,7 @@ else
 builder.Services.AddSingleton<SystemMonitorBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemMonitorBackgroundService>());
 builder.Services.AddSingleton<SystemSnapshotService>();
+builder.Services.AddSingleton<MemoryHardwareService>();
 builder.Services.AddSingleton<AnalyticsService>();
 
 builder.Services.AddOpenApi();

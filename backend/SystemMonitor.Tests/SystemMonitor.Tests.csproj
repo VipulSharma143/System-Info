@@ -18,5 +18,9 @@
     <Compile Include="../SystemMonitor.Api/interface/ISnapshotStore.cs" Link="linked/ISnapshotStore.cs" />
     <Compile Include="../SystemMonitor.Api/Native/NativeInterop.cs" Link="linked/NativeInterop.cs" />
     <Compile Include="../SystemMonitor.Api/Native/NativeKernels.cs" Link="linked/NativeKernels.cs" />
+    <Compile Include="../SystemMonitor.Api/interface/ISystemInfoProvider.cs" Link="linked/ISystemInfoProvider.cs" />
+    <Compile Include="../SystemMonitor.Api/interface/MemoryModels.cs" Link="linked/MemoryModels.cs" />
+    <Compile Include="../SystemMonitor.Api/services/MemoryMapping.cs" Link="linked/MemoryMapping.cs" />
+    <Compile Include="../SystemMonitor.Api/services/MemoryHealthReader.cs" Link="linked/MemoryHealthReader.cs" />
   </ItemGroup>
 </Project>

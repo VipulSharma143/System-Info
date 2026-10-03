@@ -63,6 +63,14 @@ public class WindowsSystemInfoProvider : ISystemInfoProvider
 
     return Task.FromResult(result);
 }
+    public RamDetails GetRamDetails() =>
+        RamDetailsReader.Read(() =>
+        {
+            // Managed fallback: the WMI reading the dashboard already uses (completes synchronously).
+            var ram = GetRamAsync().GetAwaiter().GetResult();
+            return MemoryMapping.FromBasic(ram.TotalMB * 1024 * 1024, ram.AvailableMB * 1024 * 1024);
+        });
+
     public async Task<CpuInfo> GetCpuAsync()
     {
         // PerformanceCounter's first read is always 0 — it needs a baseline sample first.

@@ -73,6 +73,157 @@ NATIVE_API int si_get_cpu_topology(int* physicalCores, int* logicalCores, int* p
 NATIVE_API int si_get_storage_volume(int index, char* mountOut, int mountSize, char* fsOut, int fsSize,
                                      long long* totalBytes, long long* freeBytes);
 
+// RAM / swap / commit snapshot. All values are bytes (64-bit).
+// A value the OS does not expose is -1 (never a fabricated 0).
+// Returns 1 if at least totalBytes and availableBytes are known, else 0.
+// Linux: from /proc/meminfo.  Windows: GlobalMemoryStatusEx + GetPerformanceInfo.
+NATIVE_API int si_get_memory_info(long long* totalBytes, long long* availableBytes,
+                                  long long* freeBytes, long long* cachedBytes,
+                                  long long* buffersBytes, long long* swapTotalBytes,
+                                  long long* swapUsedBytes, long long* commitLimitBytes,
+                                  long long* commitUsedBytes);
+
+
+// ---------------------------------------------------------------------
+// Physical RAM / DIMM hardware information (hardware_info.cpp)
+// ---------------------------------------------------------------------
+//
+// Runtime memory usage belongs to si_get_memory_info().
+// These APIs describe the physical memory modules installed in the system.
+//
+// Enumeration:
+//   index = 0, 1, 2, ... until the function returns 0.
+//
+// Unknown/unavailable numeric values are -1.
+// Unknown/unavailable strings are empty.
+//
+// On systems where the OS does not expose DIMM-level information,
+// the function returns 0 rather than fabricating hardware details.
+//
+// Windows:
+//   Reads the raw SMBIOS table via GetSystemFirmwareTable('RSMB').
+//   No WMI, wmic or PowerShell.
+//
+// Linux:
+//   Uses DMI/SMBIOS information exposed through sysfs (/sys).
+//
+// Some fields may require elevated privileges on Linux.
+//
+
+NATIVE_API int si_get_memory_module(
+    int index,
+    char* manufacturerOut,
+    int manufacturerSize,
+    char* partNumberOut,
+    int partNumberSize,
+    char* serialNumberOut,
+    int serialNumberSize,
+    char* locatorOut,
+    int locatorSize,
+    char* bankLocatorOut,
+    int bankLocatorSize,
+    char* formFactorOut,
+    int formFactorSize,
+    char* memoryTypeOut,
+    int memoryTypeSize,
+    long long* capacityBytesOut,
+    long long* speedMTsOut,
+    long long* configuredSpeedMTsOut,
+    int* dataWidthOut,
+    int* totalWidthOut,
+    int* rankOut,
+    int* eccOut
+);
+
+// Summary of the physical RAM configuration.
+//
+// installedBytes:
+//   Sum of all populated memory modules.
+//
+// moduleCount:
+//   Number of populated modules discovered.
+//
+// slotCount:
+//   Number of physical memory slots reported by the firmware.
+//
+// maxCapacityBytes:
+//   Maximum RAM capacity reported by the platform firmware.
+//
+// maxModuleCapacityBytes:
+//   Maximum capacity of a single module when exposed by firmware.
+//
+// Unknown values are -1.
+// installedBytes is only reported when at least one populated module was found
+// and every module's capacity is known (never a fabricated 0).
+// Returns 1 when the firmware's memory description was read (individual values
+// may still be -1, e.g. the slot count), otherwise 0.
+NATIVE_API int si_get_memory_hardware_summary(
+    long long* installedBytesOut,
+    int* moduleCountOut,
+    int* slotCountOut,
+    long long* maxCapacityBytesOut,
+    long long* maxModuleCapacityBytesOut
+);
+
+// Why physical memory details are or are not available right now.
+//   0 = available
+//   1 = this system has no firmware memory table (many VMs, some ARM boards)
+//   2 = a table exists but this user may not read it (Linux: root-only)
+//   3 = a saved snapshot exists but is from before the last restart
+//   4 = a table exists but could not be read / is not valid SMBIOS
+// Cheap enough to call only when the details are unavailable.
+NATIVE_API int si_get_memory_hardware_status();
+
+// Linux, run as root: saves ONLY the memory records (SMBIOS Type 16/17) of the
+// firmware table to `path` (null/empty = the default location) so the
+// unprivileged app can read them. Nothing else from the table (serial number,
+// UUID, ...) is copied. The file is world-readable and written atomically.
+// Returns 1 on success, otherwise:
+//   -1 not allowed to read the firmware table (not running as root)
+//   -2 this system has no firmware table
+//   -3 the table has no memory records / could not be read
+//   -4 the snapshot file could not be written
+//   -5 not supported on this platform (Windows needs no snapshot)
+NATIVE_API int si_write_memory_smbios_snapshot(
+    const char* path
+);
+
+// Same two APIs, but parsing a caller-supplied SMBIOS *structure table*
+// (a run of Type N records, no container header) instead of the live
+// firmware table. Platform independent: used by the unit tests with
+// hand-built tables, and usable by any provider that already holds a table.
+// A null or empty table yields "unavailable" (0); it never falls back to
+// the live system table.
+NATIVE_API int si_get_memory_module_from_table(
+    const unsigned char* table,
+    int tableSize,
+    int index,
+    char* manufacturerOut, int manufacturerSize,
+    char* partNumberOut, int partNumberSize,
+    char* serialNumberOut, int serialNumberSize,
+    char* locatorOut, int locatorSize,
+    char* bankLocatorOut, int bankLocatorSize,
+    char* formFactorOut, int formFactorSize,
+    char* memoryTypeOut, int memoryTypeSize,
+    long long* capacityBytesOut,
+    long long* speedMTsOut,
+    long long* configuredSpeedMTsOut,
+    int* dataWidthOut,
+    int* totalWidthOut,
+    int* rankOut,
+    int* eccOut
+);
+
+NATIVE_API int si_get_memory_hardware_summary_from_table(
+    const unsigned char* table,
+    int tableSize,
+    long long* installedBytesOut,
+    int* moduleCountOut,
+    int* slotCountOut,
+    long long* maxCapacityBytesOut,
+    long long* maxModuleCapacityBytesOut
+);
+
 // Enumerate fan tachometers: index = 0, 1, 2... until 0 is returned. No fans, or a
 // platform with no API (Windows), simply yields 0 on the first call.
 NATIVE_API int si_get_fan(int index, char* labelOut, int labelSize, int* rpmOut);

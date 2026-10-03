@@ -104,4 +104,37 @@ public static class NativeInterop
 
     [DllImport("systemmonitor_native", EntryPoint = "si_get_fan")]
     public static extern int GetFan(int index, StringBuilder labelOut, int labelSize, out int rpm);
+
+    // ---- RAM (hardware_info.cpp). Unknown numeric = -1, unknown string = "" (see native_engine.h). ----
+    // Runtime state: total/available/free/cached/buffers/swap/commit, all 64-bit bytes.
+    [DllImport("systemmonitor_native", EntryPoint = "si_get_memory_info")]
+    public static extern int GetMemoryInfo(
+        out long totalBytes, out long availableBytes, out long freeBytes, out long cachedBytes,
+        out long buffersBytes, out long swapTotalBytes, out long swapUsedBytes,
+        out long commitLimitBytes, out long commitUsedBytes);
+
+    // Physical DIMMs (SMBIOS Type 17). Call with index = 0, 1, 2, ... until 0 is returned.
+    [DllImport("systemmonitor_native", EntryPoint = "si_get_memory_module")]
+    public static extern int GetMemoryModule(
+        int index,
+        StringBuilder manufacturerOut, int manufacturerSize,
+        StringBuilder partNumberOut, int partNumberSize,
+        StringBuilder serialNumberOut, int serialNumberSize,
+        StringBuilder locatorOut, int locatorSize,
+        StringBuilder bankLocatorOut, int bankLocatorSize,
+        StringBuilder formFactorOut, int formFactorSize,
+        StringBuilder memoryTypeOut, int memoryTypeSize,
+        out long capacityBytes, out long speedMTs, out long configuredSpeedMTs,
+        out int dataWidth, out int totalWidth, out int rank, out int ecc);
+
+    // Why physical memory details are or are not available:
+    // 0 ok, 1 no firmware table, 2 not allowed to read it, 3 snapshot from an earlier boot, 4 unreadable.
+    [DllImport("systemmonitor_native", EntryPoint = "si_get_memory_hardware_status")]
+    public static extern int GetMemoryHardwareStatus();
+
+    // Physical platform summary (SMBIOS Type 16 + 17).
+    [DllImport("systemmonitor_native", EntryPoint = "si_get_memory_hardware_summary")]
+    public static extern int GetMemoryHardwareSummary(
+        out long installedBytes, out int moduleCount, out int slotCount,
+        out long maxCapacityBytes, out long maxModuleCapacityBytes);
 }

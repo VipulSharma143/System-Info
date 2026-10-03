@@ -17,6 +17,7 @@ export type AlertKind =
   | 'systemInfo'
   | 'connectionLost'
   | 'gpu'
+  | 'memory'
   | 'updateCheck'
   | 'updateDownload'
   | 'updateInstall'
@@ -48,6 +49,12 @@ export const ALERT_COPY: Record<AlertKind, AlertCopy> = {
     tone: 'info',
     title: 'Graphics details unavailable',
     text: "We couldn't read information about your graphics hardware. Everything else keeps working.",
+  },
+  // The RAM page's live reading failed. Physical-module problems are shown inline instead.
+  memory: {
+    tone: 'warning',
+    title: 'Memory information unavailable',
+    text: "We couldn't read memory usage right now. Everything else keeps working.",
   },
   updateCheck: {
     tone: 'warning',

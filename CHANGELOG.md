@@ -12,6 +12,31 @@ All notable changes to SystemInfo are documented here.
 
 ### Known Issues
 
+## [2.4.0] - 2026-10-02
+
+### Added
+- **RAM tab** with a full memory dashboard: usage ring, free/cached/buffers, swap or page file, commit, the installed memory platform (type, speeds, slots, maximum capacity, ECC capability), one card per physical memory module (slot, bank, manufacturer, part number, serial, capacity, speeds, rank, widths, form factor), memory health, and a "detection sources" panel that says where each section's data came from. Loading, partial-data and error states are handled per section, so a failure in one never blanks the page. Nothing is polled while the tab is hidden.
+- `GET /api/system/ram` now returns byte-accurate runtime memory (`RamDetails`), `GET /api/system/memory/hardware` returns the physical platform summary plus installed modules, and `GET /api/system/memory/health` returns ECC capability and error counters. A value the platform doesn't report is `null`, never `0`.
+- Native physical-memory API: `si_get_memory_module` and `si_get_memory_hardware_summary` parse the raw SMBIOS Type 16/17 tables directly (no `dmidecode`, `wmic` or PowerShell), plus `si_get_memory_module_from_table` / `si_get_memory_hardware_summary_from_table` to parse a caller-supplied table.
+- **Windows** physical RAM details, read from the firmware SMBIOS table via `GetSystemFirmwareTable` (no administrator rights needed).
+- **Linux physical RAM without running as root.** The firmware table is root-only, so a small helper (`si_smbios_snapshot`, installed with `sudo packaging/linux/install-smbios-snapshot.sh`) saves only the memory records (slots, capacity, speed, manufacturer, part and serial number of the modules; never the machine's own serial or UUID) to `/var/lib/system-info/smbios-memory.bin`, and a systemd service refreshes it at every boot. A snapshot from before the last restart is ignored, and when physical details are missing the RAM tab now says why and what to do instead of one generic message.
+- Linux memory error counters (corrected / uncorrected) from the kernel's EDAC interface, shown only when the kernel exposes them.
+- `smbios_parse_test` (195 checks) and `smbios_loader_test` (101 checks: the Windows header handling, and the Linux memory-only snapshot including a check that the machine serial and UUID never reach the saved file): the SMBIOS parser against hand-built tables (DDR/DDR2/DDR3/DDR4/DDR5/LPDDR mappings, Type 16 capacity, slot counts, empty slots, rank, speeds, ECC, multiple arrays, truncated and corrupt tables). It needs no hardware and runs identically on Windows and Linux.
+
+### Changed
+- `/api/system/ram` response shape changed from megabytes (`RamInfo`) to bytes (`RamDetails`). The old shape had no consumer in the app.
+- Runtime RAM reads the native engine first and falls back to the OS's basic counters; the response states which one was used.
+- The installed-memory total is reported only when at least one populated module was found and every module's capacity is known, instead of a possible `0`.
+
+### Fixed
+- The Windows native build no longer fails to link `memory_hardware_test` (the two physical-memory functions only existed in the Linux build).
+
+### Known Issues
+- Physical memory details on Linux need the one-time `install-smbios-snapshot.sh` setup (see the README); until then the RAM tab explains this and runtime usage keeps working. The installer's systemd service passes `systemd-analyze verify` but has not been run on a real systemd machine.
+- The Windows SMBIOS reader and the Windows C# RAM provider compile (cross-compiled and reviewed) but have not been run on a real Windows machine yet.
+- Memory channel mode always shows "Unknown": the installed module count does not prove how the channels are populated, and no platform source is wired up yet.
+- ECC "enabled" status is not reported on any platform; only ECC capability (SMBIOS) and Linux EDAC error counters are.
+
 ## [2.3.0] - 2026-09-29
 
 ### Added

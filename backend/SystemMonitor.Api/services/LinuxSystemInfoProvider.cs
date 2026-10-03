@@ -34,6 +34,9 @@ public class LinuxSystemInfoProvider : ISystemInfoProvider
         return Task.FromResult(result);
     }
 
+    public RamDetails GetRamDetails() =>
+        RamDetailsReader.Read(() => MemoryMapping.FromMeminfo(File.ReadAllLines("/proc/meminfo")));
+
     public async Task<CpuInfo> GetCpuAsync()
     {
         (long idle, long total) ReadCpuTimes()

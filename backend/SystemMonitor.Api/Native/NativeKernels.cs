@@ -66,6 +66,16 @@ public static class NativeKernels
 
 public sealed record StorageVolume(string Mount, string FileSystem, long TotalBytes, long FreeBytes);
 public sealed record FanReading(string Label, int Rpm);
+
+// Raw native memory values. The native contract is kept as-is here (-1 = unknown numeric,
+// "" = unknown string); MemoryMapping turns it into the nullable API models.
+public sealed record NativeMemoryInfo(long TotalBytes, long AvailableBytes, long FreeBytes, long CachedBytes,
+    long BuffersBytes, long SwapTotalBytes, long SwapUsedBytes, long CommitLimitBytes, long CommitUsedBytes);
+public sealed record NativeMemoryModule(string Manufacturer, string PartNumber, string SerialNumber, string Locator,
+    string BankLocator, string FormFactor, string MemoryType, long CapacityBytes, long SpeedMTs,
+    long ConfiguredSpeedMTs, int DataWidth, int TotalWidth, int Rank, int Ecc);
+public sealed record NativeMemorySummary(long InstalledBytes, int ModuleCount, int SlotCount,
+    long MaxCapacityBytes, long MaxModuleCapacityBytes);
 public sealed record CpuTopology(int? PhysicalCores, int LogicalCores, int? Packages);
 
 /// <summary>Managed views over the native topology/storage/fan enumerators.</summary>
@@ -100,5 +110,52 @@ public static class NativeHardware
             list.Add(new FanReading(label.ToString(), rpm));
         }
         return list;
+    }
+
+    /// <summary>Runtime RAM snapshot, or null when the native call could not answer.</summary>
+    public static NativeMemoryInfo? GetMemoryInfo()
+    {
+        if (NativeInterop.GetMemoryInfo(out var total, out var avail, out var free, out var cached, out var buffers,
+                out var swapTotal, out var swapUsed, out var commitLimit, out var commitUsed) != 1)
+            return null;
+        return new NativeMemoryInfo(total, avail, free, cached, buffers, swapTotal, swapUsed, commitLimit, commitUsed);
+    }
+
+    /// <summary>Physical modules; empty when the platform exposes no DIMM data (or access is denied).</summary>
+    public static List<NativeMemoryModule> GetMemoryModules()
+    {
+        var list = new List<NativeMemoryModule>();
+        for (int i = 0; i < 128; i++)        // bounded, like the other enumerators
+        {
+            var manufacturer = new StringBuilder(128);
+            var part = new StringBuilder(128);
+            var serial = new StringBuilder(128);
+            var locator = new StringBuilder(128);
+            var bank = new StringBuilder(128);
+            var form = new StringBuilder(64);
+            var type = new StringBuilder(64);
+            if (NativeInterop.GetMemoryModule(i,
+                    manufacturer, manufacturer.Capacity, part, part.Capacity, serial, serial.Capacity,
+                    locator, locator.Capacity, bank, bank.Capacity, form, form.Capacity, type, type.Capacity,
+                    out var capacity, out var speed, out var configured,
+                    out var dataWidth, out var totalWidth, out var rank, out var ecc) != 1)
+                break;
+            list.Add(new NativeMemoryModule(manufacturer.ToString(), part.ToString(), serial.ToString(),
+                locator.ToString(), bank.ToString(), form.ToString(), type.ToString(),
+                capacity, speed, configured, dataWidth, totalWidth, rank, ecc));
+        }
+        return list;
+    }
+
+    /// <summary>Why physical memory details are (not) available. See <see cref="MemoryMapping.UnavailableNote"/>.</summary>
+    public static int GetMemoryHardwareStatus() => NativeInterop.GetMemoryHardwareStatus();
+
+    /// <summary>Physical platform summary, or null when the platform exposes none.</summary>
+    public static NativeMemorySummary? GetMemoryHardwareSummary()
+    {
+        if (NativeInterop.GetMemoryHardwareSummary(out var installed, out var modules, out var slots,
+                out var maxCapacity, out var maxModule) != 1)
+            return null;
+        return new NativeMemorySummary(installed, modules, slots, maxCapacity, maxModule);
     }
 }
