@@ -10,11 +10,7 @@ interface SegmentedProps<T extends string | number> {
   ariaLabel: string;
 }
 
-/*
-  A row of mutually exclusive options in one rounded track — used for the
-  Analytics time range and the Processes sort order, which previously each
-  hand-rolled a slightly different version of this.
-*/
+/** Mutually exclusive options in one pill track (Analytics range, Processes sort). */
 export default function Segmented<T extends string | number>({
   value,
   options,
@@ -22,11 +18,7 @@ export default function Segmented<T extends string | number>({
   ariaLabel,
 }: SegmentedProps<T>) {
   return (
-    <div
-      role="group"
-      aria-label={ariaLabel}
-      className="inline-flex items-center gap-0.5 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--bg)] p-0.5"
-    >
+    <div role="group" aria-label={ariaLabel} className="inline-flex items-center gap-0.5 rounded-full bg-surface-2 p-1">
       {options.map((option) => {
         const active = option.value === value;
         return (
@@ -35,10 +27,8 @@ export default function Segmented<T extends string | number>({
             type="button"
             onClick={() => onChange(option.value)}
             aria-pressed={active}
-            className={`h-6 rounded-[4px] px-2.5 text-[12px] font-medium transition-colors ${
-              active
-                ? 'bg-[var(--surface-hover)] text-[var(--text)] shadow-[0_0_0_1px_var(--border-strong)]'
-                : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+            className={`h-7 rounded-full px-3.5 text-[12px] font-medium transition-colors ${
+              active ? 'bg-[var(--primary)] text-[var(--on-primary)]' : 'text-muted hover:text-ink'
             }`}
           >
             {option.label}

@@ -1,11 +1,10 @@
 import type { ReactNode } from 'react';
-
 import { NOT_REPORTED } from '../../../lib/format';
 
 /** The single rendering of an unknown value. */
 export function NotReported({ hint }: { hint?: string }) {
   return (
-    <span className="text-[13px] text-[var(--text-faint)]" title={hint}>
+    <span className="text-[13px] font-normal text-faint" title={hint}>
       {NOT_REPORTED}
     </span>
   );

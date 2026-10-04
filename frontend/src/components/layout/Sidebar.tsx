@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import {
   Activity,
   BatteryMedium,
@@ -5,6 +6,7 @@ import {
   Download,
   HardDrive,
   Info,
+  LayoutDashboard,
   ListTree,
   MemoryStick,
   Moon,
@@ -12,22 +14,26 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Sun,
+  type LucideIcon,
 } from 'lucide-react';
 import type { Theme } from '../../hooks/useTheme';
 import type { ConnectionState } from '../../hooks/useSystemMetrics';
-import StatusIndicator from '../common/StatusIndicator';
+import { hueStyle, type Hue } from '../../lib/hues';
 import { APP_VERSION } from '../../lib/version';
+import StatusIndicator from '../common/StatusIndicator';
+import BrandMark from './BrandMark';
 
 export interface NavItem {
   id: string;
   label: string;
+  hue: Hue;
   count?: number;
-  /** Small attention dot (used by the Updates tab when a new version exists). */
+  /** Attention dot (the Updates tab when a new version exists). */
   badge?: boolean;
 }
 
-const ICONS: Record<string, typeof Cpu> = {
-  overview: Cpu,
+const ICONS: Record<string, LucideIcon> = {
+  overview: LayoutDashboard,
   analytics: Activity,
   processes: ListTree,
   ram: MemoryStick,
@@ -50,7 +56,11 @@ interface SidebarProps {
   onToggleCollapsed: () => void;
 }
 
-export default function Sidebar({
+/*
+  Navigation rail: a floating panel on wide windows, a bottom bar on narrow ones. Each destination
+  carries its subsystem hue, so the colour you see in the rail is the colour of that page's charts.
+*/
+function Sidebar({
   connection,
   lastUpdated,
   theme,
@@ -61,32 +71,25 @@ export default function Sidebar({
   collapsed,
   onToggleCollapsed,
 }: SidebarProps) {
+  const ThemeIcon = theme === 'dark' ? Sun : Moon;
+
   return (
     <aside
-      className="flex h-full shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] transition-[width] duration-200"
-      style={{ width: collapsed ? 'var(--sidebar-w-collapsed)' : 'var(--sidebar-w)' }}
+      className={`panel z-20 flex shrink-0 flex-col rounded-[var(--r-xl)] transition-[width] duration-200 max-md:fixed max-md:inset-x-2 max-md:bottom-2 max-md:h-16 max-md:w-auto max-md:flex-row max-md:items-center max-md:rounded-full max-md:px-2 ${
+        collapsed ? 'w-[var(--rail-w-collapsed)]' : 'w-[var(--rail-w)]'
+      }`}
     >
-      <div
-        className={`flex h-12 shrink-0 items-center gap-2.5 border-b border-[var(--border)] ${
-          collapsed ? 'justify-center px-2' : 'px-4'
-        }`}
-      >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
-          <Activity className="h-4 w-4 text-[var(--accent)]" strokeWidth={2.2} />
-        </span>
+      <div className={`flex h-16 shrink-0 items-center gap-3 max-md:hidden ${collapsed ? 'justify-center' : 'px-5'}`}>
+        <BrandMark />
         {!collapsed && (
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-[14px] font-semibold tracking-[-0.01em] text-[var(--text)]">
-              System Info
-            </span>
-            <span className="tabular shrink-0 text-[10.5px] text-[var(--text-faint)]">
-              v{APP_VERSION}
-            </span>
+          <span className="min-w-0 leading-tight">
+            <span className="num block truncate text-[16px] font-semibold text-ink">System Info</span>
+            <span className="num block text-[11px] text-faint">v{APP_VERSION}</span>
           </span>
         )}
       </div>
 
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2.5 py-3" aria-label="Sections">
+      <nav className="flex-1 space-y-1 overflow-y-auto px-2.5 py-2 max-md:flex max-md:space-y-0 max-md:gap-1 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:py-0" aria-label="Sections">
         {items.map((item) => {
           const Icon = ICONS[item.id] ?? Cpu;
           const active = activeId === item.id;
@@ -97,45 +100,30 @@ export default function Sidebar({
               title={collapsed ? item.label : undefined}
               onClick={() => onNavigate(item.id)}
               aria-current={active ? 'page' : undefined}
-              className={`group relative flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13px] transition-colors ${
-                collapsed ? 'justify-center' : ''
-              } ${
-                active
-                  ? 'bg-[var(--surface-hover)] font-medium text-[var(--text)]'
-                  : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+              aria-label={item.label}
+              style={hueStyle(item.hue)}
+              className={`relative flex h-10 w-full items-center gap-3 rounded-full px-2 text-[13px] transition-colors max-md:w-auto max-md:shrink-0 max-md:px-3 ${collapsed ? 'justify-center' : ''} ${
+                active ? 'bg-surface-3 font-semibold text-ink' : 'text-muted hover:bg-surface-2 hover:text-ink'
               }`}
             >
-              <span
-                className={`absolute -left-2.5 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full transition-opacity ${
-                  active ? 'bg-[var(--accent)] opacity-100' : 'opacity-0'
-                }`}
-              />
-              <Icon
-                className={`h-4 w-4 shrink-0 ${active ? 'text-[var(--accent)]' : ''}`}
-                strokeWidth={1.8}
-              />
-              {!collapsed && <span className="truncate">{item.label}</span>}
+              <span className={`glyph !h-7 !w-7 !rounded-full ${active ? '' : '!bg-transparent'}`}>
+                <Icon className="h-4 w-4" strokeWidth={active ? 2.3 : 1.9} />
+              </span>
+              {!collapsed && <span className="truncate max-md:hidden">{item.label}</span>}
               {item.badge && (
-                <span
-                  title="Update available"
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)] ${
-                    collapsed ? 'absolute right-2 top-2' : 'ml-auto'
-                  }`}
-                />
+                <span title="Update available" className={`h-2 w-2 shrink-0 rounded-full bg-[var(--h)] ${collapsed ? 'absolute right-2 top-2' : 'ml-auto'}`} />
               )}
               {!collapsed && item.count !== undefined && (
-                <span className="tabular ml-auto rounded-md border border-[var(--border)] px-1.5 py-px text-[11px] text-[var(--text-faint)]">
-                  {item.count}
-                </span>
+                <span className="num ml-auto rounded-full bg-surface-2 px-2 py-px text-[11px] text-faint max-md:hidden">{item.count}</span>
               )}
             </button>
           );
         })}
       </nav>
 
-      <div className="space-y-2.5 border-t border-[var(--border)] p-2.5">
+      <div className="space-y-2 p-2.5 max-md:hidden">
         {!collapsed && (
-          <div className="px-1.5">
+          <div className="px-2">
             <StatusIndicator connection={connection} lastUpdated={lastUpdated} />
           </div>
         )}
@@ -144,18 +132,16 @@ export default function Sidebar({
             type="button"
             onClick={onToggleTheme}
             title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-            className={`flex h-8 items-center justify-center gap-1.5 rounded-lg text-[12px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)] ${
-              collapsed ? 'w-8' : 'flex-1'
-            }`}
+            className={`flex h-9 items-center justify-center gap-2 rounded-full text-[12px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink ${collapsed ? 'w-9' : 'flex-1'}`}
           >
-            {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-            {!collapsed && <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>}
+            <ThemeIcon className="h-3.5 w-3.5" />
+            {!collapsed && <span>{theme === 'dark' ? 'Light theme' : 'Dark theme'}</span>}
           </button>
           <button
             type="button"
             onClick={onToggleCollapsed}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink"
           >
             {collapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
           </button>
@@ -164,3 +150,5 @@ export default function Sidebar({
     </aside>
   );
 }
+
+export default memo(Sidebar);

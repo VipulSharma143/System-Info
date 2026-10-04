@@ -1,5 +1,6 @@
 // Physical-memory sections of the RAM page: platform summary, modules, ECC health, data sources.
-import { type ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
+import { HeartPulse, MemoryStick, Radar, Server } from 'lucide-react';
 
 import { type JsonResource } from '../../../hooks/useJsonResource';
 import { safeMessage } from '../../../lib/errors';
@@ -27,7 +28,7 @@ function hardwareProblem(hw: JsonResource<MemoryHardwareInfo>): string | null {
   return null;
 }
 
-export function PlatformPanel({
+export const PlatformPanel = memo(function PlatformPanel({
   hw,
   summary,
 }: {
@@ -38,7 +39,7 @@ export function PlatformPanel({
 
   if (hw.loading) {
     return (
-      <Panel title="Memory platform">
+      <Panel title="Memory platform" icon={Server} hue="ram">
         <div className="grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
           {Array.from({ length: 6 }, (_, i) => (
             <Skeleton key={i} className="h-5" />
@@ -50,7 +51,7 @@ export function PlatformPanel({
 
   const s = summary;
   return (
-    <Panel title="Memory platform" meta={problem ? undefined : 'Reported by firmware'}>
+    <Panel title="Memory platform" icon={Server} hue="ram" meta={problem ? undefined : 'Reported by firmware'}>
       <div className="grid grid-cols-1 gap-x-8 md:grid-cols-2">
         <div>
           <InfoRow label="Installed memory" value={val(s?.installedBytes, formatMemory)} />
@@ -76,31 +77,31 @@ export function PlatformPanel({
           <InfoRow label="Channel mode" value={s?.channelMode ?? 'Unknown'} />
         </div>
       </div>
-      {problem && <p className="mt-3 text-[12px] text-[var(--text-faint)]">{problem}</p>}
+      {problem && <p className="mt-3 text-[12px] text-faint">{problem}</p>}
     </Panel>
   );
-}
+});
 
 function ModuleCard({ module, index }: { module: MemoryModule; index: number }) {
   const title = module.locator ?? `Module ${index + 1}`;
   return (
-    <div className="card min-w-0 p-4">
+    <div className="min-w-0 rounded-[var(--r-md)] bg-surface-2 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-[13px] font-semibold text-[var(--text)]">{title}</div>
+          <div className="truncate text-[13px] font-semibold text-ink">{title}</div>
           {module.bankLocator && (
-            <div className="truncate text-[12px] text-[var(--text-faint)]">{module.bankLocator}</div>
+            <div className="truncate text-[12px] text-faint">{module.bankLocator}</div>
           )}
         </div>
         {module.memoryType && <Badge tone="info" dot={false}>{formatMemoryType(module.memoryType)}</Badge>}
       </div>
 
       <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="tabular text-[26px] font-medium leading-none text-[var(--text)]">
+        <span className="num text-[26px] font-semibold leading-none text-ink">
           {module.capacityBytes !== null ? formatMemory(module.capacityBytes) : NOT_REPORTED}
         </span>
         {module.speedMTs !== null && (
-          <span className="text-[13px] text-[var(--text-muted)]">{formatSpeed(module.speedMTs)}</span>
+          <span className="text-[13px] text-muted">{formatSpeed(module.speedMTs)}</span>
         )}
       </div>
 
@@ -119,7 +120,7 @@ function ModuleCard({ module, index }: { module: MemoryModule; index: number }) 
   );
 }
 
-export function ModulesPanel({ hw }: { hw: JsonResource<MemoryHardwareInfo> }) {
+export const ModulesPanel = memo(function ModulesPanel({ hw }: { hw: JsonResource<MemoryHardwareInfo> }) {
   const modules = hw.data?.modules ?? [];
   const problem = hardwareProblem(hw);
   const summary = hw.data?.summary ?? null;
@@ -152,7 +153,7 @@ export function ModulesPanel({ hw }: { hw: JsonResource<MemoryHardwareInfo> }) {
           ))}
         </div>
         {summary?.slotCount != null && summary.moduleCount != null && (
-          <p className="text-[12px] text-[var(--text-muted)]">
+          <p className="text-[12px] text-muted">
             {summary.moduleCount} occupied
             {summary.emptySlots != null && <> · {summary.emptySlots} empty</>}
             {' · '}
@@ -166,22 +167,24 @@ export function ModulesPanel({ hw }: { hw: JsonResource<MemoryHardwareInfo> }) {
   return (
     <Panel
       title="Memory modules"
+      icon={MemoryStick}
+      hue="ram"
       meta={!hw.loading && !problem && modules.length > 0 ? `${modules.length} installed` : undefined}
     >
       {body}
     </Panel>
   );
-}
+});
 
 /* ------------------------------------------------------------------ */
 /* Health + sources                                                    */
 /* ------------------------------------------------------------------ */
 
-export function HealthPanel({ health }: { health: JsonResource<MemoryHealth> }) {
+export const HealthPanel = memo(function HealthPanel({ health }: { health: JsonResource<MemoryHealth> }) {
   const h = health.data;
   if (health.loading) {
     return (
-      <Panel title="Memory health">
+      <Panel title="Memory health" icon={HeartPulse} hue="ram">
         <div className="space-y-3">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-5" />
@@ -193,14 +196,14 @@ export function HealthPanel({ health }: { health: JsonResource<MemoryHealth> }) 
 
   const noCounters = !h || (h.correctedErrors === null && h.uncorrectedErrors === null);
   return (
-    <Panel title="Memory health">
+    <Panel title="Memory health" icon={HeartPulse} hue="ram">
       {/* Capability, enabled state and live counters are different facts; each shows only what was reported. */}
       <InfoRow label="ECC support" value={yesNo(h?.eccSupport ?? null, 'Supported', 'Not supported')} />
       <InfoRow label="ECC enabled" value={yesNo(h?.eccEnabled ?? null, 'Enabled', 'Disabled')} />
       <InfoRow label="Corrected errors" value={val(h?.correctedErrors, (n) => n.toLocaleString())} />
       <InfoRow label="Uncorrected errors" value={val(h?.uncorrectedErrors, (n) => n.toLocaleString())} />
       {noCounters && (
-        <p className="mt-3 text-[12px] text-[var(--text-faint)]">
+        <p className="mt-3 text-[12px] text-faint">
           {health.error
             ? "We couldn't read memory health information."
             : safeMessage(h?.note, 'Memory error counters are not available on this system.')}
@@ -208,9 +211,9 @@ export function HealthPanel({ health }: { health: JsonResource<MemoryHealth> }) 
       )}
     </Panel>
   );
-}
+});
 
-export function SourcesPanel({
+export const SourcesPanel = memo(function SourcesPanel({
   ram,
   hw,
   health,
@@ -241,14 +244,14 @@ export function SourcesPanel({
         : 'Unavailable';
 
   return (
-    <Panel title="Detection sources">
+    <Panel title="Detection sources" icon={Radar} hue="ram">
       <InfoRow label="Runtime memory" value={runtime} />
       <InfoRow label="Physical modules" value={firmware} />
       <InfoRow label="Platform limits" value={firmware} />
       <InfoRow label="Memory health" value={healthSource} />
-      <p className="mt-3 text-[12px] text-[var(--text-faint)]">
+      <p className="mt-3 text-[12px] text-faint">
         Each section reads from a different place, so one can be available while another is not.
       </p>
     </Panel>
   );
-}
+});

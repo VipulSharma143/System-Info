@@ -1,0 +1,167 @@
+/* ------------------------------------------------------------------ */
+/* Alerts — SweetAlert2 themed to the tokens above.                    */
+/* SweetAlert2 styles its parts through :where() (zero specificity), so */
+/* these plain class selectors win without !important.                 */
+/* ------------------------------------------------------------------ */
+
+.swal2-container {
+  --swal2-backdrop: var(--overlay);
+  --swal2-container-padding: 1.25rem;
+  font-family: var(--font-ui);
+}
+
+.swal2-container.swal2-backdrop-show {
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.swal2-popup.sysalert {
+  --swal2-show-animation: sysalert-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1);
+  --swal2-hide-animation: sysalert-out 0.12s ease-in forwards;
+
+  --tone: var(--text-muted);
+  --tone-soft: var(--surface-3);
+
+  padding: 28px 28px 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xl);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: center;
+}
+
+.swal2-popup.sysalert--error {
+  --tone: var(--critical);
+  --tone-soft: color-mix(in srgb, var(--critical) 16%, transparent);
+}
+.swal2-popup.sysalert--warning {
+  --tone: var(--warn);
+  --tone-soft: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+.swal2-popup.sysalert--info {
+  --tone: var(--info);
+  --tone-soft: color-mix(in srgb, var(--info) 16%, transparent);
+}
+.swal2-popup.sysalert--question {
+  --tone: var(--focus);
+  --tone-soft: color-mix(in srgb, var(--focus) 18%, transparent);
+}
+
+/* Replace SweetAlert's animated ring icon with a calm tinted disc. */
+.swal2-popup.sysalert .swal2-icon.sysalert__icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--tone-soft);
+  color: var(--tone);
+  box-sizing: border-box;
+}
+.swal2-popup.sysalert .swal2-icon.sysalert__icon .swal2-icon-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  animation: none;
+}
+.swal2-popup.sysalert .swal2-icon.sysalert__icon .swal2-icon-content svg {
+  width: 22px;
+  height: 22px;
+}
+
+.swal2-popup.sysalert .sysalert__title {
+  margin: 0;
+  padding: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+}
+
+.swal2-popup.sysalert .sysalert__text {
+  margin: 8px 0 0;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.swal2-popup.sysalert .sysalert__actions {
+  --swal2-actions-margin: 0;
+  margin: 22px 0 0;
+  gap: 8px;
+  justify-content: center;
+}
+
+.swal2-popup.sysalert .sysalert__btn {
+  min-width: 92px;
+  height: 34px;
+  margin: 0;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: default;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.swal2-popup.sysalert .sysalert__btn--primary {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.swal2-popup.sysalert .sysalert__btn--primary:hover {
+  background: color-mix(in srgb, var(--primary) 85%, transparent);
+}
+
+.swal2-popup.sysalert .sysalert__btn--secondary {
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--text);
+}
+.swal2-popup.sysalert .sysalert__btn--secondary:hover {
+  background: var(--surface-3);
+}
+
+.swal2-popup.sysalert .sysalert__btn--danger {
+  background: var(--critical);
+  color: #ffffff;
+}
+.swal2-popup.sysalert .sysalert__btn--danger:hover {
+  background: color-mix(in srgb, var(--critical) 86%, black);
+}
+
+.swal2-popup.sysalert .sysalert__btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+@keyframes sysalert-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes sysalert-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}

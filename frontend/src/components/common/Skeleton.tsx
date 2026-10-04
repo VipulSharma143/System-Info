@@ -1,10 +1,4 @@
-// Placeholder block shown while data loads, so a valid-looking "0 GB" / "0%" is never
-// on screen before the real reading arrives.
+// Placeholder shown while data loads, so a valid-looking "0 GB" / "0%" is never on screen first.
 export default function Skeleton({ className = '' }: { className?: string }) {
-  return (
-    <div
-      aria-hidden="true"
-      className={`animate-pulse rounded-md bg-[var(--surface-hover)] ${className}`}
-    />
-  );
+  return <div aria-hidden="true" className={`animate-pulse rounded-[var(--r-md)] bg-surface-3 ${className}`} />;
 }

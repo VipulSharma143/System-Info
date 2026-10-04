@@ -6,6 +6,11 @@ export function severity(percent: number): Severity {
   return 'ok';
 }
 
+/** Plain-language word for a usage percentage ("Normal" / "High" / "Critical"). */
+export function severityWord(percent: number, labels: [string, string, string] = ['Normal', 'High', 'Critical']): string {
+  return labels[{ ok: 0, warn: 1, critical: 2 }[severity(percent)]];
+}
+
 // Never renders "Invalid Date" — returns an em dash for anything missing
 // or unparsable instead of crashing into a broken-looking cell.
 export function formatTimeSafe(value: unknown): string {
@@ -77,3 +82,32 @@ export function ratioPercent(used: number | null, total: number | null): number 
   return Math.min(100, (used / total) * 100);
 }
 
+
+// ---------------------------------------------------------------------------
+// Units used by several pages, defined once.
+// ---------------------------------------------------------------------------
+
+/** Process memory arrives in MB: "512 MB" / "1.25 GB". */
+export function formatMB(mb: number, gbDigits = 2): string {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(gbDigits)} GB` : `${mb.toFixed(0)} MB`;
+}
+
+/** Network rates arrive in KB/s: "812.0 KB/s" / "1.20 MB/s". */
+export function formatRate(kbps: number): string {
+  return kbps >= 1024 ? `${(kbps / 1024).toFixed(2)} MB/s` : `${kbps.toFixed(1)} KB/s`;
+}
+
+/** Drive sizes arrive in GB: "512 GB" / "1.8 TB". */
+export function formatGB(gb: number, digits = 0): string {
+  return gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb.toFixed(digits)} GB`;
+}
+
+export function formatUptime(seconds: number | null): string {
+  if (seconds === null || seconds < 0) return 'Unavailable';
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}

@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "2.4.2",
+  "version": "2.4.3",
   "author": "Vipul Sharma",
   "type": "module",
   "scripts": {
@@ -12,6 +12,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@fontsource-variable/bricolage-grotesque": "^5.3.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-process": "^2.3.1",

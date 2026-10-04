@@ -1,34 +1,15 @@
 import type { ReactNode } from 'react';
-import { severity } from '../../lib/format';
+import { hueStyle, usageColor, type Hue } from '../../lib/hues';
+import Figure from './Figure';
 
 /*
-  Shared primitives for the redesigned dashboard.
-
-  Everything here exists so sections stop inventing their own spacing,
-  type sizes, and card shapes. The rules, applied everywhere:
-    - card padding: px-4 py-3  (compact) / p-4 (panel body)
-    - grid gap:     gap-3
-    - radius:       var(--radius-card) via the shared `.card` class
-    - label text:   12px muted
-    - value text:   20px (tile) / 26px (hero) tabular
-    - detail text:  12px faint
-  A component sized to its content, not to fill a column.
+  Small shared building blocks. Rules applied everywhere:
+    - tiles sit on the `panel` surface; the hue only tints a figure, a dot or a bar
+    - label 12px muted · figure in the display face · detail 12px faint
 */
 
-const SEVERITY_COLOR: Record<string, string> = {
-  ok: 'var(--accent)',
-  warn: 'var(--warn)',
-  critical: 'var(--critical)',
-};
-
-export function severityColor(percent: number | undefined) {
-  return percent === undefined ? 'var(--text-muted)' : SEVERITY_COLOR[severity(percent)];
-}
-
 /* ------------------------------------------------------------------ */
-/* StatTile — the compact building block for dense metric grids.       */
-/* Deliberately shorter than the old MetricCard: one line of label,    */
-/* one line of value, one optional line of detail. Nothing stretches.  */
+/* StatTile — compact label / figure / detail block.                   */
 /* ------------------------------------------------------------------ */
 
 interface StatTileProps {
@@ -36,154 +17,99 @@ interface StatTileProps {
   value: ReactNode;
   unit?: string;
   detail?: ReactNode;
+  /** Switches the figure to warn / critical colour when usage is high. */
   percentForColor?: number;
-  accent?: string;
+  hue?: Hue;
 }
 
-export function StatTile({
-  label,
-  value,
-  unit,
-  detail,
-  percentForColor,
-  accent,
-}: StatTileProps) {
-  const color = accent ?? severityColor(percentForColor);
-
+export function StatTile({ label, value, unit, detail, percentForColor, hue = 'neutral' }: StatTileProps) {
   return (
-    <div className="card min-w-0 px-4 py-3">
-      <div className="flex items-center gap-1.5">
-        {percentForColor !== undefined && (
-          <span
-            className="h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: color }}
-          />
-        )}
-        <span className="truncate text-[12px] text-[var(--text-muted)]">{label}</span>
+    <div className="panel min-w-0 rounded-[var(--r-md)] px-4 py-3.5" style={hueStyle(hue)}>
+      <div className="flex items-center gap-2 text-[12px] text-muted">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: 'var(--h)' }} />
+        <span className="truncate">{label}</span>
       </div>
-      <div className="mt-1.5 flex items-baseline gap-1">
-        <span className="tabular text-[20px] font-medium leading-none text-[var(--text)]">
-          {value}
-        </span>
-        {unit && <span className="text-[12px] text-[var(--text-muted)]">{unit}</span>}
+      <div className="mt-2">
+        <Figure
+          size="sm"
+          value={value}
+          unit={unit}
+          color={percentForColor !== undefined && percentForColor >= 70 ? usageColor(percentForColor) : undefined}
+        />
       </div>
-      {detail && (
-        <div className="mt-1 truncate text-[12px] text-[var(--text-faint)]">{detail}</div>
-      )}
+      {detail && <div className="mt-1.5 truncate text-[12px] text-faint">{detail}</div>}
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* InfoRow — label/value pair for two-column information layouts.      */
-/* Used by Battery details and the System page so both read the same.  */
+/* InfoRow — label ........ value, the spec-sheet row.                 */
 /* ------------------------------------------------------------------ */
 
-export function InfoRow({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: ReactNode;
-  hint?: string;
-}) {
+export function InfoRow({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-[var(--border)] py-2 first:pt-0 last:border-b-0 last:pb-0">
-      <span className="shrink-0 text-[12px] text-[var(--text-muted)]">{label}</span>
-      <span className="tabular min-w-0 truncate text-right text-[13px] text-[var(--text)]">
+    <div className="flex items-baseline gap-3 py-[7px]">
+      <span className="shrink-0 text-[12px] text-muted">{label}</span>
+      <span aria-hidden="true" className="min-w-4 flex-1 translate-y-[-3px] border-b border-dotted border-line-strong" />
+      <span className="min-w-0 truncate text-right text-[13px] font-medium text-ink">
         {value}
-        {hint && (
-          <span className="ml-1.5 font-sans text-[11px] text-[var(--text-faint)]">{hint}</span>
-        )}
+        {hint && <span className="ml-1.5 text-[11px] font-normal text-faint">{hint}</span>}
       </span>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Badge — status pill. Always pairs a dot with a WORD, never colour   */
-/* alone, so status is readable without relying on colour perception.  */
+/* Badge — status pill. Always a dot AND a word, never colour alone.   */
 /* ------------------------------------------------------------------ */
 
 export type BadgeTone = 'ok' | 'warn' | 'critical' | 'info' | 'muted';
 
-const TONE: Record<BadgeTone, { fg: string; bg: string }> = {
-  ok: { fg: 'var(--accent)', bg: 'var(--accent-soft)' },
-  warn: { fg: 'var(--warn)', bg: 'var(--warn-soft)' },
-  critical: { fg: 'var(--critical)', bg: 'var(--critical-soft)' },
-  info: { fg: 'var(--info)', bg: 'var(--info-soft)' },
-  muted: { fg: 'var(--text-muted)', bg: 'var(--surface-hover)' },
+const TONE: Record<BadgeTone, string> = {
+  ok: 'var(--ok)',
+  warn: 'var(--warn)',
+  critical: 'var(--critical)',
+  info: 'var(--info)',
+  muted: 'var(--text-muted)',
 };
 
-export function Badge({
-  tone = 'muted',
-  children,
-  dot = true,
-}: {
-  tone?: BadgeTone;
-  children: ReactNode;
-  dot?: boolean;
-}) {
-  const { fg, bg } = TONE[tone];
+export function Badge({ tone = 'muted', children, dot = true }: { tone?: BadgeTone; children: ReactNode; dot?: boolean }) {
+  const color = TONE[tone];
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium leading-4"
-      style={{ color: fg, backgroundColor: bg }}
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium leading-4"
+      style={{ color, backgroundColor: `color-mix(in srgb, ${color} 15%, transparent)` }}
     >
-      {dot && (
-        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: fg }} />
-      )}
+      {dot && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />}
       {children}
     </span>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Unavailable — the honest empty value.                               */
-/* The backend never fabricates missing hardware readings, so the UI    */
-/* never renders a fake 0 either. This is what "we don't know" looks   */
-/* like, and it stays compact instead of becoming a giant empty card.  */
+/* Unavailable — the honest empty value. Never a fake 0.               */
 /* ------------------------------------------------------------------ */
 
 export function Unavailable({ reason }: { reason?: string | null }) {
   return (
-    <span
-      className="text-[13px] text-[var(--text-faint)]"
-      title={reason ?? undefined}
-    >
+    <span className="text-[13px] font-normal text-faint" title={reason ?? undefined}>
       Unavailable
     </span>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Grid — the one responsive grid every section uses.                  */
-/* 4 columns → 2 → 1 as width drops, so nothing ever overflows         */
-/* horizontally on a 1280-wide laptop.                                 */
+/* Layout helpers                                                      */
 /* ------------------------------------------------------------------ */
 
-export function TileGrid({
-  children,
-  cols = 4,
-}: {
-  children: ReactNode;
-  cols?: 2 | 3 | 4;
-}) {
+/** Responsive tile grid: columns collapse as the window narrows, so nothing overflows sideways. */
+export function TileGrid({ children, cols = 4 }: { children: ReactNode; cols?: 2 | 3 | 4 }) {
   const colClass =
-    cols === 2
-      ? 'sm:grid-cols-2'
-      : cols === 3
-        ? 'sm:grid-cols-2 md:grid-cols-3'
-        : 'sm:grid-cols-2 xl:grid-cols-4';
-
-  return <div className={`grid grid-cols-1 gap-3 ${colClass}`}>{children}</div>;
+    cols === 2 ? 'sm:grid-cols-2' : cols === 3 ? 'sm:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2 xl:grid-cols-4';
+  return <div className={`grid grid-cols-1 gap-3.5 ${colClass}`}>{children}</div>;
 }
 
-/* ------------------------------------------------------------------ */
-/* Section — consistent vertical rhythm + padding for every page.      */
-/* ------------------------------------------------------------------ */
-
+/** Page padding and vertical rhythm shared by every view. */
 export function ViewContainer({ children }: { children: ReactNode }) {
-  return <div className="space-y-3 p-4">{children}</div>;
+  return <div className="mx-auto w-full max-w-[1280px] space-y-3.5 px-6 pb-8 pt-1 max-md:px-4">{children}</div>;
 }

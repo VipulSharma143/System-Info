@@ -1,18 +1,25 @@
-import { lazy, Suspense, useCallback, useMemo, useState, type ReactNode } from 'react';
+import { Activity, lazy, Suspense, useCallback, useMemo, useState, type ReactNode } from 'react';
 
 import { useSystemMetrics } from './hooks/useSystemMetrics';
+import { useDashboardHistory } from './hooks/useDashboardHistory';
 import { useSystemInfo } from './hooks/useSystemInfo';
 import { useSystemGpu } from './hooks/useSystemGpu';
 import { useServiceControl } from './hooks/useServiceControl';
+import { useMediaQuery } from './hooks/useMediaQuery';
 import { useTheme } from './hooks/useTheme';
 import { useProcessHistory } from './hooks/useProcessHistory';
 import { useUpdater } from './hooks/useUpdater';
 import { useFailureAlerts } from './hooks/useFailureAlerts';
 import { isTauri } from './lib/tauri';
+import { SECTIONS, sectionById, type SectionId } from './lib/sections';
 
 import AppShell from './components/layout/AppShell';
 import type { NavItem } from './components/layout/Sidebar';
+import ServiceControls from './components/layout/ServiceControls';
 import StartupScreen, { buildStartupSteps } from './components/layout/StartupScreen';
+import UpdateBanner from './components/layout/UpdateBanner';
+import StatusIndicator from './components/common/StatusIndicator';
+import { LoadingState, OfflineBanner } from './components/common/States';
 import OverviewView from './components/views/OverviewView';
 
 // Everything but the first screen is loaded the first time it is opened.
@@ -28,113 +35,76 @@ const UpdateInstallingOverlay = lazy(() =>
   import('./components/views/UpdatesView').then((m) => ({ default: m.UpdateInstallingOverlay }))
 );
 
-import { LoadingState, OfflineBanner } from './components/common/States';
-import StatusIndicator from './components/common/StatusIndicator';
-import ServiceControls from './components/layout/ServiceControls';
-import Button from './components/common/Button';
-
-// Order matters — this is the reading order of the product: what's
-// happening now, what happened over time, then the per-subsystem detail
-// pages, then static reference information last.
-const SECTIONS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'analytics', label: 'Analytics' },
-  { id: 'processes', label: 'Processes' },
-  { id: 'ram', label: 'RAM' },
-  { id: 'storage', label: 'Storage' },
-  { id: 'network', label: 'Network' },
-  { id: 'battery', label: 'Battery' },
-  { id: 'system', label: 'System' },
-  { id: 'updates', label: 'Updates' },
-] as const;
-
-type SectionId = (typeof SECTIONS)[number]['id'];
-
-const TITLES: Record<SectionId, { title: string; description: string }> = {
-  overview: { title: 'Overview', description: 'System state at a glance' },
-  analytics: { title: 'Analytics', description: 'Trends, stats, and bottleneck history' },
-  processes: { title: 'Processes', description: 'Running processes by memory' },
-  ram: { title: 'RAM', description: 'Memory usage, installed modules, and health' },
-  storage: { title: 'Storage', description: 'Drives, capacity, and usage' },
-  network: { title: 'Network', description: 'Interfaces, traffic, and connection speed' },
-  battery: { title: 'Battery', description: 'Charge, health, and power draw' },
-  system: { title: 'System', description: 'Hardware and operating system information' },
-  updates: { title: 'Updates', description: 'Check for new versions and read release notes' },
-};
-
-// Retrying after a startup failure remounts the whole tree, which gives every hook a fresh
-// startup window.
+// Retrying after a startup failure remounts the whole tree, which gives every hook a fresh startup window.
 function App() {
   const [startupAttempt, setStartupAttempt] = useState(0);
   return <AppContent key={startupAttempt} onRetryStartup={() => setStartupAttempt((a) => a + 1)} />;
 }
 
+// A visited page stays mounted so its state survives navigation. While hidden, <Activity> keeps the
+// state but pauses its effects (polling stops) and defers its renders, so only the visible page works.
 function Page({ active, children }: { active: boolean; children: ReactNode }) {
   return (
-    <div className={active ? 'block' : 'hidden'}>
+    <Activity mode={active ? 'visible' : 'hidden'}>
       <Suspense fallback={<LoadingState />}>{children}</Suspense>
-    </div>
+    </Activity>
   );
 }
 
 function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
-  const {
-    data,
-    error,
-    connection,
-    lastUpdated,
-    startupError: metricsStartupError,
-  } = useSystemMetrics();
+  const { data, error, connection, lastUpdated, startupError: metricsStartupError } = useSystemMetrics();
+  const history = useDashboardHistory(data);
   const { status: serviceStatus } = useServiceControl();
   const { theme, toggle } = useTheme();
   const { findNearest } = useProcessHistory(data?.cpu.usedPercent, data?.processes);
 
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
-  const [collapsed, setCollapsed] = useState(false);
+  const [userCollapsed, setUserCollapsed] = useState(false);
+  const narrow = useMediaQuery('(max-width: 1100px)');
+  const collapsed = userCollapsed || narrow;
 
-  // A page is mounted the first time it is opened and then stays mounted (hidden with CSS), so
-  // its polling and state survive navigation, but nothing is fetched for pages never visited.
+  // Pages are mounted the first time they are opened; nothing is fetched for pages never visited.
   const [visited, setVisited] = useState<ReadonlySet<SectionId>>(() => new Set<SectionId>(['overview']));
   const navigate = useCallback((id: SectionId) => {
     setActiveSection(id);
     setVisited((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   }, []);
+  const onNavigate = useCallback((id: string) => navigate(id as SectionId), [navigate]);
+  const toggleCollapsed = useCallback(() => setUserCollapsed((c) => !c), []);
 
-  // Identity and GPU details are only shown on the System page: load them when it is first
-  // opened (GPU only while it is on screen) so they are never part of startup.
+  // Identity and GPU details only appear on the System page: loaded when it is first opened
+  // (GPU only while on screen), so they are never part of startup.
   const { info, error: infoError, retry: retryInfo } = useSystemInfo(visited.has('system'));
   const { gpus, error: gpuError } = useSystemGpu(activeSection === 'system');
 
-  // One updater instance for the whole app: the sidebar badge, the banner
-  // below and the Updates tab all read this same state. Automatic checks only
-  // begin once the dashboard has loaded, so they never compete with startup.
+  // One updater for the whole app: the rail badge, the banner and the Updates tab read the same state.
+  // Automatic checks begin only once the dashboard has loaded, so they never compete with startup.
   const updater = useUpdater(data !== null);
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const updateAvailable = updater.phase === 'available' && updater.available !== null;
 
+  const processCount = data?.processes.length ?? 0;
   const navItems: NavItem[] = useMemo(
     () =>
-      SECTIONS.map((section) => {
-        if (section.id === 'processes') return { ...section, count: data?.processes.length ?? 0 };
-        if (section.id === 'updates') return { ...section, badge: updateAvailable };
-        return section;
-      }),
-    [data?.processes, updateAvailable]
+      SECTIONS.map(({ id, label, hue }) => ({
+        id,
+        label,
+        hue,
+        ...(id === 'processes' ? { count: processCount } : {}),
+        ...(id === 'updates' ? { badge: updateAvailable } : {}),
+      })),
+    [processCount, updateAvailable]
   );
 
-  // Inside the Tauri shell the backend is a child process whose readiness is reported by the
-  // services-status event. In a browser it was started before the page loaded.
+  // In the desktop shell the backend is a child process whose readiness arrives as an event.
   const servicesReady = !isTauri() || serviceStatus.backend === 'running';
   const metricsLoaded = data !== null;
-
-  // Startup only waits for the dashboard snapshot. A genuine startup failure exists only before
-  // the first successful load; afterwards a disconnect is handled by the offline banner.
+  // A genuine startup failure exists only before the first successful load; afterwards a disconnect
+  // is handled by the offline banner.
   const startupFailed = !metricsLoaded && Boolean(metricsStartupError);
 
-  // Friendly SweetAlert notifications for genuine failures. This only observes
-  // the error state the hooks above already produce — no requests, no polling
-  // changes. `quiet` covers moments when a dropped connection is expected: the
-  // user pressed Stop, services are still starting, or an update is installing.
+  // Friendly alerts for genuine failures. This only observes the hooks' error state; `quiet` covers
+  // moments when a dropped connection is expected (Stop pressed, services starting, update installing).
   useFailureAlerts({
     startupFailed,
     onRetryStartup,
@@ -153,6 +123,12 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
     );
   }
 
+  const section = sectionById(activeSection);
+  const show = (id: SectionId, view: ReactNode) =>
+    visited.has(id) && (
+      <Page active={activeSection === id}>{view}</Page>
+    );
+
   return (
     <AppShell
       connection={connection}
@@ -161,116 +137,48 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
       onToggleTheme={toggle}
       navItems={navItems}
       activeId={activeSection}
-      onNavigate={(id) => navigate(id as SectionId)}
+      onNavigate={onNavigate}
       collapsed={collapsed}
-      onToggleCollapsed={() => setCollapsed((c) => !c)}
-      title={TITLES[activeSection].title}
-      description={TITLES[activeSection].description}
+      onToggleCollapsed={toggleCollapsed}
+      title={section.title}
+      description={section.description}
+      hue={section.hue}
       topBarAction={
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <ServiceControls />
-          {isTauri() && <span aria-hidden="true" className="h-4 w-px bg-[var(--border)]" />}
           <StatusIndicator connection={connection} lastUpdated={lastUpdated} compact />
         </div>
       }
     >
-      {/*
-        The offline banner shows while the last known data stays on screen.
-        Blanking the dashboard on a dropped poll would be worse than showing
-        stale numbers clearly labelled as stale — which the header's
-        "updated Ns ago" counter does. `error` here is exclusively the
-        post-first-load, steady-state signal (see useSystemMetrics) — it can
-        no longer fire during the startup window this component gates above.
-      */}
-      {updateAvailable &&
-        updater.available &&
-        dismissedBanner !== updater.available.version &&
-        activeSection !== 'updates' && (
-          <div className="px-4 pt-4">
-            <div
-              role="status"
-              className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[var(--radius-control)] border border-[var(--accent)]/30 px-4 py-2 text-[13px] text-[var(--text)]"
-              style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 8%, transparent)' }}
-            >
-              <span>
-                System Info <strong className="font-semibold">v{updater.available.version}</strong> is
-                available.
-              </span>
-              <button
-                type="button"
-                onClick={() => navigate('updates')}
-                className="font-medium text-[var(--accent)] hover:underline"
-              >
-                View details
-              </button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto"
-                onClick={() => setDismissedBanner(updater.available!.version)}
-              >
-                Dismiss
-              </Button>
-            </div>
-          </div>
-        )}
+      {/* Stale data stays on screen with a clear banner; blanking the dashboard on a dropped poll would be worse. */}
+      {updater.available && updateAvailable && dismissedBanner !== updater.available.version && activeSection !== 'updates' && (
+        <UpdateBanner
+          version={updater.available.version}
+          onView={() => navigate('updates')}
+          onDismiss={() => setDismissedBanner(updater.available!.version)}
+        />
+      )}
 
       {error && connection === 'offline' && updater.phase !== 'installing' && (
-        <div className="px-4 pt-4">
+        <div className="mx-auto max-w-[1280px] px-6 pb-3.5 max-md:px-4">
           <OfflineBanner />
         </div>
       )}
 
-      <div className={activeSection === 'overview' ? 'block' : 'hidden'}>
-        <OverviewView data={data} />
-      </div>
-      {visited.has('analytics') && (
-        <Page active={activeSection === 'analytics'}>
-          <AnalyticsView findNearest={findNearest} />
-        </Page>
+      <Activity mode={activeSection === 'overview' ? 'visible' : 'hidden'}>
+        <OverviewView data={data} history={history} />
+      </Activity>
+      {show('analytics', <AnalyticsView findNearest={findNearest} />)}
+      {show('processes', <ProcessesView processes={data.processes} />)}
+      {show('ram', <RamView active={activeSection === 'ram'} />)}
+      {show('storage', <StorageView disks={data.disks} />)}
+      {show('network', <NetworkView network={data.network} history={history} />)}
+      {show('battery', <BatteryView battery={data.battery} chargeHistory={history.charge} />)}
+      {show(
+        'system',
+        <SystemView info={info} infoError={infoError} onRetryInfo={retryInfo} data={data} gpus={gpus} gpuError={gpuError} />
       )}
-      {visited.has('processes') && (
-        <Page active={activeSection === 'processes'}>
-          <ProcessesView processes={data.processes} />
-        </Page>
-      )}
-      {visited.has('ram') && (
-        <Page active={activeSection === 'ram'}>
-          <RamView active={activeSection === 'ram'} />
-        </Page>
-      )}
-      {visited.has('storage') && (
-        <Page active={activeSection === 'storage'}>
-          <StorageView disks={data.disks} />
-        </Page>
-      )}
-      {visited.has('network') && (
-        <Page active={activeSection === 'network'}>
-          <NetworkView network={data.network} />
-        </Page>
-      )}
-      {visited.has('battery') && (
-        <Page active={activeSection === 'battery'}>
-          <BatteryView battery={data.battery} />
-        </Page>
-      )}
-      {visited.has('system') && (
-        <Page active={activeSection === 'system'}>
-          <SystemView
-            info={info}
-            infoError={infoError}
-            onRetryInfo={retryInfo}
-            data={data}
-            gpus={gpus}
-            gpuError={gpuError}
-          />
-        </Page>
-      )}
-      {visited.has('updates') && (
-        <Page active={activeSection === 'updates'}>
-          <UpdatesView updater={updater} />
-        </Page>
-      )}
+      {show('updates', <UpdatesView updater={updater} />)}
 
       {updater.phase === 'installing' && (
         <Suspense fallback={null}>

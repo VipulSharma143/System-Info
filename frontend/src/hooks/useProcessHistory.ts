@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { ProcessInfo } from '../types/system';
 
 export interface ProcessSnapshot {
@@ -7,16 +7,15 @@ export interface ProcessSnapshot {
   processes: ProcessInfo[]; // top N by memory, already sorted by the backend
 }
 
-// Fixed-size ring buffer — ~5 min of history at a 2s poll interval, capped
-// to the top 8 processes per snapshot. Kept in memory only, nothing
-// persisted, nothing sent anywhere: this is the "lightweight" version of
-// spike correlation, not a monitoring subsystem.
+// Fixed-size ring buffer — ~5 min of history at a 2s poll interval, top 8 processes per snapshot.
+// Memory only: nothing persisted, nothing sent anywhere. It lives in a ref because only
+// `findNearest` ever reads it, so capturing a snapshot never triggers a render.
 const MAX_SNAPSHOTS = 150;
 const TOP_N = 8;
 const MIN_CAPTURE_INTERVAL_MS = 1000;
 
 export function useProcessHistory(cpuPercent: number | undefined, processes: ProcessInfo[] | undefined) {
-  const [history, setHistory] = useState<ProcessSnapshot[]>([]);
+  const history = useRef<ProcessSnapshot[]>([]);
   const lastCaptured = useRef(0);
 
   useEffect(() => {
@@ -25,28 +24,20 @@ export function useProcessHistory(cpuPercent: number | undefined, processes: Pro
     if (now - lastCaptured.current < MIN_CAPTURE_INTERVAL_MS) return;
     lastCaptured.current = now;
 
-    setHistory((prev) => {
-      const next = [...prev, { timestamp: now, cpuPercent, processes: processes.slice(0, TOP_N) }];
-      return next.length > MAX_SNAPSHOTS ? next.slice(next.length - MAX_SNAPSHOTS) : next;
-    });
+    history.current.push({ timestamp: now, cpuPercent, processes: processes.slice(0, TOP_N) });
+    if (history.current.length > MAX_SNAPSHOTS) history.current.shift();
   }, [cpuPercent, processes]);
 
-  // Nearest-in-time snapshot to an analytics-service ISO timestamp — an
-  // approximation (client clock vs. server clock), labeled as such in the UI.
-  function findNearest(isoTime: string): ProcessSnapshot | null {
-    if (history.length === 0) return null;
+  // Nearest-in-time snapshot to an analytics ISO timestamp — an approximation (client clock vs.
+  // server clock), labelled as such in the UI.
+  const findNearest = useCallback((isoTime: string): ProcessSnapshot | null => {
+    const snapshots = history.current;
+    if (snapshots.length === 0) return null;
     const target = new Date(isoTime).getTime();
-    let closest = history[0];
-    let bestDiff = Math.abs(closest.timestamp - target);
-    for (const snap of history) {
-      const diff = Math.abs(snap.timestamp - target);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        closest = snap;
-      }
-    }
-    return closest;
-  }
+    return snapshots.reduce((best, snap) =>
+      Math.abs(snap.timestamp - target) < Math.abs(best.timestamp - target) ? snap : best
+    );
+  }, []);
 
-  return { history, findNearest };
+  return { findNearest };
 }

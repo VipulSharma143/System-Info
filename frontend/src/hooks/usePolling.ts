@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../lib/api';
 import { STARTUP_GRACE_MS } from '../lib/apiConfig';
 import { reportDiagnostic } from '../lib/errors';
+import { shareUnchanged } from '../lib/share';
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'offline';
 
@@ -63,7 +64,8 @@ export function usePolling<T>(path: string, { intervalMs, enabled = true }: Opti
         if (cancelled) return;
         failures = 0;
         loaded.current = true;
-        setState({ data, lastUpdated: Date.now(), connection: 'live', startupError: false });
+        // Unchanged sections keep their identity, so memoised views skip rendering for them.
+        setState((prev) => ({ data: shareUnchanged(prev.data, data), lastUpdated: Date.now(), connection: 'live', startupError: false }));
         if (intervalMs !== null) timer = setTimeout(run, intervalMs);
       } catch (err) {
         if (cancelled) return;

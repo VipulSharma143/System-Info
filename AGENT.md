@@ -49,7 +49,16 @@ Real-time hardware telemetry (CPU/RAM/disk/network/processes/battery/GPU/system 
 ## 📁 Structure
 
 ```
-frontend/src/          React app: components/{views,common,layout}, hooks/, lib/ (apiConfig.ts!), types/
+frontend/src/          React app: components/{views,common,layout}, hooks/, lib/ (apiConfig.ts!), styles/, types/
+                       Each view in components/views/ is a thin page that composes section files in a same-named subfolder
+                       (views/overview/, network/, battery/, ram/ …). Shared pieces live in components/common/.
+                       Design system: styles/tokens.css (colours, radii, fonts) · base.css · components.css · alerts.css.
+                       Every subsystem owns a hue (lib/hues.ts, `--hue-*`); `Panel hue=…` sets `--h`, and bars/glyphs/dots tint from it.
+                       Fonts are bundled (@fontsource-variable/bricolage-grotesque) — no network font requests; body text is the system font.
+                       Live series come from ONE buffer (hooks/useDashboardHistory) fed by the snapshot already polled. Polled JSON keeps
+                       the identity of unchanged sections (lib/share.ts) so memo()'d panels skip renders. Visited pages stay mounted inside
+                       React <Activity>, which pauses their effects/polling while hidden. Never put numbers in raw `toFixed` per page —
+                       use lib/format.ts.
   views/                OverviewView, AnalyticsView, ProcessesView, RamView, StorageView, NetworkView, BatteryView, SystemView, UpdatesView
   common/                Shared design-system primitives: Panel, MetricCard, Sparkline, UsageBar, States, Table, Segmented, StatusIndicator
   hooks/                 useSystemMetrics, useSystemInfo, useSystemGpu, useAnalytics, useSpeedTest, useServiceControl, useUpdater, useTheme

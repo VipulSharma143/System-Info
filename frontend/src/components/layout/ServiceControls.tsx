@@ -5,11 +5,8 @@ import { reportDiagnostic, type AlertKind } from '../../lib/errors';
 import { useServiceControl, type ServiceHealth } from '../../hooks/useServiceControl';
 import Button from '../common/Button';
 
-// Renders nothing when this bundle is running as a plain browser tab (the
-// legacy launcher path) — there is no process for these buttons to control
-// there. Inside Tauri it's the desktop-controls cluster the migration spec
-// asks for: a status readout plus Start/Resume, Stop, and Exit (distinct
-// from Stop — see the hook's module docs and STOP-vs-EXIT table).
+// Desktop-only controls: a status readout plus Start/Resume, Stop (keeps the window) and Exit
+// (stops services and closes). Renders nothing in a plain browser tab, where there is no process to control.
 export default function ServiceControls() {
   const { status, pending, start, stop, exit } = useServiceControl();
 
@@ -17,9 +14,8 @@ export default function ServiceControls() {
 
   const { label, color, filled } = summarize(status.backend);
 
-  // start/stop reject if the desktop shell can't complete the request. Nothing
-  // used to surface that; now the user gets a plain-language alert and the
-  // technical cause goes to the developer console.
+  // start/stop reject if the desktop shell can't complete the request: the user gets a plain-language
+  // alert and the technical cause goes to the developer console.
   const run = async (action: () => Promise<void>, failure: AlertKind) => {
     try {
       await action();
@@ -34,8 +30,8 @@ export default function ServiceControls() {
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[12px] font-medium">
+    <div className="flex items-center gap-2.5">
+      <span className="inline-flex min-w-0 items-center gap-2 whitespace-nowrap text-[12px] font-medium">
         <span
           className="inline-flex h-2 w-2 shrink-0 rounded-full"
           style={{ backgroundColor: filled ? color : 'transparent', border: `1.5px solid ${color}` }}
@@ -45,7 +41,7 @@ export default function ServiceControls() {
         </span>
       </span>
 
-      <div className="flex items-center gap-0.5 rounded-[var(--radius-control)] border border-[var(--border)] p-0.5">
+      <div className="flex items-center gap-0.5 rounded-full bg-surface-2 p-1">
         <Button
           variant="ghost"
           size="sm"
@@ -68,7 +64,6 @@ export default function ServiceControls() {
         >
           Stop
         </Button>
-        <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-[var(--border)]" />
         <Button
           variant="danger"
           size="sm"
@@ -87,7 +82,7 @@ export default function ServiceControls() {
 function summarize(backend: ServiceHealth): { label: string; color: string; filled: boolean } {
   switch (backend) {
     case 'running':
-      return { label: 'Running', color: 'var(--accent)', filled: true };
+      return { label: 'Running', color: 'var(--ok)', filled: true };
     case 'starting':
       return { label: 'Starting…', color: 'var(--warn)', filled: true };
     case 'unavailable':

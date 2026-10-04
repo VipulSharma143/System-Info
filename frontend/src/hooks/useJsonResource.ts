@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson } from '../lib/api';
 import { reportDiagnostic } from '../lib/errors';
+import { shareUnchanged } from '../lib/share';
 
 interface Options {
   /** Only fetch/poll while true — the RAM tab is mounted even when hidden. */
@@ -59,7 +60,7 @@ export function useJsonResource<T>(
         if (cancelled) return;
         failures = 0;
         loaded.current = true;
-        setData(json);
+        setData((prev) => shareUnchanged(prev, json));
         setError(false);
         if (intervalMs) timer = setTimeout(run, intervalMs);
       } catch (err) {
@@ -86,5 +87,6 @@ export function useJsonResource<T>(
     setAttempt((a) => a + 1);
   }, []);
 
-  return { data, error, loading: data === null && !error, retry };
+  // Stable identity while nothing changed, so memoised panels that receive the resource skip renders.
+  return useMemo(() => ({ data, error, loading: data === null && !error, retry }), [data, error, retry]);
 }

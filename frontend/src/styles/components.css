@@ -1,0 +1,58 @@
+@layer components {
+  /*
+    The one surface. `--h` is the subsystem hue; anything inside can tint itself
+    with it. Radius steps down with importance: hero > tile > chip.
+  */
+  .panel {
+    --h: var(--text-muted);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+  }
+  .panel--hero {
+    border-radius: var(--r-xl);
+    background:
+      radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--h) 13%, transparent), transparent 62%),
+      var(--surface);
+  }
+
+  .glyph {
+    display: inline-flex;
+    height: 28px;
+    width: 28px;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    color: var(--h);
+    background: color-mix(in srgb, var(--h) 16%, transparent);
+  }
+
+  .table-flush :is(th, td):first-child {
+    padding-left: 1.25rem;
+  }
+  .table-flush :is(th, td):last-child {
+    padding-right: 1.25rem;
+  }
+
+  .bento {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 14px;
+  }
+}
+
+@keyframes heartbeat {
+  0% {
+    stroke-dashoffset: 1;
+  }
+  60%,
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.heartbeat-line {
+  stroke-dasharray: 1;
+  animation: heartbeat 1.8s ease-in-out infinite;
+}

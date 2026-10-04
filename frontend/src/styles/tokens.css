@@ -1,0 +1,111 @@
+/*
+  Design tokens. The look is built around one idea: every subsystem owns a hue
+  (CPU orange, memory violet, storage cyan, network blue, battery lime, system
+  pink) and that hue follows it everywhere — navigation, charts, rings, tiles.
+  Severity (ok / warn / critical) is separate and always printed as a word, so
+  colour is never the only signal.
+*/
+:root {
+  color-scheme: dark;
+
+  --bg: #0c0e1a;
+  --bg-glow: #1a1840;
+  --surface: #141729;
+  --surface-2: #1b1f36;
+  --surface-3: #242946;
+  --line: rgba(160, 170, 255, 0.1);
+  --line-strong: rgba(160, 170, 255, 0.2);
+
+  --text: #eef0ff;
+  --text-muted: #a0a6c4;
+  --text-faint: #6f7698;
+
+  --primary: #eef0ff;
+  --on-primary: #0c0e1a;
+  --focus: #94a6ff;
+
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --critical: #fb5a6e;
+  --info: #5b9bff;
+
+  --hue-overview: #94a6ff;
+  --hue-analytics: #818cf8;
+  --hue-cpu: #ff8a3d;
+  --hue-ram: #a78bfa;
+  --hue-disk: #22d3ee;
+  --hue-net: #5b9bff;
+  --hue-power: #a3e635;
+  --hue-sys: #f472b6;
+  --hue-updates: #fcd34d;
+
+  --font-display: 'Bricolage Grotesque Variable', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --font-ui: system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  --r-xl: 24px;
+  --r-lg: 18px;
+  --r-md: 12px;
+  --r-sm: 8px;
+
+  --shadow-pop: 0 28px 56px -16px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(160, 170, 255, 0.08);
+  --overlay: rgba(8, 9, 20, 0.66);
+
+  --rail-w: 224px;
+  --rail-w-collapsed: 72px;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #eeeff8;
+  --bg-glow: #ddd9ff;
+  --surface: #ffffff;
+  --surface-2: #f5f5fc;
+  --surface-3: #e9e9f6;
+  --line: rgba(40, 40, 100, 0.1);
+  --line-strong: rgba(40, 40, 100, 0.2);
+
+  --text: #15162e;
+  --text-muted: #565b7c;
+  --text-faint: #7c819f;
+
+  --primary: #15162e;
+  --on-primary: #ffffff;
+  --focus: #4f46e5;
+
+  --ok: #16a34a;
+  --warn: #b45309;
+  --critical: #d12a41;
+  --info: #1d6fe0;
+
+  --hue-overview: #4f46e5;
+  --hue-analytics: #4f46e5;
+  --hue-cpu: #d4600a;
+  --hue-ram: #6d4fe0;
+  --hue-disk: #0e8fb0;
+  --hue-net: #1d6fe0;
+  --hue-power: #5f8f0c;
+  --hue-sys: #c2327f;
+  --hue-updates: #a16207;
+
+  --shadow-pop: 0 28px 56px -16px rgba(30, 30, 80, 0.3), 0 0 0 1px rgba(40, 40, 100, 0.06);
+  --overlay: rgba(30, 30, 70, 0.36);
+}
+
+@theme {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--text);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-critical: var(--critical);
+  --color-info: var(--info);
+  --font-display: var(--font-display);
+  --font-ui: var(--font-ui);
+}
