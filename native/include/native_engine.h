@@ -3,7 +3,7 @@
 #ifdef _WIN32
 #define NATIVE_API extern "C" __declspec(dllexport)
 #else
-#define NATIVE_API extern "C"
+#define NATIVE_API extern "C" __attribute__((visibility("default")))
 #endif
 
 // Cross-platform, implemented in common.cpp
@@ -12,7 +12,7 @@ NATIVE_API int call_asm_constant();
 NATIVE_API double run_cpu_benchmark(long long iterations, long long* resultOut);
 NATIVE_API void run_simd_comparison(long long iterations, double* scalarOpsPerSecOut, double* simdOpsPerSecOut);
 
-// Platform-specific — implemented differently in linux_provider.cpp / windows_provider.cpp
+// Platform-specific — implemented per OS in platform/linux/ and platform/windows/
 NATIVE_API int get_cpu_info(char* modelNameOut, int bufferSize);
 NATIVE_API double get_cpu_usage_percent();
 NATIVE_API double get_cpu_temperature();
@@ -31,7 +31,7 @@ NATIVE_API int get_gpu_vram_bytes(int adapterIndex, char* nameOut, int nameBuffe
                                    long long* dedicatedBytesOut, long long* sharedSystemBytesOut);
 
 // ---------------------------------------------------------------------
-// CPU features + Assembly kernels (simd_dispatch.cpp / vector_kernels.asm)
+// CPU features + Assembly kernels (simd_dispatch.cpp / math/vector_math.asm, memory/memory_kernels.asm)
 // ---------------------------------------------------------------------
 // Bitmask returned by si_get_cpu_features(). A bit is set ONLY when the CPU
 // reports the feature and (for AVX-family) the OS has enabled YMM state.
@@ -61,7 +61,7 @@ NATIVE_API unsigned long long si_xor_u64(const unsigned long long* a, long long 
 NATIVE_API int si_memory_bandwidth(long long bytes, int repeats, double* copyGBps, double* readGBps);
 
 // ---------------------------------------------------------------------
-// Topology, storage, fans (hardware_info.cpp)
+// Topology, storage, fans (native/platform/*)
 // Unknown values are reported as -1 (or return 0); never a fabricated zero.
 // ---------------------------------------------------------------------
 // Returns 1 if at least the logical CPU count is known. physicalCores/packages
@@ -85,7 +85,7 @@ NATIVE_API int si_get_memory_info(long long* totalBytes, long long* availableByt
 
 
 // ---------------------------------------------------------------------
-// Physical RAM / DIMM hardware information (hardware_info.cpp)
+// Physical RAM / DIMM hardware information (native/platform/*)
 // ---------------------------------------------------------------------
 //
 // Runtime memory usage belongs to si_get_memory_info().

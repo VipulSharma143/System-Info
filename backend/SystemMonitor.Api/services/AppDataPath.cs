@@ -1,8 +1,6 @@
 namespace SystemMonitor.Api.Services;
 
-// Resolves where local historical data lives. Replaces MongoDB Atlas as the
-// persistence layer — see LocalJsonSnapshotStore. Deterministic, writable,
-// local, and independent of any database or internet connection.
+// Resolves the writable directory for local history (see LocalJsonSnapshotStore).
 public static class AppDataPath
 {
     // Resolution order:

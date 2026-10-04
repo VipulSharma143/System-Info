@@ -2,77 +2,110 @@ using SystemMonitor.Api.Interface;
 
 namespace SystemMonitor.Api.Services;
 
-// Samples CPU and network in the background; endpoints read the cache
-// instead of sampling on every request.
-public class SystemMonitorBackgroundService : BackgroundService
+/// <summary>
+/// Samples CPU and network once a second into an in-memory cache that the endpoints read, and
+/// queues one snapshot line per sample for the local history.
+/// </summary>
+public sealed class SystemMonitorBackgroundService : BackgroundService
 {
-private readonly ISystemInfoProvider _provider;
-private readonly ILogger<SystemMonitorBackgroundService> _log;
-private string? _lastError;
+    private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(1);
 
-public CpuInfo? LatestCpu { get; private set; }
-public List<NetworkInfo>? LatestNetwork { get; private set; }
+    // The cache is filled from the first sample so the UI has CPU data immediately. History
+    // logging starts later so the backend's own JIT/Kestrel start-up load is not recorded as
+    // system load.
+    private static readonly long LoggingWarmUpMs = 3_000;
 
-private readonly object _lock = new();
+    // Batching interval for disk writes (see LocalJsonSnapshotStore).
+    private static readonly long FlushIntervalMs = 5_000;
 
-public SystemMonitorBackgroundService(ISystemInfoProvider provider, ILogger<SystemMonitorBackgroundService> log)
+    // Battery changes slowly and, on Windows, costs a driver IOCTL: refresh it less often.
+    private static readonly long BatteryRefreshMs = 10_000;
+
+    private readonly ISystemInfoProvider _provider;
+    private readonly ILogger<SystemMonitorBackgroundService> _log;
+    private readonly object _lock = new();
+    private CpuInfo? _cpu;
+    private List<NetworkInfo>? _network;
+    private string? _lastError;
+
+    public SystemMonitorBackgroundService(ISystemInfoProvider provider, ILogger<SystemMonitorBackgroundService> log)
     {
-_provider = provider;
-_log = log;
+        _provider = provider;
+        _log = log;
     }
 
-protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-// Let .NET startup (JIT, Kestrel init) settle before sampling,
-// so it isn't logged as system load.
-await Task.Delay(3000, stoppingToken);
+    public CpuInfo? GetCachedCpu() { lock (_lock) return _cpu; }
 
-while (!stoppingToken.IsCancellationRequested)
+    public List<NetworkInfo>? GetCachedNetwork() { lock (_lock) return _network; }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        // Never hold up host start-up with the first sample.
+        await Task.Yield();
+
+        long startedAt = Environment.TickCount64, lastFlush = startedAt, lastBattery = long.MinValue;
+        BatteryInfo? battery = null;
+        bool primed = false;
+        using var timer = new PeriodicTimer(SampleInterval);
+
+        try
         {
-try
+            do
             {
-var cpu = await _provider.GetCpuAsync();
-var network = await _provider.GetNetworkAsync();
-
-// Battery is a single-pass sync read (no delta sampling needed,
-// same reasoning as GetDisks()) — not cached separately, just
-// pulled fresh each loop so the local snapshot includes it.
-var battery = _provider.GetBattery();
-
-lock (_lock)
+                try
                 {
-LatestCpu = cpu;
-LatestNetwork = network;
-                }
+                    var cpuTask = _provider.GetCpuAsync();
+                    var netTask = _provider.GetNetworkAsync();
+                    var cpu = await cpuTask;
+                    var network = await netTask;
 
-SnapshotLogger.Append(cpu, network, battery);
-            }
-catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-break;
-            }
-catch (Exception ex)
-            {
-// Don't let a transient read failure kill the loop — but do not hide it
-// either: log once per distinct error, and back off so a persistent
-// failure cannot spin the CPU.
-if (_lastError != ex.Message)
-                {
-_lastError = ex.Message;
-_log.LogWarning(ex, "System sampling failed; will keep retrying.");
+                    // The first reading spans the backend's own start-up work, so it is a
+                    // measurement of the app, not the machine: keep it out of the cache and
+                    // report CPU as "not ready yet" for the one second until the next sample.
+                    lock (_lock)
+                    {
+                        if (primed) _cpu = cpu;
+                        _network = network;
+                    }
+                    if (!primed) { primed = true; continue; }
+
+                    var now = Environment.TickCount64;
+                    if (now - startedAt >= LoggingWarmUpMs)
+                    {
+                        if (now - lastBattery >= BatteryRefreshMs)
+                        {
+                            battery = _provider.GetBattery();
+                            lastBattery = now;
+                        }
+                        SnapshotLogger.Append(cpu, network, battery);
+                    }
+
+                    if (now - lastFlush >= FlushIntervalMs)
+                    {
+                        SnapshotLogger.Flush();
+                        lastFlush = now;
+                    }
                 }
-try { await Task.Delay(2000, stoppingToken); } catch (OperationCanceledException) { break; }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // A transient read failure must not end sampling, but is logged once per
+                    // distinct error; the timer's fixed period already prevents a busy loop.
+                    if (_lastError != ex.Message)
+                    {
+                        _lastError = ex.Message;
+                        _log.LogWarning(ex, "System sampling failed; will keep retrying.");
+                    }
+                }
             }
+            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
-    }
-
-public CpuInfo? GetCachedCpu()
-    {
-lock (_lock) return LatestCpu;
-    }
-
-public List<NetworkInfo>? GetCachedNetwork()
-    {
-lock (_lock) return LatestNetwork;
+        catch (OperationCanceledException)
+        {
+            // shutting down
+        }
+        finally
+        {
+            SnapshotLogger.Flush();
+        }
     }
 }

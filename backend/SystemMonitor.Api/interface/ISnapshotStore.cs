@@ -1,21 +1,19 @@
 namespace SystemMonitor.Api.Interface;
 
-// One row of historical data. Json is a single pre-serialized snapshot line
-// (the shape AnalyticsService parses) — kept as a
-// raw string rather than a typed model since the snapshot schema is owned by
-// SnapshotLogger and consumed opaquely by storage.
+/// <summary>One historical row; <c>Json</c> is a single pre-serialised snapshot line parsed by AnalyticsService.</summary>
 public record SystemSnapshot(DateTime TimestampUtc, string Json);
 
-// Storage boundary for historical snapshots. The background service depends
-// on this, not on any specific storage technology (previously MongoClient,
-// now LocalJsonSnapshotStore) — a future SQLite implementation could replace
-// LocalJsonSnapshotStore without touching anything above this interface.
+/// <summary>Storage boundary for historical snapshots.</summary>
 public interface ISnapshotStore
 {
+    /// <summary>Queues a snapshot. Implementations may buffer; <see cref="Flush"/> makes it durable.</summary>
     Task AppendAsync(SystemSnapshot snapshot);
 
     Task<IReadOnlyList<SystemSnapshot>> QueryAsync(
         DateTime from,
         DateTime to,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Writes anything still buffered. A no-op for unbuffered stores.</summary>
+    void Flush() { }
 }

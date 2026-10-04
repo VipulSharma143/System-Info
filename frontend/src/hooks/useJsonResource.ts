@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { API_BASE } from '../lib/apiConfig';
+import { fetchJson } from '../lib/api';
 import { reportDiagnostic } from '../lib/errors';
 
 interface Options {
@@ -55,9 +55,7 @@ export function useJsonResource<T>(
 
     const run = async () => {
       try {
-        const response = await fetch(`${API_BASE}${path}`, { signal: controller.signal });
-        if (!response.ok) throw new Error(`Backend returned ${response.status}`);
-        const json = (await response.json()) as T;
+        const json = await fetchJson<T>(path, controller.signal);
         if (cancelled) return;
         failures = 0;
         loaded.current = true;

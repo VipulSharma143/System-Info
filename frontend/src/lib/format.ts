@@ -71,15 +71,6 @@ export function formatMemoryType(value: string | null | undefined): string {
   return t ? t : NOT_REPORTED;
 }
 
-/** Applies `format` to a present value, or returns the fallback for null/undefined. */
-export function formatNullable<T>(
-  value: T | null | undefined,
-  format: (v: T) => string = String,
-  fallback: string = NOT_REPORTED
-): string {
-  return value === null || value === undefined ? fallback : format(value);
-}
-
 /** used/total as a percentage, or null when it cannot be computed honestly. */
 export function ratioPercent(used: number | null, total: number | null): number | null {
   if (used === null || total === null || total <= 0 || used < 0) return null;

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useState, type ReactNode } from 'react';
 
 import { useSystemMetrics } from './hooks/useSystemMetrics';
 import { useSystemInfo } from './hooks/useSystemInfo';
@@ -14,16 +14,21 @@ import AppShell from './components/layout/AppShell';
 import type { NavItem } from './components/layout/Sidebar';
 import StartupScreen, { buildStartupSteps } from './components/layout/StartupScreen';
 import OverviewView from './components/views/OverviewView';
-import AnalyticsView from './components/views/AnalyticsView';
-import ProcessesView from './components/views/ProcessesView';
-import RamView from './components/views/RamView';
-import StorageView from './components/views/StorageView';
-import NetworkView from './components/views/NetworkView';
-import BatteryView from './components/views/BatteryView';
-import SystemView from './components/views/SystemView';
-import UpdatesView, { UpdateInstallingOverlay } from './components/views/UpdatesView';
 
-import { OfflineBanner } from './components/common/States';
+// Everything but the first screen is loaded the first time it is opened.
+const AnalyticsView = lazy(() => import('./components/views/AnalyticsView'));
+const ProcessesView = lazy(() => import('./components/views/ProcessesView'));
+const RamView = lazy(() => import('./components/views/RamView'));
+const StorageView = lazy(() => import('./components/views/StorageView'));
+const NetworkView = lazy(() => import('./components/views/NetworkView'));
+const BatteryView = lazy(() => import('./components/views/BatteryView'));
+const SystemView = lazy(() => import('./components/views/SystemView'));
+const UpdatesView = lazy(() => import('./components/views/UpdatesView'));
+const UpdateInstallingOverlay = lazy(() =>
+  import('./components/views/UpdatesView').then((m) => ({ default: m.UpdateInstallingOverlay }))
+);
+
+import { LoadingState, OfflineBanner } from './components/common/States';
 import StatusIndicator from './components/common/StatusIndicator';
 import ServiceControls from './components/layout/ServiceControls';
 import Button from './components/common/Button';
@@ -57,16 +62,19 @@ const TITLES: Record<SectionId, { title: string; description: string }> = {
   updates: { title: 'Updates', description: 'Check for new versions and read release notes' },
 };
 
-// Top-level wrapper only exists to own the "retry after a genuine startup
-// failure" mechanism. useSystemMetrics/useSystemGpu don't expose their own
-// retry() the way useSystemInfo does — they just poll on a fixed interval —
-// so the simplest, most honest way to give them a fresh STARTUP_GRACE_MS
-// window on Retry is a full remount: bumping `startupAttempt` changes
-// AppContent's key, which discards and re-mounts every hook inside it,
-// including a fresh `startedAt` in the two polling hooks.
+// Retrying after a startup failure remounts the whole tree, which gives every hook a fresh
+// startup window.
 function App() {
   const [startupAttempt, setStartupAttempt] = useState(0);
   return <AppContent key={startupAttempt} onRetryStartup={() => setStartupAttempt((a) => a + 1)} />;
+}
+
+function Page({ active, children }: { active: boolean; children: ReactNode }) {
+  return (
+    <div className={active ? 'block' : 'hidden'}>
+      <Suspense fallback={<LoadingState />}>{children}</Suspense>
+    </div>
+  );
 }
 
 function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
@@ -77,8 +85,6 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
     lastUpdated,
     startupError: metricsStartupError,
   } = useSystemMetrics();
-  const { info, error: infoError, retry: retryInfo } = useSystemInfo();
-  const { gpus, error: gpuError, startupError: gpuStartupError } = useSystemGpu();
   const { status: serviceStatus } = useServiceControl();
   const { theme, toggle } = useTheme();
   const { findNearest } = useProcessHistory(data?.cpu.usedPercent, data?.processes);
@@ -86,10 +92,23 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
   const [collapsed, setCollapsed] = useState(false);
 
+  // A page is mounted the first time it is opened and then stays mounted (hidden with CSS), so
+  // its polling and state survive navigation, but nothing is fetched for pages never visited.
+  const [visited, setVisited] = useState<ReadonlySet<SectionId>>(() => new Set<SectionId>(['overview']));
+  const navigate = useCallback((id: SectionId) => {
+    setActiveSection(id);
+    setVisited((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }, []);
+
+  // Identity and GPU details are only shown on the System page: load them when it is first
+  // opened (GPU only while it is on screen) so they are never part of startup.
+  const { info, error: infoError, retry: retryInfo } = useSystemInfo(visited.has('system'));
+  const { gpus, error: gpuError } = useSystemGpu(activeSection === 'system');
+
   // One updater instance for the whole app: the sidebar badge, the banner
   // below and the Updates tab all read this same state. Automatic checks only
   // begin once the dashboard has loaded, so they never compete with startup.
-  const updater = useUpdater(info !== null && data !== null && gpus !== null);
+  const updater = useUpdater(data !== null);
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const updateAvailable = updater.phase === 'available' && updater.available !== null;
 
@@ -103,25 +122,14 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
     [data?.processes, updateAvailable]
   );
 
-  // "Services starting" only means something inside the Tauri desktop
-  // shell, where the backend process is spawned by this app
-  // and their readiness is reported via the real services-status event
-  // (useServiceControl). On the Linux browser-tab path, start-all.sh
-  // already started the backend and dev server before the page even loaded, so
-  // there's no separate "starting services" phase to represent here —
-  // treat it as instantly satisfied rather than faking a check.
+  // Inside the Tauri shell the backend is a child process whose readiness is reported by the
+  // services-status event. In a browser it was started before the page loaded.
   const servicesReady = !isTauri() || serviceStatus.backend === 'running';
-  const infoLoaded = info !== null;
   const metricsLoaded = data !== null;
-  const gpuLoaded = gpus !== null;
-  const initialLoadComplete = infoLoaded && metricsLoaded && gpuLoaded;
 
-  // A genuine startup failure only exists before the first successful
-  // load — these *StartupError fields are only ever set once
-  // STARTUP_GRACE_MS has elapsed with zero success (see the hooks). Once
-  // any source has loaded once, a later disconnect is steady-state
-  // territory (OfflineBanner / SystemView's own error panels), not this.
-  const startupFailed = !initialLoadComplete && Boolean(metricsStartupError || gpuStartupError || infoError);
+  // Startup only waits for the dashboard snapshot. A genuine startup failure exists only before
+  // the first successful load; afterwards a disconnect is handled by the offline banner.
+  const startupFailed = !metricsLoaded && Boolean(metricsStartupError);
 
   // Friendly SweetAlert notifications for genuine failures. This only observes
   // the error state the hooks above already produce — no requests, no polling
@@ -135,11 +143,10 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
     quiet: updater.phase === 'installing' || (isTauri() && serviceStatus.backend !== 'running'),
   });
 
-  if (!initialLoadComplete || !data || !info || !gpus) {
-    const steps = buildStartupSteps({ servicesReady, infoLoaded, metricsLoaded, gpuLoaded });
+  if (!data) {
     return (
       <StartupScreen
-        steps={steps}
+        steps={buildStartupSteps({ servicesReady, metricsLoaded })}
         failed={startupFailed}
         onRetry={onRetryStartup}
       />
@@ -154,7 +161,7 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
       onToggleTheme={toggle}
       navItems={navItems}
       activeId={activeSection}
-      onNavigate={(id) => setActiveSection(id as SectionId)}
+      onNavigate={(id) => navigate(id as SectionId)}
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed((c) => !c)}
       title={TITLES[activeSection].title}
@@ -191,7 +198,7 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
               </span>
               <button
                 type="button"
-                onClick={() => setActiveSection('updates')}
+                onClick={() => navigate('updates')}
                 className="font-medium text-[var(--accent)] hover:underline"
               >
                 View details
@@ -214,52 +221,61 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
         </div>
       )}
 
-      {/*
-        Every view stays mounted and is shown/hidden with CSS rather than
-        conditionally rendered. This is load-bearing, not cosmetic: it keeps
-        the single polling lifecycle (system metrics, analytics, process
-        history) alive across navigation instead of tearing hooks down and
-        re-fetching on every tab change. Switching tabs costs zero requests.
-      */}
       <div className={activeSection === 'overview' ? 'block' : 'hidden'}>
         <OverviewView data={data} />
       </div>
-      <div className={activeSection === 'processes' ? 'block' : 'hidden'}>
-        <ProcessesView processes={data.processes} />
-      </div>
-      <div className={activeSection === 'ram' ? 'block' : 'hidden'}>
-        {/* Polls only while this tab is the visible one (the view stays mounted like the others). */}
-        <RamView active={activeSection === 'ram'} />
-      </div>
-      <div className={activeSection === 'storage' ? 'block' : 'hidden'}>
-        <StorageView disks={data.disks} />
-      </div>
-      <div className={activeSection === 'network' ? 'block' : 'hidden'}>
-        <NetworkView network={data.network} />
-      </div>
-      <div className={activeSection === 'battery' ? 'block' : 'hidden'}>
-        <BatteryView battery={data.battery} />
-      </div>
-
-      <div className={activeSection === 'analytics' ? 'block' : 'hidden'}>
-        <AnalyticsView findNearest={findNearest} />
-      </div>
-      <div className={activeSection === 'system' ? 'block' : 'hidden'}>
-        <SystemView
-          info={info}
-          infoError={infoError}
-          onRetryInfo={retryInfo}
-          data={data}
-          gpus={gpus}
-          gpuError={gpuError}
-        />
-      </div>
-      <div className={activeSection === 'updates' ? 'block' : 'hidden'}>
-        <UpdatesView updater={updater} />
-      </div>
+      {visited.has('analytics') && (
+        <Page active={activeSection === 'analytics'}>
+          <AnalyticsView findNearest={findNearest} />
+        </Page>
+      )}
+      {visited.has('processes') && (
+        <Page active={activeSection === 'processes'}>
+          <ProcessesView processes={data.processes} />
+        </Page>
+      )}
+      {visited.has('ram') && (
+        <Page active={activeSection === 'ram'}>
+          <RamView active={activeSection === 'ram'} />
+        </Page>
+      )}
+      {visited.has('storage') && (
+        <Page active={activeSection === 'storage'}>
+          <StorageView disks={data.disks} />
+        </Page>
+      )}
+      {visited.has('network') && (
+        <Page active={activeSection === 'network'}>
+          <NetworkView network={data.network} />
+        </Page>
+      )}
+      {visited.has('battery') && (
+        <Page active={activeSection === 'battery'}>
+          <BatteryView battery={data.battery} />
+        </Page>
+      )}
+      {visited.has('system') && (
+        <Page active={activeSection === 'system'}>
+          <SystemView
+            info={info}
+            infoError={infoError}
+            onRetryInfo={retryInfo}
+            data={data}
+            gpus={gpus}
+            gpuError={gpuError}
+          />
+        </Page>
+      )}
+      {visited.has('updates') && (
+        <Page active={activeSection === 'updates'}>
+          <UpdatesView updater={updater} />
+        </Page>
+      )}
 
       {updater.phase === 'installing' && (
-        <UpdateInstallingOverlay version={updater.available?.version} />
+        <Suspense fallback={null}>
+          <UpdateInstallingOverlay version={updater.available?.version} />
+        </Suspense>
       )}
     </AppShell>
   );

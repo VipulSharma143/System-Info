@@ -1,46 +1,28 @@
-// SnapshotLogger.cs
-// Same public interface as before (Append(cpu, network, battery)) — only the
-// destination changed, from MongoDB Atlas to local JSONL files via
-// ISnapshotStore (see LocalJsonSnapshotStore). MongoDB Atlas, MONGO_URI, and
-// any external database are no longer required by this application.
-//
-// Graceful degradation preserved: a failed write is logged to stderr and
-// does not crash the background sampling loop.
-
 using System.Text.Json.Nodes;
 using SystemMonitor.Api.Interface;
 
 namespace SystemMonitor.Api.Services;
 
+/// <summary>
+/// Serialises one sample into the snapshot line AnalyticsService reads and hands it to the
+/// store. A failed write is reported on stderr and never reaches the sampling loop.
+/// </summary>
 public static class SnapshotLogger
 {
-    // Set once at startup (see Program.cs) after the local data directory is
-    // resolved and created. Kept as a static field so the existing static
-    // Append(...) call sites in SystemMonitorBackgroundService don't need to
-    // change to instance/DI-based calls.
     private static ISnapshotStore? _store;
 
-    public static void Initialize(ISnapshotStore store)
-    {
-        _store = store;
-    }
+    public static void Initialize(ISnapshotStore store) => _store = store;
 
-    // battery is optional so any existing caller passing just (cpu, network)
-    // still compiles — but the background service always supplies it.
     public static void Append(CpuInfo? cpu, List<NetworkInfo>? network, BatteryInfo? battery = null)
     {
-        if (_store is null)
-        {
-            Console.Error.WriteLine("[SnapshotLogger] store not initialized — snapshot logging disabled.");
-            return;
-        }
+        if (_store is null) return;
 
         try
         {
             var timestamp = DateTime.UtcNow;
 
             var networkArray = new JsonArray();
-            foreach (var n in network ?? new List<NetworkInfo>())
+            foreach (var n in network ?? [])
             {
                 networkArray.Add(new JsonObject
                 {
@@ -52,16 +34,12 @@ public static class SnapshotLogger
 
             var obj = new JsonObject
             {
-                // ISO-8601 UTC with a trailing "Z" — read back by AnalyticsService (DateTime parses it
-                // directly, including the 7-digit fractional seconds).
                 ["timestamp"] = timestamp.ToString("o"),
                 ["cpuUsedPercent"] = cpu?.UsedPercent ?? 0,
                 ["network"] = networkArray
             };
 
-            // Only written when a battery is actually present — desktops
-            // simply omit the field rather than storing fabricated/null
-            // placeholder values.
+            // Desktops without a battery omit the field rather than store placeholders.
             if (battery is { Available: true })
             {
                 obj["battery"] = new JsonObject
@@ -73,18 +51,17 @@ public static class SnapshotLogger
                 };
             }
 
-            var json = obj.ToJsonString();
-
-            // The background service's loop is not async-friendly here (Append
-            // is called from a synchronous context), so we block on the write.
-            // Local disk I/O for a single short line is fast enough that this
-            // has never been the bottleneck (unlike the old network round-trip
-            // to Atlas, which this replaces).
-            _store.AppendAsync(new SystemSnapshot(timestamp, json)).GetAwaiter().GetResult();
+            _store.AppendAsync(new SystemSnapshot(timestamp, obj.ToJsonString())).GetAwaiter().GetResult();
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[SnapshotLogger] failed to write snapshot: {ex.Message}");
+            Console.Error.WriteLine($"[SnapshotLogger] failed to queue snapshot: {ex.Message}");
         }
+    }
+
+    public static void Flush()
+    {
+        try { _store?.Flush(); }
+        catch (Exception ex) { Console.Error.WriteLine($"[SnapshotLogger] flush failed: {ex.Message}"); }
     }
 }

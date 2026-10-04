@@ -115,6 +115,22 @@ try
     _ = await new LocalJsonSnapshotStore(dir).QueryAsync(DateTime.MinValue, now);
     Check(sw.ElapsedMilliseconds < 500, $"all-time store query took {sw.ElapsedMilliseconds} ms");
 
+    // writes are buffered: nothing reaches disk until Flush(), but a query always sees them
+    var bufDir = Path.Combine(Path.GetTempPath(), "sysinfo-buffer-" + Guid.NewGuid().ToString("N"));
+    var buffered = new LocalJsonSnapshotStore(bufDir);
+    var stamp = DateTime.UtcNow;
+    await buffered.AppendAsync(new SystemSnapshot(stamp, $"{{\"timestamp\":\"{stamp:o}\",\"a\":1}}"));
+    await buffered.AppendAsync(new SystemSnapshot(stamp.AddSeconds(1), $"{{\"timestamp\":\"{stamp.AddSeconds(1):o}\",\"a\":2}}"));
+    var dayFile = Directory.GetFiles(bufDir, "*.jsonl", SearchOption.AllDirectories);
+    Check(dayFile.Length == 0, "appended snapshots stay in memory until flushed");
+    var seen = await buffered.QueryAsync(stamp.AddMinutes(-1), stamp.AddMinutes(1));
+    Check(seen.Count == 2, $"query flushes pending writes first (saw {seen.Count})");
+    dayFile = Directory.GetFiles(bufDir, "*.jsonl", SearchOption.AllDirectories);
+    Check(dayFile.Length == 1 && File.ReadAllLines(dayFile[0]).Length == 2, "flush writes all pending lines in one file");
+    buffered.Flush();
+    Check(File.ReadAllLines(dayFile[0]).Length == 2, "flushing with nothing pending writes nothing");
+    Directory.Delete(bufDir, true);
+
     // cancellation is honoured
     using var cts = new CancellationTokenSource(); cts.Cancel();
     bool cancelled = false;

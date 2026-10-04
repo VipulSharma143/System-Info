@@ -39,7 +39,7 @@ Real-time hardware telemetry (CPU/RAM/disk/network/processes/battery/GPU/system 
 | Desktop shell | Tauri 2 (Rust, `win32job` on Windows) — native window, spawns/supervises the backend as a child process |
 | Backend | C#, .NET 10 Minimal API. No auth (loopback-only, single user). No ORM. |
 | Native engine | C++17 (CMake), called via P/Invoke — CPU topology/features, storage volumes, fans, GPU/VRAM, battery, benchmarks, memory bandwidth |
-| Assembly | x86-64 NASM: benchmark loops + SSE2/AVX2 vector kernels (`vector_kernels.asm`: add, dot, int32 sum) behind runtime CPUID/XGETBV dispatch in `simd_dispatch.cpp`; every kernel is verified against a C++ reference by `si_kernel_selftest()` |
+| Assembly | x86-64 NASM: benchmark loops + SSE2/AVX2 vector kernels (`math/vector_math.asm`: add, dot, int32 sum) behind runtime CPUID/XGETBV dispatch in `simd_dispatch.cpp`; every kernel is verified against a C++ reference by `si_kernel_selftest()` |
 | Analytics | `AnalyticsService.cs` (in-process; was Python/FastAPI on :8001) — trend/bottleneck/stats over local snapshot files, 5 s result cache |
 | Storage | **No database.** Append-only local JSON Lines: `data/snapshots/{yyyy}/{MM}/{dd}.jsonl`. (Previously MongoDB Atlas, before that PostgreSQL was the original target — both replaced deliberately for offline capability. Don't reintroduce a DB without discussion.) |
 | CI/CD | `.github/workflows/release.yml`: `version → tests → build-windows + build-linux (parallel) → release`, triggered by a new top `CHANGELOG.md` entry. `tests` is the reusable `tests.yml` (native/Assembly ctest on Linux + Windows/MSVC, C# tests, Rust supervisor tests); `tests.yml` also runs on every PR and non-main push. |
@@ -64,9 +64,9 @@ backend/SystemMonitor.Api/
   interface/             ISystemInfoProvider, ISnapshotStore
   Native/                 NativeInterop.cs (P/Invoke bridge), NativeKernels.cs (safe span wrappers + C# reference implementations)
 backend/SystemMonitor.Tests/  dependency-free test runner (analytics, storage, native wrappers); links sources instead of referencing the Api project
-native/                  C++ engine: include/native_engine.h (C ABI), src/{windows,linux}_provider.cpp, src/common.cpp,
-                         src/simd_dispatch.cpp (CPUID + dispatch + self-test), src/hardware_info.cpp (topology/storage/fans), build.sh
-assembly/                NASM: benchmark_loop.asm, simd_loop.asm, get_constant.asm, vector_kernels.asm (SSE2/AVX2 kernels)
+native/                  C++ engine: include/native_engine.h (C ABI), src/common.cpp, src/simd_dispatch.cpp (CPUID + dispatch + self-test),
+                         src/smbios/ (platform-neutral table parsing), platform/{linux,windows}/ (cpu, storage, fan, memory, smbios_source, provider), build.sh
+assembly/                NASM: cpu/ (benchmark_loop, simd_loop, get_constant), math/vector_math.asm, memory/memory_kernels.asm (SSE2/AVX2), abi.inc
 scripts/                 sync-version.mjs, check-version.mjs, archive-changelog.mjs, make-update-manifest.mjs
 tests/native/            C++/Assembly tests (ctest)
 packaging/linux/         only systeminfo.png (icon source). The AppImage's AppRun is generated inline by release.yml.
@@ -149,7 +149,7 @@ Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job
 - **Never hold a lock across a readiness wait, and never block in a sync Tauri command.** Sync commands run on the UI thread; this froze the window on slow cold starts once. `get_service_status` must stay lock-free and do no I/O.
 - **Keep every native export exception-free and bounds-checked.** An exception crossing the `extern "C"` boundary into .NET kills the process. Use the `std::error_code` filesystem overloads, validate buffers, report unknown as `-1`/`0` return — never a fabricated zero.
 - **Linux physical RAM goes through a memory-only snapshot.** `/sys/firmware/dmi/tables/DMI` is root-only (it also holds the machine serial/UUID), so the app never reads it as an unprivileged user and never runs `dmidecode`. `si_smbios_snapshot` (root, built by `native/build.sh`, installed by `packaging/linux/install-smbios-snapshot.sh`) saves only Type 16/17 records to `/var/lib/system-info/smbios-memory.bin` with the boot id; `si_dmi_load_table_ex` reads the live table first, then that snapshot, and returns a reason code (`si_get_memory_hardware_status`) that `MemoryMapping.UnavailableNote` turns into the on-screen message. Never widen what the filter copies, and keep the stale-boot check. The snapshot code is covered by `smbios_loader_test`.
-- **The SMBIOS parser is shared and byte-buffer driven.** Don't add platform branches inside the Type 16/17 parsing; only `si_dmi_load_table` is platform-specific. Any parser change needs a case in `tests/native/smbios_parse_test.cpp` (hand-built tables; unknown stays `-1`/empty, never a fabricated 0). `smbios_loader_test` `#include`s `hardware_info.cpp`, so it is a standalone target and must not link `systemmonitor_native`.
+- **The SMBIOS parser is shared and byte-buffer driven.** Don't add platform branches inside the Type 16/17 parsing; only `si_dmi_load_table` (platform/<os>/smbios_source.cpp) is platform-specific. Any parser change needs a case in `tests/native/smbios_parse_test.cpp` (hand-built tables; unknown stays `-1`/empty, never a fabricated 0). `smbios_loader_test` `#include`s `hardware_info.cpp`, so it is a standalone target and must not link `systemmonitor_native`.
 - **Assembly kernels must stay verified.** Any new or changed kernel needs a C++ reference and a case in `si_kernel_selftest()` covering n = 0, 1, odd lengths, tails and misaligned pointers; SSE2 is the only baseline — AVX2 is reachable only through the CPUID+XGETBV dispatcher.
 - **An unbounded query range is a trap.** `ISnapshotStore.QueryAsync(DateTime.MinValue, …)` is legal because the store clamps to the oldest day on disk; don't add code that iterates calendar days itself.
 - When zipping the repo for sharing, don't exclude `native/build*` — it also matches `native/build.sh`.

@@ -94,7 +94,7 @@ public static class NativeInterop
     [DllImport("systemmonitor_native", EntryPoint = "si_memory_bandwidth")]
     public static extern int MemoryBandwidth(long bytes, int repeats, out double copyGBps, out double readGBps);
 
-    // ---- topology / storage / fans (hardware_info.cpp). 64-bit byte counts stay `long`. ----
+    // ---- topology / storage / fans (native/platform/*, native/src/smbios/). 64-bit byte counts stay `long`. ----
     [DllImport("systemmonitor_native", EntryPoint = "si_get_cpu_topology")]
     public static extern int GetCpuTopology(out int physicalCores, out int logicalCores, out int packages);
 
@@ -105,7 +105,7 @@ public static class NativeInterop
     [DllImport("systemmonitor_native", EntryPoint = "si_get_fan")]
     public static extern int GetFan(int index, StringBuilder labelOut, int labelSize, out int rpm);
 
-    // ---- RAM (hardware_info.cpp). Unknown numeric = -1, unknown string = "" (see native_engine.h). ----
+    // ---- RAM (native/platform/*, native/src/smbios/). Unknown numeric = -1, unknown string = "" (see native_engine.h). ----
     // Runtime state: total/available/free/cached/buffers/swap/commit, all 64-bit bytes.
     [DllImport("systemmonitor_native", EntryPoint = "si_get_memory_info")]
     public static extern int GetMemoryInfo(

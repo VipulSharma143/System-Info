@@ -4,32 +4,64 @@ project(SystemMonitorNative)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# Only functions marked NATIVE_API are part of the library's ABI.
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 enable_language(ASM_NASM)
 
+# Kernels share assembly/abi.inc (argument-register macros).
+set(ASM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../assembly)
+
 if(WIN32)
     set(CMAKE_ASM_NASM_OBJECT_FORMAT win64)
-    set(PLATFORM_SOURCE src/windows_provider.cpp)
+    set(PLATFORM_DIR platform/windows)
+    set(PLATFORM_SOURCES
+        ${PLATFORM_DIR}/cpu.cpp
+        ${PLATFORM_DIR}/storage.cpp
+        ${PLATFORM_DIR}/fan.cpp
+        ${PLATFORM_DIR}/memory.cpp
+        ${PLATFORM_DIR}/smbios_source.cpp
+        ${PLATFORM_DIR}/snapshot_writer.cpp
+        ${PLATFORM_DIR}/provider.cpp)
 else()
     set(CMAKE_ASM_NASM_OBJECT_FORMAT elf64)
-    set(PLATFORM_SOURCE src/linux_provider.cpp)
+    set(PLATFORM_DIR platform/linux)
+    set(PLATFORM_SOURCES
+        ${PLATFORM_DIR}/cpu.cpp
+        ${PLATFORM_DIR}/storage.cpp
+        ${PLATFORM_DIR}/fan.cpp
+        ${PLATFORM_DIR}/memory.cpp
+        ${PLATFORM_DIR}/smbios_source.cpp
+        ${PLATFORM_DIR}/snapshot_writer.cpp
+        ${PLATFORM_DIR}/provider.cpp)
 endif()
 
-add_library(systemmonitor_native SHARED
+# Compiled once; the shared library and the white-box loader test both reuse these objects.
+add_library(systemmonitor_objects OBJECT
     src/common.cpp
     src/simd_dispatch.cpp
-    src/hardware_info.cpp
-    ${PLATFORM_SOURCE}
-    ../assembly/get_constant.asm
-    ../assembly/benchmark_loop.asm
-    ../assembly/simd_loop.asm
-    ../assembly/vector_kernels.asm
+    src/smbios/reader.cpp
+    src/smbios/table_source.cpp
+    src/smbios/decode.cpp
+    src/smbios/parser.cpp
+    src/smbios/memory_dimm.cpp
+    ${PLATFORM_SOURCES}
+    ${ASM_DIR}/cpu/get_constant.asm
+    ${ASM_DIR}/cpu/benchmark_loop.asm
+    ${ASM_DIR}/cpu/simd_loop.asm
+    ${ASM_DIR}/math/vector_math.asm
+    ${ASM_DIR}/memory/memory_kernels.asm
 )
+
+target_include_directories(systemmonitor_objects PRIVATE ${ASM_DIR})
+
+add_library(systemmonitor_native SHARED $<TARGET_OBJECTS:systemmonitor_objects>)
 
 if(NOT WIN32)
     target_link_libraries(systemmonitor_native stdc++fs)
 else()
-    # windows_provider.cpp relies on #pragma comment(lib, "dxgi.lib") for
+    # platform/windows/provider.cpp relies on #pragma comment(lib, "dxgi.lib") for
     # DXGI (CreateDXGIFactory), which only MSVC honors. Declaring it here too
     # means the link doesn't silently depend on a compiler-specific pragma.
     target_link_libraries(systemmonitor_native dxgi psapi)
@@ -74,10 +106,9 @@ if(BUILD_NATIVE_TESTS)
     add_test(NAME smbios_parse_test COMMAND smbios_parse_test)
     set_tests_properties(smbios_parse_test PROPERTIES TIMEOUT 60)
 
-    # Windows RawSMBIOSData header handling. This test #includes hardware_info.cpp
-    # to reach a static helper, so it is built standalone (not linked against
-    # systemmonitor_native, which would duplicate every symbol).
-    add_executable(smbios_loader_test ../tests/native/smbios_loader_test.cpp)
+    # RawSMBIOSData header handling and the Linux snapshot format. Needs internal (non-exported)
+    # functions, so it links the shared objects directly rather than the library.
+    add_executable(smbios_loader_test ../tests/native/smbios_loader_test.cpp $<TARGET_OBJECTS:systemmonitor_objects>)
     if(WIN32)
         target_link_libraries(smbios_loader_test dxgi psapi)
     else()

@@ -6,11 +6,10 @@
 // hardware reader, and it is platform independent, so it is tested here with
 // hand-built buffers on every host.
 //
-// This file #includes hardware_info.cpp directly to reach the static helper,
-// so it must NOT also link systemmonitor_native (duplicate symbols); see the
-// smbios_loader_test target in native/CMakeLists.txt.
+// It reaches internal helpers through native/src/smbios/smbios.h, so it links the shared
+// object files directly (see the smbios_loader_test target in native/CMakeLists.txt).
 
-#include "../../native/src/hardware_info.cpp"
+#include "../../native/src/smbios/smbios.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -20,6 +19,7 @@
 #include <vector>
 
 #ifndef _WIN32
+#include "../../native/platform/linux/sysfs.h"
 #include <sys/stat.h>
 #include <unistd.h>
 #endif

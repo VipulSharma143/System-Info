@@ -5,10 +5,7 @@ using SystemMonitor.Api.Interface;
 namespace SystemMonitor.Api.Services;
 
 // Trend, bottleneck and summary analysis over the local snapshot history.
-// Originally a separate Python/FastAPI service; moved in-process (see PROJECT_STATUS.md,
-// "Why analytics moved from Python to C#"). Same maths, same thresholds, same JSON shape (snake_case, and the same
-// "no snapshots" short-circuit the frontend already handles) — so
-// /api/analytics/* is a drop-in and nothing outside this file changed for the UI.
+// Responses are snake_case JSON, with a "no snapshots" short-circuit the frontend handles.
 //
 // Data comes from ISnapshotStore, which already reads only the daily .jsonl
 // files covering the requested range and skips malformed lines.

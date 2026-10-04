@@ -1,24 +1,25 @@
+using System.Text;
 using System.Text.Json;
 using SystemMonitor.Api.Interface;
 
 namespace SystemMonitor.Api.Services;
 
 // Local append-only JSON Lines storage: data/snapshots/{yyyy}/{MM}/{dd}.jsonl
-// Replaces MongoDB Atlas. No database, no network dependency, no account.
-//
-// Design notes (see engineering-spec §13-§26):
-//  - One file per day keeps any single file small and keeps queries cheap —
-//    only the days actually requested are opened, never the whole history.
-//  - Append is a single lock + File.AppendAllText call. Snapshots are taken
-//    roughly once a second by the background service, so contention is
-//    negligible; a full async queue would be over-engineering for this load.
-//  - A malformed/partial line (e.g. from a hard kill mid-write) is skipped
-//    with a logged warning during QueryAsync, never thrown — one bad line
-//    must not take down analytics for an entire day's history.
+//  - One file per day, so a query only opens the days it asks for.
+//  - Appends are buffered in memory and written in one operation per file by Flush(), which
+//    the sampler calls every few seconds. That turns one open/write/close per sample into one
+//    per flush; QueryAsync flushes first so readers never see stale data.
+//  - A malformed/partial line (e.g. a hard kill mid-write) is skipped with a warning on read,
+//    never thrown: one bad line must not take down a whole day of analytics.
 public class LocalJsonSnapshotStore : ISnapshotStore
 {
+    // A write that keeps failing must not grow the buffer without bound.
+    private const int MaxPendingChars = 1_000_000;
+
     private readonly string _rootDir;
-    private static readonly object WriteLock = new();
+    private readonly object _lock = new();
+    private readonly Dictionary<string, StringBuilder> _pending = new();
+    private readonly HashSet<string> _knownDirs = new();
 
     public LocalJsonSnapshotStore(string dataDir)
     {
@@ -26,24 +27,56 @@ public class LocalJsonSnapshotStore : ISnapshotStore
         Directory.CreateDirectory(_rootDir);
     }
 
+    private string FileFor(DateTime day) =>
+        Path.Combine(_rootDir, day.Year.ToString("D4"), day.Month.ToString("D2"), $"{day.Day:D2}.jsonl");
+
     public Task AppendAsync(SystemSnapshot snapshot)
     {
-        var day = snapshot.TimestampUtc;
-        var dir = Path.Combine(_rootDir, day.Year.ToString("D4"), day.Month.ToString("D2"));
-        Directory.CreateDirectory(dir);
-        var file = Path.Combine(dir, $"{day.Day:D2}.jsonl");
-
-        lock (WriteLock)
+        var file = FileFor(snapshot.TimestampUtc);
+        lock (_lock)
         {
-            File.AppendAllText(file, snapshot.Json + Environment.NewLine);
+            if (!_pending.TryGetValue(file, out var buffer))
+            {
+                _pending[file] = buffer = new StringBuilder();
+                EnsureDirectory(file);
+            }
+            if (buffer.Length > MaxPendingChars) buffer.Clear();
+            buffer.Append(snapshot.Json).Append(Environment.NewLine);
         }
-
         return Task.CompletedTask;
+    }
+
+    private void EnsureDirectory(string file)
+    {
+        var dir = Path.GetDirectoryName(file)!;
+        if (_knownDirs.Add(dir)) Directory.CreateDirectory(dir);
+    }
+
+    public void Flush()
+    {
+        lock (_lock)
+        {
+            foreach (var (file, buffer) in _pending)
+            {
+                if (buffer.Length == 0) continue;
+                try
+                {
+                    EnsureDirectory(file);
+                    File.AppendAllText(file, buffer.ToString());
+                    buffer.Clear();
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine($"[LocalJsonSnapshotStore] flush to {file} failed: {ex.Message}");
+                }
+            }
+        }
     }
 
     public Task<IReadOnlyList<SystemSnapshot>> QueryAsync(
         DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
+        Flush();
         var results = new List<SystemSnapshot>();
 
         // An open-ended lower bound (DateTime.MinValue / "all time") must not
@@ -55,8 +88,7 @@ public class LocalJsonSnapshotStore : ISnapshotStore
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var file = Path.Combine(
-                _rootDir, date.Year.ToString("D4"), date.Month.ToString("D2"), $"{date.Day:D2}.jsonl");
+            var file = FileFor(date);
             if (!File.Exists(file)) continue;
 
             foreach (var line in File.ReadLines(file))

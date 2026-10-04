@@ -8,57 +8,25 @@ export interface StartupStep {
 }
 
 interface StartupScreenProps {
-  // One entry per checklist line, in display order. "Loading CPU
-  // information" / "…memory…" / "…storage…" / "…network…" all share a
-  // single `done` value (metricsLoaded) — see buildStartupSteps() below —
-  // because all four come back together in one /api/system/all payload,
-  // not as four independent requests. Faking independent completion for
-  // them would be dishonest about what the app is actually doing.
+  // One entry per checklist line, in display order.
   steps: StartupStep[];
-  // True once STARTUP_GRACE_MS has elapsed with no success on at least one
-  // of the underlying sources. When true, the checklist is replaced with a
-  // genuine error state — this is a real failure, not "still starting". The
-  // wording is always the plain-language catalog copy, never the raw error.
+  // True once STARTUP_GRACE_MS has passed with no successful load. The checklist is then
+  // replaced by an error state, using plain-language catalog copy.
   failed: boolean;
   onRetry: () => void;
 }
 
-// Builds the ordered checklist from the individual completion flags. Kept
-// as a standalone function (rather than inlined in the component) so
-// App.tsx can construct `steps` without either side having to duplicate
-// the label text or the grouping logic.
-//
-//   Starting System Info   — true the instant this screen renders; it
-//                             represents the app process itself having
-//                             started, which is a precondition for this
-//                             component existing at all, not a network call.
-//   Loading system services — Tauri's services-status event (backend
-//                             process actually answering /health).
-//                             Auto-true outside Tauri: on Linux, start-all.sh
-//                             already starts the three processes before the
-//                             browser tab even opens, so there is no
-//                             separate "starting services" phase from the
-//                             frontend's point of view there.
-//   Fetching system information — useSystemInfo's info !== null
-//   Loading CPU/memory/storage/network information — all four share
-//                             useSystemMetrics' data !== null; they are one
-//                             payload from /api/system/all, not four calls.
-//   Loading GPU information — useSystemGpu's gpus !== null
-export function buildStartupSteps(args: {
-  servicesReady: boolean;
-  infoLoaded: boolean;
-  metricsLoaded: boolean;
-  gpuLoaded: boolean;
-}): StartupStep[] {
+// Builds the ordered checklist. The four dashboard lines share one flag because they arrive
+// together in a single /api/system/all response, not as separate requests. System identity and
+// GPU details are not listed: they load in the background once the System page is opened.
+export function buildStartupSteps(args: { servicesReady: boolean; metricsLoaded: boolean }): StartupStep[] {
   return [
     { label: 'Starting System Info', done: true },
     { label: 'Loading system services', done: args.servicesReady },
-    { label: 'Fetching system information', done: args.infoLoaded },
     { label: 'Loading CPU information', done: args.metricsLoaded },
     { label: 'Loading memory information', done: args.metricsLoaded },
     { label: 'Loading storage information', done: args.metricsLoaded },
     { label: 'Loading network information', done: args.metricsLoaded },
-    { label: 'Loading GPU information', done: args.gpuLoaded },
   ];
 }
 

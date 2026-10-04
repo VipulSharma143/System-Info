@@ -1,5 +1,5 @@
 // simd_dispatch.cpp — CPU feature detection and runtime dispatch for the
-// Assembly kernels in assembly/vector_kernels.asm.
+// Assembly kernels in assembly/math and assembly/memory.
 //
 // Dispatch order: AVX2 -> SSE2 (x86-64 baseline; always available).
 // AVX2 is only selected when CPUID reports it AND the OS has enabled YMM

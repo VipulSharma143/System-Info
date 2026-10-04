@@ -26,11 +26,9 @@
 12. [Version & Changelog Management](#-version--changelog-management)
 13. [Testing / Validation](#-testing--validation)
 14. [Known Limitations](#-known-limitations)
-15. [Why Analytics Moved from Python to C#](#-why-analytics-moved-from-python-to-c)
-16. [Historical Architecture](#-historical-architecture)
-17. [Phase Log](#-phase-log)
-18. [Performance Metrics](#-performance-metrics)
-19. [Remaining Work](#-remaining-work)
+15. [Phase Log](#-phase-log)
+16. [Performance Metrics](#-performance-metrics)
+17. [Remaining Work](#-remaining-work)
 
 ---
 
@@ -280,118 +278,6 @@ Not yet verified on real machines: the full download/install/relaunch cycle on W
 
 ---
 
-## 🔀 Why Analytics Moved from Python to C#
-
-**Short version.** Analytics was a Python service for three iterations of the project. Each time the data source or the packaging changed, the Python service stayed — and kept getting more expensive to carry, because what it actually does (about 800 lines of arithmetic over files the .NET backend already writes and reads) never needed a second language, a second process, or a second port. Once the app became a double-click desktop installer, the service's costs were paid on every user's machine while its benefits were paid only during development. In 2.3.0 it was ported into the backend and deleted.
-
-### The three stages
-
-| Stage | How analytics got its data | Why it was built that way | What it cost |
-|---|---|---|---|
-| **1 — Python service on MongoDB** (Phases 7–8) | A FastAPI process queried MongoDB Atlas directly. The .NET backend proxied `/api/analytics/*` to it on `:8001` and degraded to a `503` if it was down. | The project is built one language at a time, each layer proven before the next. Statistics over history was the natural place to add Python: quick to iterate, runs as an independent restartable process. | An external account and network connection for an otherwise offline desktop app (this is what pushed storage off MongoDB — see [Storage](#-storage)). |
-| **2 — Python service reading local JSONL** (the move to local storage, Tauri-era) | The same Python service, now reading the `.jsonl` snapshot files directly from disk. | Removing MongoDB was the goal; the smallest change was to keep the service and point it at files instead of a database. | Two programs in two languages now read one file format: the backend wrote and read the files through `ISnapshotStore`, and the Python service re-implemented file discovery and parsing and had to stay in agreement with it. A proxy hop and a "service is down" UI state sat between them. And because the app now shipped as an installer, the service had to ship too (below). |
-| **3 — C# inside the backend** (2.3.0) | `AnalyticsService` reads the same files through the same `ISnapshotStore` the backend already uses. | See "Why not keep it" below. | A one-off port (and giving up Python for ad-hoc analysis inside the product). |
-
-### What shipping the Python service actually cost
-
-All of these are visible in the repository's own history and CI file, not hypotheticals:
-
-- **A frozen executable per platform.** The service had to run on machines with no Python, so CI installed Python, installed the dependencies and froze it with PyInstaller (`--onefile`) once for Windows and once for Linux — then staged, validated and bundled the result alongside the backend.
-- **A failure mode that builds cleanly and crashes on launch.** The ASGI server loads parts of itself by string name at runtime, which PyInstaller's static analysis cannot see. The build succeeds; the executable dies when started unless every such module is listed by hand in a dedicated entry-point file. That is exactly the kind of fault a green CI run does not catch.
-- **An orphan-process workaround.** A one-file executable starts by extracting an interpreter and launching it as a child, so killing the process the shell knew about could leave the real one running. The Windows Job Object hardening was partly there to guard against that.
-- **A second port, a second health check, a second timeout.** The shell polled `:8001` separately (up to 30 s in the original code) and the UI carried a separate "analytics unavailable / partial" state.
-- **A packaging bug that shipped.** Before Linux moved onto Tauri, the Linux package depended on a *system-wide* `uvicorn` and a writable `/opt` log directory, producing the `uvicorn: command not found` and `Permission denied` reports.
-- **Two parsers for one format.** Every change to the snapshot schema or timestamp format had to be right in C# and in Python.
-
-### Why not keep it
-
-1. **The work is small and generic.** Mean/min/max, a least-squares slope, run detection over a threshold, and classifying episodes. No numerical library, no model, nothing Python-specific. The C# port used none.
-2. **The backend already owns the data.** `SnapshotLogger` writes the files and `ISnapshotStore` reads them. Analytics next to them removes the duplicate reader and the proxy.
-3. **Every user paid for it; only the developer benefited.** The Python advantage — fast iteration — applies while developing. The costs above are paid on every install.
-4. **One child process is easier to make reliable than two.** The 2.3.0 audit was about an installed app that could appear to hang on launch. Removing a whole process, its port and its readiness wait removes a class of failure outright rather than hardening it.
-
-An honest caveat: **I did not measure analytics as the startup bottleneck.** The case above rests on structure — what had to be built, shipped, supervised and kept in sync — not on a benchmark. Startup timings for the installed app have not yet been taken (see [Remaining Work](#-remaining-work)).
-
-### What was done
-
-| Removed | Added / changed |
-|---|---|
-| The Python source (service, analysis scripts, entry point, requirements files) | `AnalyticsService.cs` — same maths, same thresholds, same JSON shape (snake_case keys, the same "no snapshots" short-circuit, `+00:00` timestamps) |
-| The proxy and its `HttpClient`; port `8001` | `/api/analytics/*` computed in-process, with a 5 s result cache and bounded "all time" queries |
-| PyInstaller and `pip` steps in CI (both platforms), and `setup-python` | `backend/SystemMonitor.Tests` — 41 analytics checks, including torn and malformed lines, an empty history, a full 86,400-row day and cancellation |
-| Python handling in `setup.*`, `start-all.*`, `build.sh`, `clean.sh` | The frontend's service status is `{ backend }` only (logic change, no visual change) |
-| The second supervised process and its separate readiness wait | A generic, tested supervisor that currently manages one service |
-| Python as the fake service in the supervisor tests and as the AppImage stamping tool in CI | A std-only Rust fake service; a short Node script (Node is already in that CI job) |
-
-### Trade-offs accepted
-
-- Ad-hoc analysis in a Python notebook is no longer one import away from the product's code. (Reading the `.jsonl` files from any language still works — the format is plain JSON Lines.)
-- Battery trend analysis existed only in the old scripts and was never reachable from the app or the API, so it was not ported.
-- Multi-day windows still read every line on a cache miss (see [Known Limitations](#-known-limitations)).
-
-### What would change this decision
-
-Heavy numerical work — forecasting, anomaly models, anything that genuinely wants a scientific library — would justify an *optional*, out-of-process tool. It should not be part of the shipped app: if it is ever added, it must not need to be started by the shell, must not add a port to the readiness path, and must not require a runtime on the user's machine.
-
----
-
-## 🕰️ Historical Architecture
-
-The project has gone through three earlier architectural shapes before the current one:
-
-```
-Shape 1 (Phases 2–6): Linux-only proof-of-concept
-  React ↔ .NET, then C++ native engine, then Assembly — one verified layer at a time
-
-Shape 2 (Cross-platform refactor): ISystemInfoProvider abstraction
-  adds a Windows implementation alongside Linux, still no persistence
-
-Shape 3 (Phase 8, MongoDB Atlas): adds persistent historical storage
-  SnapshotLogger.cs → MongoDB Atlas; analytics_service.py queries Mongo
-  — later fully replaced, not merely deprecated:
-  Phase 8 originally targeted PostgreSQL per the roadmap, but the team
-  switched to MongoDB Atlas mid-phase (an Atlas cluster was already
-  available from another project, and the JSONL snapshot shape mapped
-  onto Mongo documents with no relational schema design needed)
-
-Shape 3.5 (Windows packaging v1): whole-repo Inno Setup installer
-  requiring the end user to have Node/npm/Python/.NET SDK installed
-  → replaced with a self-contained publish + a C# console launcher
-  (launcher/Program.cs) that started the services and opened a browser tab
-
-Shape 4 (Windows Tauri migration): local JSONL storage (MongoDB fully
-  removed) + Tauri 2 native desktop shell on Windows, replacing the C#
-  launcher's browser-tab model; Linux packaging (AppImage/.deb) still used
-  the pre-Tauri browser-launch model at this point; most recently extended
-  with Windows GPU support and extended System Identity, and a split
-  CHANGELOG.md/CHANGELOG_ARCHIVE.md so version history stays legible as
-  it grows
-
-Shape 5 (Linux Tauri migration): the same Tauri 2 shell packages Linux
-  too. release.yml's build-linux job stopped staging start-all.sh into
-  /opt/systeminfo (the source of the sudo-for-logs and missing-system-
-  runtime problems) and instead publishes a self-contained linux-x64
-  backend plus a frozen analytics executable, stages them as Tauri
-  resources exactly like build-windows, and runs `tauri build` against
-  targets ["nsis","deb","appimage"] (Tauri skips whichever aren't
-  buildable on the current host). process.rs/commands.rs/lib.rs needed no
-  changes — the Rust shell was already fully cross-platform.
-
-Shape 6 (current — 2.3.0): analytics moves into the backend. The
-  separate analytics process, its frozen build, its port and the proxy
-  between them are deleted; the Tauri shell supervises exactly one child
-  process (the .NET backend). The supervisor is rewritten around a
-  Tauri-free core with its own tests; the native C++/Assembly layer is
-  expanded (topology, storage, fans, SSE2/AVX2 kernels with runtime
-  dispatch); releases are gated on a reusable test workflow. Why the
-  analytics move happened is told in full in "Why Analytics Moved from
-  Python to C#" above.
-```
-
-Technologies that are **historical only** and must not appear in current setup instructions: MongoDB Atlas, `MONGO_URI`, PostgreSQL (planned for Phase 8, never implemented), the Python/FastAPI analytics service and its PyInstaller build, the C# production launcher and the Inno Setup installer (both deleted in 2.3.0), and the earlier multi-workflow release pipeline (the current pipeline is one release workflow plus the reusable test workflow — see [Release Pipeline](#-release-pipeline)).
-
----
-
 ## 🗂️ Phase Log
 
 | # | Phase | Layer | Status | Summary |
@@ -503,3 +389,14 @@ Open: none of the above has run in a real installer yet (still true).
 - **Verified here:** native ctest 5/5 on Linux; `smbios_parse_test` and `smbios_loader_test` also as Windows x64 builds under Wine; parser tests clean under AddressSanitizer + UBSan; parser and loader were mutation-tested (deliberate bugs made the tests fail, including a segfault when the length clamp is removed); 510 C# checks; production frontend build; the real API run on Linux with all three endpoints exercised; headless-browser screenshots of the loaded, partial, loading and failed states.
 - **Not verified:** the live Windows firmware call on real hardware; the Windows C# provider edit (cross-reviewed only, `System.Management` could not be restored offline); any real DIMM data in the UI (the authoring sandbox has no DMI table, so the full-hardware view was driven with mocked responses); an installed build.
 - **Follow-up, same day: Linux physical RAM for unprivileged users.** Running the real app on Linux showed the Memory platform/modules sections as unavailable, as expected: the firmware table is root-only. Fix: `si_smbios_snapshot` (root helper) saves only Type 16/17 records plus the boot id to `/var/lib/system-info/smbios-memory.bin`; the native loader falls back to it when the live table is unreadable, refuses a snapshot from an earlier boot, and reports a reason code (`si_get_memory_hardware_status`) that becomes an actionable on-screen message. `packaging/linux/install-smbios-snapshot.sh` installs the helper and a systemd unit (refresh at boot). Verified: `smbios_loader_test` 101 checks (as root and as `nobody`; privacy check that machine serial/UUID never reach the file; writer permissions under umask 077; planted-symlink refusal; mutation-tested), the real backend run as `nobody` returning both modules from a root-owned snapshot, the UI rendering them, the stale-snapshot message, the installer's refusal/uninstall paths, and `systemd-analyze verify` on the unit. Not verified: the install/boot flow on a real systemd machine, and any real firmware table (the sandbox has none).
+
+---
+
+## 2026-10-03: optimization and restructuring pass
+
+- **Sampling:** CPU and network are deltas against the previous reading (no sleep inside a call); a fixed 1 s `PeriodicTimer` replaces the free-running loop; the first CPU reading (which measures the backend's own start-up) is not published; history logging starts 3 s after launch.
+- **Disk:** snapshot lines are buffered and written once per 5 s per day-file (and on shutdown); `QueryAsync` flushes first. Battery is read every 10 s.
+- **Windows provider:** split into partial files (core / Battery / Identity / Gpu); static WMI identity and the GPU adapter list are cached, only engine utilisation is live.
+- **Native:** the 3,296-line `hardware_info.cpp` is now `src/smbios/*` (platform-neutral table parsing) and `platform/{linux,windows}/*` (CPU topology, storage, fans, runtime RAM, table source, snapshot writer, provider). Internal symbols are hidden; the exported C ABI is unchanged.
+- **Assembly:** `assembly/{cpu,math,memory}/` with a shared `abi.inc`.
+- **Frontend:** startup waits only for `/api/system/all`; System identity and GPU data load when the System page is first opened; non-overview pages are lazy chunks; one `usePolling` hook replaces three duplicate fetch loops; `RamView` split into `views/ram/*`; unused `bootstrap` removed.

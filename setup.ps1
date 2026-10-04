@@ -13,14 +13,6 @@
 # missing ones via winget, builds the native engine with the Visual Studio
 # generator, installs frontend deps, sets up local storage,
 # checks ports, and offers to launch start-all.ps1.
-#
-# KNOWN GAP (flagging honestly, not hiding it): this assumes native/CMakeLists.txt
-# and the C++ source already build cleanly under MSVC and that
-# WindowsSystemInfoProvider.cs is a real implementation, not just the
-# "Available: false" stub PROJECT_STATUS.md describes. If native/build.sh
-# does `gcc`/`g++`-specific flags, or the C++ code includes <sys/...> Linux
-# headers, this step will fail loudly (by design — this script does not
-# paper over a broken native build).
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path

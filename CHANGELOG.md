@@ -12,6 +12,19 @@ All notable changes to SystemInfo are documented here.
 
 ### Known Issues
 
+## [2.4.1] - 2026-10-04
+
+### Changed
+- **Faster to open.** The dashboard now appears as soon as your main numbers (CPU, memory, storage and network) are ready. Extra details for the System page, such as your computer's model and graphics card, are no longer waited for on the loading screen. They load the first time you open that page.
+- **CPU usage shows up sooner.** The CPU figure now appears within about a second of opening the app, instead of after a few seconds.
+- **Tabs load when you need them.** Analytics, Processes, RAM, Storage, Network, Battery, System and Updates are prepared the first time you open them, so the app has less to do at startup and feels lighter.
+- **Gentler on your computer.** The app now does less work in the background and saves your history to disk in small batches instead of constantly. Your Analytics history is just as detailed as before.
+- **System page opens faster the second time.** Details that never change while the app is running (such as your computer's model and graphics adapters on Windows) are now looked up once and reused.
+- **Tidier inside.** We reorganised and cleaned up a large part of the app's internals so future updates are quicker to build and less likely to cause problems. Nothing changes in how the app looks or works.
+
+### Known Issues
+- The Windows version of this update has been checked as far as possible without a real Windows PC, but has not been run on one yet. If anything looks off on Windows, please let us know.
+
 ## [2.4.0] - 2026-10-02
 
 ### Added

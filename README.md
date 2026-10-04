@@ -83,8 +83,8 @@ flowchart TB
 | **Backend** | C#, .NET 10 Web API (Minimal APIs) | REST endpoints, platform-provider dispatch, snapshot writes, in-process analytics | Strong typing and WMI/`PerformanceCounter` access on Windows without native interop for most metrics |
 | **Native Engine** | C++17, CMake | Kernel/OS-level hardware reads exposed via P/Invoke: CPU topology/features, storage, fans, GPU/VRAM, battery; CPU benchmarking | Direct OS-level access (DXGI, sysfs, `GetLogicalProcessorInformationEx`) where a managed API isn't sufficient or fast enough |
 | **Assembly** | x86-64 NASM | Benchmark loops plus SSE2/AVX2 kernels (vector add, dot product, int32 sum/min/max, memcpy, XOR checksum) chosen at run time by CPUID/XGETBV; used by the memory-bandwidth and kernel-throughput benchmarks | Real, verifiable low-level work: every kernel is checked against a C++ reference, and the Windows x64 and System V ABIs are both assembled from the same source |
-| **Analytics** | C# (`AnalyticsService`, in-process) | Trend analysis, bottleneck detection, stats aggregation over historical snapshots | The backend already owns the snapshot files, so the analysis runs next to them: no second runtime, no extra port, no extra process. The history of how it got here is in [`PROJECT_STATUS.md`](./PROJECT_STATUS.md#-why-analytics-moved-from-python-to-c) |
-| **Storage** | Local JSON Lines files | Historical snapshot persistence | No database to install, configure, or fail to connect to — see [Storage](#-storage--historical-data) below for the MongoDB → local-file migration |
+| **Analytics** | C# (`AnalyticsService`, in-process) | Trend analysis, bottleneck detection, stats aggregation over historical snapshots | The backend already owns the snapshot files, so the analysis runs next to them: no second runtime, no extra port, no extra process. |
+| **Storage** | Local JSON Lines files | Historical snapshot persistence | No database to install, configure, or fail to connect to — see [Storage](#-storage--historical-data) below |
 | **Build / Release** | GitHub Actions (`release.yml`, `tests.yml`), Tauri's NSIS bundler, `appimagetool`, `dpkg-deb` | CI builds for both platforms, version-tag-driven GitHub Releases | One release workflow, five jobs (`version` → `tests` → `build-windows` / `build-linux` → `release`), triggered by pushing a new `CHANGELOG.md` entry; the `tests` job gates both builds |
 
 ---
@@ -123,13 +123,13 @@ System Info/
 │
 ├── native/                          # C++17 native engine (CMake)
 │   ├── include/native_engine.h      # Cross-platform C ABI (extern "C")
-│   ├── src/                         # common.cpp, windows_provider.cpp, linux_provider.cpp,
-│   │                                # simd_dispatch.cpp (CPUID + kernel dispatch, self-test),
-│   │                                # hardware_info.cpp (topology, storage volumes, fans)
+│   ├── src/                         # common.cpp, simd_dispatch.cpp (CPUID + kernel dispatch, self-test),
+│   │   └── smbios/                  # platform-neutral SMBIOS memory-table parsing + DIMM API
+│   ├── platform/{linux,windows}/    # per-OS CPU topology, storage, fans, RAM, SMBIOS source, provider
 │   └── build.sh                     # Standalone native build used by ./build.sh
 │
-├── assembly/                        # x86-64 NASM — benchmark loops + SSE2/AVX2 kernels
-│                                     # (vector add, dot, int32 sum/min/max, memcpy, XOR checksum)
+├── assembly/                        # x86-64 NASM: cpu/ (benchmark loops), math/ (vector add, dot, sum,
+│                                     # min/max), memory/ (memcpy, XOR checksum); abi.inc = arg registers
 │
 ├── tests/native/                    # C++/Assembly tests (ctest) — see "Tests" below
 ├── packaging/linux/systeminfo.png   # Source art used to generate frontend/src-tauri/icons/
@@ -141,7 +141,7 @@ System Info/
 ├── start-all.sh / start-all.ps1     # DEV-ONLY: run backend + Vite together in a browser tab
 │                                     # (the installed app never uses these; Tauri starts everything itself)
 ├── build.sh                         # Fail-fast full build/validation, including the test suites
-├── clean.sh                         # Strip build artifacts before archiving/sharing the repo
+├── clean.sh                         # Remove generated build output before archiving/sharing the repo
 │
 ├── CHANGELOG.md                     # Recent version history (source of truth for the app
 │                                     # version — see Version Management below)
@@ -279,11 +279,7 @@ npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or
 
 ## 📈 Storage & Historical Data
 
-**Before:** snapshot history was written to and read from **MongoDB Atlas** — `SnapshotLogger.cs` wrote documents, the then-separate analytics service queried Mongo directly, and a `MONGO_URI` connection string had to be configured before analytics would work at all.
-
-**Why it changed:** MongoDB Atlas added an external dependency, an account, and a network requirement to what is otherwise a fully local, offline-capable application — and mid-project the target was originally PostgreSQL before the team settled on Mongo Atlas as what was available at the time.
-
-**Now:** `ISnapshotStore` / `LocalJsonSnapshotStore` write append-only JSON Lines files at `data/snapshots/{yyyy}/{MM}/{dd}.jsonl`. `AppDataPath.cs` resolves the writable location automatically:
+`ISnapshotStore` / `LocalJsonSnapshotStore` writes append-only JSON Lines files (buffered in memory, flushed every 5 s and on shutdown) at `data/snapshots/{yyyy}/{MM}/{dd}.jsonl`. `AppDataPath.cs` resolves the writable location automatically:
 
 | Environment | Location |
 |---|---|
@@ -291,7 +287,7 @@ npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or
 | Windows (packaged) | `%LOCALAPPDATA%\SystemInfo\data` |
 | Linux (packaged) | `~/.local/share/SystemInfo/data` |
 
-`AnalyticsService` reads these `.jsonl` files directly for the requested date range; malformed lines are logged and skipped rather than crashing the request, and an "all time" query is clamped to the oldest day that actually has data. Results are cached for 5 seconds. (Analytics was a separate Python service before it moved into the backend — see [`PROJECT_STATUS.md`](./PROJECT_STATUS.md#-why-analytics-moved-from-python-to-c).) There is currently **no retention/TTL policy** — the snapshot directory grows unbounded over time (a known, documented trade-off, not a bug).
+`AnalyticsService` reads these `.jsonl` files directly for the requested date range; malformed lines are logged and skipped rather than crashing the request, and an "all time" query is clamped to the oldest day that actually has data. Results are cached for 5 seconds. There is currently **no retention/TTL policy** — the snapshot directory grows unbounded over time (a known, documented trade-off, not a bug).
 
 ---
 

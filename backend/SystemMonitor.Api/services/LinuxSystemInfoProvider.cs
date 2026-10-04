@@ -37,72 +37,78 @@ public class LinuxSystemInfoProvider : ISystemInfoProvider
     public RamDetails GetRamDetails() =>
         RamDetailsReader.Read(() => MemoryMapping.FromMeminfo(File.ReadAllLines("/proc/meminfo")));
 
-    public async Task<CpuInfo> GetCpuAsync()
+    // CPU and network rates are deltas between two readings. The previous reading is kept
+    // between calls (the background sampler is the only caller), so a call never sleeps
+    // except the very first one, which needs a short window to measure against.
+    private static readonly TimeSpan MinCpuWindow = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan MinNetWindow = TimeSpan.FromMilliseconds(250);
+    private readonly object _cpuLock = new();
+    private (long Idle, long Total, long Tick)? _prevCpu;
+
+    private static (long Idle, long Total, long Tick) ReadCpuTimes()
     {
-        (long idle, long total) ReadCpuTimes()
+        // The first line of /proc/stat is the aggregate "cpu" row: user nice system idle iowait ...
+        using var reader = new StreamReader("/proc/stat");
+        var line = reader.ReadLine() ?? throw new IOException("/proc/stat is empty");
+        long idle = 0, total = 0;
+        int field = 0;
+        foreach (var part in line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
         {
-            var line = File.ReadAllLines("/proc/stat")[0];
-            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(1)
-                             .Select(long.Parse).ToArray();
-            long idleTime = parts[3];
-            long total = parts.Sum();
-            return (idleTime, total);
+            if (field++ == 0) continue;
+            var v = long.Parse(part);
+            if (field == 5) idle = v;
+            total += v;
         }
-
-        var (idle1, total1) = ReadCpuTimes();
-        await Task.Delay(200);
-        var (idle2, total2) = ReadCpuTimes();
-
-        long idleDelta = idle2 - idle1;
-        long totalDelta = total2 - total1;
-        double usedPercent = totalDelta == 0 ? 0 : (1.0 - (double)idleDelta / totalDelta) * 100;
-
-        return new CpuInfo(Math.Round(usedPercent, 1));
+        return (idle, total, Environment.TickCount64);
     }
 
-public async Task<List<ProcessInfo>> GetProcessesAsync()
-{
-    var pidDirs = Directory.GetDirectories("/proc")
-        .Where(dir => int.TryParse(Path.GetFileName(dir), out _))
-        .ToList();
-
-    var tasks = pidDirs.Select(dir => Task.Run(() =>
+    public async Task<CpuInfo> GetCpuAsync()
     {
-        try
+        (long Idle, long Total, long Tick) prev;
+        lock (_cpuLock) prev = _prevCpu ?? ReadCpuTimes();
+        var wait = MinCpuWindow.TotalMilliseconds - (Environment.TickCount64 - prev.Tick);
+        if (wait > 0) await Task.Delay((int)wait);
+
+        var now = ReadCpuTimes();
+        lock (_cpuLock) _prevCpu = now;
+
+        long totalDelta = now.Total - prev.Total;
+        double used = totalDelta <= 0 ? 0 : (1.0 - (double)(now.Idle - prev.Idle) / totalDelta) * 100;
+        return new CpuInfo(Math.Round(used, 1));
+    }
+
+    public Task<List<ProcessInfo>> GetProcessesAsync()
+    {
+        var processes = new List<ProcessInfo>(256);
+        foreach (var dir in Directory.EnumerateDirectories("/proc"))
         {
-            var pidStr = Path.GetFileName(dir);
-            if (!int.TryParse(pidStr, out int pid)) return null;
-
-            var statusPath = Path.Combine(dir, "status");
-            if (!File.Exists(statusPath)) return null;
-
-            var lines = File.ReadAllLines(statusPath);
-            string name = lines.FirstOrDefault(l => l.StartsWith("Name:"))?.Split(':', 2)[1].Trim() ?? "unknown";
-            string vmRssLine = lines.FirstOrDefault(l => l.StartsWith("VmRSS:")) ?? "";
-            long memoryKb = 0;
-            if (vmRssLine.Length > 0)
+            if (!int.TryParse(Path.GetFileName(dir.AsSpan()), out var pid)) continue;
+            try
             {
-                var numPart = vmRssLine.Split(':', 2)[1].Replace("kB", "").Trim();
-                long.TryParse(numPart, out memoryKb);
+                string name = "unknown";
+                long rssKb = 0;
+                foreach (var line in File.ReadLines(dir + "/status"))
+                {
+                    if (line.StartsWith("Name:", StringComparison.Ordinal)) name = line[5..].Trim();
+                    else if (line.StartsWith("VmRSS:", StringComparison.Ordinal))
+                    {
+                        long.TryParse(line.AsSpan(6).Trim().TrimEnd("kB").Trim(), out rssKb);
+                        break;   // VmRSS comes after Name in the file
+                    }
+                }
+                processes.Add(new ProcessInfo(pid, name, rssKb / 1024));
             }
-
-            return new ProcessInfo(pid, name, memoryKb / 1024);
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // exited while being read
+            }
         }
-        catch
-        {
-            return null;
-        }
-    }));
 
-    var results = await Task.WhenAll(tasks);
+        processes.Sort((a, b) => b.MemoryMB.CompareTo(a.MemoryMB));
+        if (processes.Count > 50) processes.RemoveRange(50, processes.Count - 50);
+        return Task.FromResult(processes);
+    }
 
-    return results
-        .Where(p => p != null)
-        .Cast<ProcessInfo>()
-        .OrderByDescending(p => p.MemoryMB)
-        .Take(50)
-        .ToList();
-}
     public List<DiskInfo> GetDisks()
     {
         var drives = new List<DiskInfo>();
@@ -150,39 +156,41 @@ public async Task<List<ProcessInfo>> GetProcessesAsync()
         return drives;
     }
 
+    private readonly object _netLock = new();
+    private (Dictionary<string, (long Rx, long Tx)> Counters, long Tick)? _prevNet;
+
+    private static (Dictionary<string, (long Rx, long Tx)> Counters, long Tick) ReadNetStats()
+    {
+        var result = new Dictionary<string, (long, long)>();
+        foreach (var line in File.ReadLines("/proc/net/dev").Skip(2))
+        {
+            var colon = line.IndexOf(':');
+            if (colon < 0) continue;
+            var stats = line[(colon + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            result[line[..colon].Trim()] = (long.Parse(stats[0]), long.Parse(stats[8]));
+        }
+        return (result, Environment.TickCount64);
+    }
+
     public async Task<List<NetworkInfo>> GetNetworkAsync()
     {
-        Dictionary<string, (long rx, long tx)> ReadNetStats()
-        {
-            var result = new Dictionary<string, (long, long)>();
-            var lines = File.ReadAllLines("/proc/net/dev").Skip(2);
+        (Dictionary<string, (long Rx, long Tx)> Counters, long Tick) prev;
+        lock (_netLock) prev = _prevNet ?? ReadNetStats();
+        var wait = MinNetWindow.TotalMilliseconds - (Environment.TickCount64 - prev.Tick);
+        if (wait > 0) await Task.Delay((int)wait);
 
-            foreach (var line in lines)
-            {
-                var parts = line.Split(':');
-                if (parts.Length != 2) continue;
-                var iface = parts[0].Trim();
-                var stats = parts[1].Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                long rxBytes = long.Parse(stats[0]);
-                long txBytes = long.Parse(stats[8]);
-                result[iface] = (rxBytes, txBytes);
-            }
-            return result;
+        var now = ReadNetStats();
+        lock (_netLock) _prevNet = now;
+
+        double seconds = Math.Max(0.001, (now.Tick - prev.Tick) / 1000.0);
+        var interfaces = new List<NetworkInfo>(now.Counters.Count);
+        foreach (var (iface, (rx, tx)) in now.Counters)
+        {
+            var (rx0, tx0) = prev.Counters.GetValueOrDefault(iface, (rx, tx));
+            interfaces.Add(new NetworkInfo(iface,
+                Math.Round((rx - rx0) / 1024.0 / seconds, 1),
+                Math.Round((tx - tx0) / 1024.0 / seconds, 1)));
         }
-
-        var sample1 = ReadNetStats();
-        await Task.Delay(500);
-        var sample2 = ReadNetStats();
-
-        var interfaces = sample2.Keys.Select(iface =>
-        {
-            var (rx1, tx1) = sample1.GetValueOrDefault(iface, (0, 0));
-            var (rx2, tx2) = sample2[iface];
-            double rxKBps = Math.Round((rx2 - rx1) / 1024.0 / 0.5, 1);
-            double txKBps = Math.Round((tx2 - tx1) / 1024.0 / 0.5, 1);
-            return new NetworkInfo(iface, rxKBps, txKBps);
-        }).ToList();
-
         return interfaces;
     }
 
