@@ -22,5 +22,6 @@
     <Compile Include="../SystemMonitor.Api/interface/MemoryModels.cs" Link="linked/MemoryModels.cs" />
     <Compile Include="../SystemMonitor.Api/services/MemoryMapping.cs" Link="linked/MemoryMapping.cs" />
     <Compile Include="../SystemMonitor.Api/services/MemoryHealthReader.cs" Link="linked/MemoryHealthReader.cs" />
+    <Compile Include="../SystemMonitor.Api/services/SystemInfoCache.cs" Link="linked/SystemInfoCache.cs" />
   </ItemGroup>
 </Project>

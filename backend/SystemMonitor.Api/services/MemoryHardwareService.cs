@@ -10,27 +10,62 @@ namespace SystemMonitor.Api.Services;
 /// </summary>
 public sealed class MemoryHardwareService
 {
+    private const string CacheName = "memory-hardware";
     private static readonly TimeSpan FoundTtl = TimeSpan.FromHours(1);
     private static readonly TimeSpan MissingTtl = TimeSpan.FromMinutes(1);
 
     private readonly ILogger<MemoryHardwareService> _log;
-    private readonly object _gate = new();
+    private readonly SystemInfoCache _cache;
+    private readonly object _gate = new();       // guards the fields below
+    private readonly object _readGate = new();   // one native read at a time
     private MemoryHardwareInfo? _cached;
+    private MemoryHardwareInfo? _seed;           // last launch's reading, served until the first fresh read
     private long _cachedAt;
 
-    public MemoryHardwareService(ILogger<MemoryHardwareService> log) => _log = log;
+    public MemoryHardwareService(ILogger<MemoryHardwareService> log, SystemInfoCache cache)
+    {
+        _log = log;
+        _cache = cache;
+    }
+
+    /// <summary>Loads the last launch's reading, then re-reads in the background and rewrites the cache.</summary>
+    public async Task WarmUpAsync()
+    {
+        var seed = await _cache.ReadAsync<MemoryHardwareInfo>(CacheName, h => h.Available);
+        lock (_gate) { if (_cached is null) _seed = seed; }
+        await Task.Run(() => Refresh());
+    }
 
     public MemoryHardwareInfo GetHardware()
     {
         lock (_gate)
         {
-            if (_cached is { } c &&
-                TimeSpan.FromMilliseconds(Environment.TickCount64 - _cachedAt) < (c.Available ? FoundTtl : MissingTtl))
-                return c;
+            if (IsFresh()) return _cached!;
+            if (_seed is { } seed) return seed;
+        }
+        return Refresh();
+    }
 
-            _cached = Read();
-            _cachedAt = Environment.TickCount64;
-            return _cached;
+    private bool IsFresh() =>
+        _cached is { } c &&
+        TimeSpan.FromMilliseconds(Environment.TickCount64 - _cachedAt) < (c.Available ? FoundTtl : MissingTtl);
+
+    private MemoryHardwareInfo Refresh()
+    {
+        lock (_readGate)
+        {
+            lock (_gate) { if (IsFresh()) return _cached!; }   // another caller read while this one waited
+
+            var info = Read();
+            lock (_gate)
+            {
+                _cached = info;
+                _cachedAt = Environment.TickCount64;
+                _seed = null;
+            }
+            // Only a successful read is worth keeping; "unavailable" is retried instead.
+            if (info.Available) _ = _cache.WriteAsync(CacheName, info);
+            return info;
         }
     }
 

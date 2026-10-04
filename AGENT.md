@@ -12,7 +12,7 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.4.0 · **License:** none — no `LICENSE` file exists in the repo.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.5.0 · **License:** none — no `LICENSE` file exists in the repo.
 
 ## 📖 What it is
 
@@ -126,6 +126,7 @@ dotnet run --project backend/SystemMonitor.Tests   # analytics + storage + nativ
 ./build.sh                                  # fail-fast full validation build (native → backend → frontend)
 ./clean.sh                                  # strip build artifacts (node_modules/dist/bin/obj/caches) before archiving/sharing
 ```
+Startup cache: `<data>/cache/*.json` (`SystemInfoCache.cs`) holds identity/CPU model, memory modules, Windows GPU adapters and last disks/battery; a `.version` marker (schema|app version|machine) wipes it on any change. Every failure is a cache miss — never make the cache required or let it throw.
 Data dir: `./data` (dev) · `%LOCALAPPDATA%\SystemInfo\data` (Win packaged) · `~/.local/share/SystemInfo/data` (Linux packaged) — resolved by `AppDataPath.cs`, never hardcode.
 
 ## 🔢 Versioning & release

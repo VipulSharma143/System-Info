@@ -12,6 +12,12 @@ All notable changes to SystemInfo are documented here.
 
 ### Known Issues
 
+## [2.4.2] - 2026-10-04
+
+### Changed
+- **Opens even faster after the first launch.** The app now keeps a small cache of your system details (computer model, processor, memory modules, graphics adapters on Windows, and the last storage and battery readings) and shows it immediately next time, while fresh values are read in the background.
+- **Safe by design.** If the cache is deleted, damaged or can't be written, the app quietly rebuilds it. After an update, the old cache is discarded so outdated information is never shown.
+
 ## [2.4.1] - 2026-10-04
 
 ### Changed

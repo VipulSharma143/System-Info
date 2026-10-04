@@ -4,8 +4,8 @@ namespace SystemMonitor.Api.Services;
 
 /// <summary>
 /// One aggregated reading for /api/system/all.
-/// Same JSON shape the frontend already consumes, plus an additive
-/// <c>unavailable</c> list naming any subsystem that could not be read.
+/// Same JSON shape the frontend already consumes, plus additive <c>unavailable</c> and <c>cached</c>
+/// lists naming subsystems that could not be read / are shown from an earlier reading.
 /// </summary>
 public sealed record AggregateSnapshot(
     RamInfo Ram,
@@ -14,7 +14,11 @@ public sealed record AggregateSnapshot(
     List<DiskInfo> Disks,
     List<NetworkInfo> Network,
     BatteryInfo Battery,
-    IReadOnlyList<string> Unavailable);
+    IReadOnlyList<string> Unavailable,
+    IReadOnlyList<string> Cached);
+
+/// <summary>Disks and battery as last read (kept on disk between launches).</summary>
+public sealed record SlowSections(List<DiskInfo> Disks, BatteryInfo Battery);
 
 /// <summary>
 /// Builds the aggregated snapshot with per-subsystem failure isolation:
@@ -28,31 +32,58 @@ public sealed record AggregateSnapshot(
 ///  - failures are logged and reported in <c>unavailable</c> — never silently
 ///    turned into zeros. RAM (the one section the UI cannot render without)
 ///    falls back to the last good sample, or the request fails with 503 if
-///    there has never been one.
+///    there has never been one;
+///  - disks and battery can be slow on a cold start (waking drives, driver calls). If one has not answered
+///    within <see cref="CachedGrace"/> and an earlier reading exists (this run, or the previous launch's cache),
+///    that reading is returned and named in <c>cached</c> while the live read finishes for the next poll.
 /// </summary>
 public sealed class SystemSnapshotService
 {
     private static readonly TimeSpan Ttl = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan SectionTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan CachedGrace = TimeSpan.FromMilliseconds(300);
+    private static readonly long PersistIntervalMs = 30_000;
+    private const string CacheName = "dashboard";
 
     private readonly ISystemInfoProvider _provider;
     private readonly SystemMonitorBackgroundService _sampler;
     private readonly ILogger<SystemSnapshotService> _log;
+    private readonly SystemInfoCache _cache;
+    private readonly Lazy<Task> _warmUp;
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, Task> _running = new();   // only touched inside _gate
+    private readonly Dictionary<string, long> _startedAt = new(); // only touched inside _gate
     private AggregateSnapshot? _cached;
     private long _cachedAt;                                        // Environment.TickCount64
     private RamInfo? _lastRam;
+    private List<DiskInfo>? _lastDisks;
+    private BatteryInfo? _lastBattery;
+    private long _persistedAt;
 
     public SystemSnapshotService(
         ISystemInfoProvider provider,
         SystemMonitorBackgroundService sampler,
+        SystemInfoCache cache,
         ILogger<SystemSnapshotService> log)
     {
         _provider = provider;
         _sampler = sampler;
+        _cache = cache;
         _log = log;
+        _warmUp = new Lazy<Task>(() => Task.Run(LoadCachedAsync));
+    }
+
+    /// <summary>Loads the previous launch's disks/battery. Cheap, and never needed to answer a request.</summary>
+    public Task WarmUpAsync() => _warmUp.Value;
+
+    private async Task LoadCachedAsync()
+    {
+        var saved = await _cache.ReadAsync<SlowSections>(CacheName, c => c.Disks is not null && c.Battery is not null);
+        if (saved is null) return;
+        // Live results of this run always win over the file.
+        _lastDisks ??= saved.Disks;
+        _lastBattery ??= saved.Battery;
     }
 
     /// <summary>Null means RAM has never been readable: the caller should answer 503.</summary>
@@ -102,8 +133,9 @@ public sealed class SystemSnapshotService
 
         var (ram, ramOk) = await AwaitSection("ram", ramT, (RamInfo?)null, ct);
         var (processes, procOk) = await AwaitSection("processes", procT, new List<ProcessInfo>(), ct);
-        var (disks, diskOk) = await AwaitSection("disks", diskT, new List<DiskInfo>(), ct);
-        var (battery, batOk) = await AwaitSection("battery", batT, (BatteryInfo?)null, ct);
+        var cached = new List<string>();
+        var (disks, diskOk) = await AwaitSection("disks", diskT, new List<DiskInfo>(), ct, _lastDisks, cached);
+        var (battery, batOk) = await AwaitSection("battery", batT, (BatteryInfo?)null, ct, _lastBattery, cached);
 
         if (!procOk) unavailable.Add("processes");
         if (!diskOk) unavailable.Add("disks");
@@ -145,8 +177,24 @@ public sealed class SystemSnapshotService
             network = new List<NetworkInfo>();
         }
 
-        return new AggregateSnapshot(ram, cpu, processes ?? new(), disks ?? new(), network, battery, unavailable);
+        if (!cached.Contains("disks") && diskOk && disks is not null) _lastDisks = disks;
+        if (!cached.Contains("battery") && batOk && battery is not null) _lastBattery = battery;
+        PersistIfDue(cached);
+
+        return new AggregateSnapshot(ram, cpu, processes ?? new(), disks ?? new(), network, battery, unavailable, cached);
     }
+
+    private void PersistIfDue(List<string> cached)
+    {
+        if (cached.Count > 0 || _lastDisks is null || _lastBattery is null) return;
+        var now = Environment.TickCount64;
+        if (_persistedAt != 0 && now - _persistedAt < PersistIntervalMs) return;
+        _persistedAt = now;
+        _ = _cache.WriteAsync(CacheName, new SlowSections(_lastDisks, _lastBattery));
+    }
+
+    private TimeSpan Age(string name) =>
+        _startedAt.TryGetValue(name, out var at) ? TimeSpan.FromMilliseconds(Environment.TickCount64 - at) : TimeSpan.Zero;
 
     private Task<T> StartSection<T>(string name, Func<Task<T>> work)
     {
@@ -156,13 +204,28 @@ public sealed class SystemSnapshotService
         }
         var task = Task.Run(work);          // off the request thread; sync WMI/IO never blocks Kestrel
         _running[name] = task;
+        _startedAt[name] = Environment.TickCount64;
         return task;
     }
 
-    private async Task<(T? Value, bool Ok)> AwaitSection<T>(string name, Task<T> task, T? fallback, CancellationToken ct)
+    private async Task<(T? Value, bool Ok)> AwaitSection<T>(
+        string name, Task<T> task, T? fallback, CancellationToken ct, T? lastKnown = null, List<string>? cached = null)
+        where T : class
     {
         try
         {
+            // Slow read with an earlier reading to show: answer with that now (still inside the section timeout,
+            // so a wedged read is eventually reported as unavailable, not shown as stale forever).
+            if (lastKnown is not null && cached is not null && !task.IsCompleted && Age(name) < SectionTimeout)
+            {
+                await Task.WhenAny(task, Task.Delay(CachedGrace, ct));
+                if (!task.IsCompleted)
+                {
+                    cached.Add(name);
+                    return (lastKnown, true);
+                }
+            }
+
             var value = await task.WaitAsync(SectionTimeout, ct);
             return (value, true);
         }

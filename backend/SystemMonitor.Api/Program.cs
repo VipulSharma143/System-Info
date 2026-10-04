@@ -4,14 +4,12 @@ using SystemMonitor.Api.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Local history: one store instance for the app's lifetime (see AppDataPath for the location).
 var dataDir = AppDataPath.ResolveAndEnsureCreated();
 Console.WriteLine($"[Startup] Local data directory: {dataDir}");
 var snapshotStore = new LocalJsonSnapshotStore(dataDir);
 SnapshotLogger.Initialize(snapshotStore);
 builder.Services.AddSingleton<ISnapshotStore>(snapshotStore);
 
-// Register the correct platform-specific provider at startup
 if (OperatingSystem.IsWindows())
 {
     builder.Services.AddSingleton<ISystemInfoProvider, WindowsSystemInfoProvider>();
@@ -24,6 +22,10 @@ else
 {
     throw new PlatformNotSupportedException("This application only supports Windows and Linux.");
 }
+// On-disk cache for slow-to-collect system info (see SystemInfoCache); lives beside the history.
+builder.Services.AddSingleton(sp => new SystemInfoCache(
+    Path.Combine(dataDir, "cache"), sp.GetRequiredService<ILogger<SystemInfoCache>>()));
+builder.Services.AddSingleton<SystemInfoService>();
 builder.Services.AddSingleton<SystemMonitorBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemMonitorBackgroundService>());
 builder.Services.AddSingleton<SystemSnapshotService>();
@@ -38,12 +40,8 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins(
                   "http://localhost:5173",   // `npm run dev` (Vite)
-                  "http://tauri.localhost",  // Tauri 2's default Windows WebView2 origin
-                                              // for the bundled production frontend — see
-                                              // frontend/src/lib/apiConfig.ts for why the
-                                              // Tauri build talks to this fixed port instead
-                                              // of a same-origin relative path.
-                  "tauri://localhost")       // non-Windows Tauri targets (custom URI scheme)
+                  "http://tauri.localhost",  // Tauri on Windows (WebView2)
+                  "tauri://localhost")       // Tauri on Linux
               .AllowAnyMethod()
               .AllowAnyHeader();
     });
@@ -56,13 +54,9 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-// No HTTPS redirection: the backend only listens on plain loopback HTTP, so the
-// middleware could never find an https port and just logged a warning per request.
 app.UseCors("AllowFrontend");
 
-// Cheap, dependency-free readiness probe for the Tauri process manager
-// (src-tauri/src/supervisor.rs) — deliberately NOT under /api/system so it
-// never touches ISystemInfoProvider or the background sampler.
+// Readiness probe for the Tauri supervisor; touches no provider.
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
    .WithName("HealthCheck");
 
@@ -71,11 +65,7 @@ app.MapNativeEndpoints();
 app.MapAnalyticsEndpoints();
 app.MapSpeedTestEndpoints();
 
-// Production: serve the React production build (frontend/dist, copied to
-// wwwroot at publish time — see SystemMonitor.Api.csproj) directly from the
-// backend, so the packaged app is a single process with no `npm run dev`
-// dependency. In development wwwroot won't exist (the frontend runs
-// separately via Vite on :5173), so this is skipped rather than erroring.
+// Packaged app: serve the built frontend from wwwroot (absent in development).
 var webRootPath = app.Environment.WebRootPath;
 if (!string.IsNullOrEmpty(webRootPath) && Directory.Exists(webRootPath))
 {
@@ -84,19 +74,24 @@ if (!string.IsNullOrEmpty(webRootPath) && Directory.Exists(webRootPath))
     app.MapFallbackToFile("index.html");
 }
 
-// Pay the first-call cost of WMI / performance counters now, in the background,
-// instead of on the first /api/system/all request the UI makes.
+// Background warm-up, so the first requests find their data ready. RAM first (cheapest, needed by the
+// dashboard); the cache loads and fresh reads then run once the server is already listening.
 _ = Task.Run(async () =>
 {
     try
     {
-        var provider = app.Services.GetRequiredService<ISystemInfoProvider>();
-        await provider.GetRamAsync();
+        await app.Services.GetRequiredService<ISystemInfoProvider>().GetRamAsync();
     }
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "Provider warm-up failed (non-fatal).");
     }
 });
+
+app.Lifetime.ApplicationStarted.Register(() => _ = Task.WhenAll(
+    app.Services.GetRequiredService<SystemSnapshotService>().WarmUpAsync(),
+    app.Services.GetRequiredService<SystemInfoService>().WarmUpAsync(),
+    app.Services.GetRequiredService<MemoryHardwareService>().WarmUpAsync())
+    .ContinueWith(t => app.Logger.LogWarning(t.Exception, "Cache warm-up failed (non-fatal)."), TaskContinuationOptions.OnlyOnFaulted));
 
 app.Run();

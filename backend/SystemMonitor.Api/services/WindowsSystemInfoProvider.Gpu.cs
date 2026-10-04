@@ -29,6 +29,16 @@ public partial class WindowsSystemInfoProvider
         return AttachEngineUsage(adapters);
     }
 
+    // Start-up cache hooks (see SystemInfoService): seed with the last launch's list, then re-read.
+    public void SeedGpuAdapters(List<GpuInfo> adapters) => _gpuAdapters ??= adapters;
+
+    public List<GpuInfo> RefreshGpuAdapters()
+    {
+        var adapters = ReadAdapters();
+        if (adapters.Count > 0) _gpuAdapters = adapters;
+        return adapters;
+    }
+
     private List<GpuInfo> ReadAdapters()
     {
         var gpus = new List<GpuInfo>();

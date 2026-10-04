@@ -78,34 +78,13 @@ app.MapGet("/api/system/all", async (SystemSnapshotService snapshots, Cancellati
 // Static host/hardware identification for the System page. Deliberately
 // separate from /api/system/all: none of this changes while the app runs,
 // so the frontend fetches it once instead of re-polling it every 2s.
-app.MapGet("/api/system/info", (ISystemInfoProvider provider) =>
+app.MapGet("/api/system/info", async (SystemInfoService info) =>
 {
-    // Only cpuModel comes from the native engine now — the previous
-    // "coreCount" return value from get_cpu_info() was actually a logical
-    // processor/thread count (GetSystemInfo().dwNumberOfProcessors on
-    // Windows, a count of "processor" lines in /proc/cpuinfo on Linux), not
-    // physical cores, and it duplicated logicalProcessors below under a
-    // misleading name. True physical core count now comes from
-    // identity.PhysicalCores (Win32_Processor on Windows, /proc/cpuinfo
-    // grouped by socket on Linux — see the provider implementations).
-    string cpuModel;
-    try
-    {
-        var buffer = new System.Text.StringBuilder(256);
-        Native.NativeInterop.GetCpuInfo(buffer, buffer.Capacity);
-        cpuModel = buffer.ToString();
-    }
-    catch
-    {
-        // Native engine unavailable — report honestly rather than guessing.
-        cpuModel = "";
-    }
-
-    // Win32_ComputerSystem/Win32_BIOS/Win32_OperatingSystem/Win32_Processor on
-    // Windows (spec §6-§8); best-effort DMI/os-release/proc reads on Linux.
-    // One optional field failing here (see provider implementations) never
-    // blanks the rest — each is independently null-safe.
-    var identity = provider.GetSystemIdentity();
+    // Identity and CPU model come from SystemInfoService (last launch's cache first, refreshed in the
+    // background). Each optional field is independently null-safe: one failing never blanks the rest, and
+    // an unavailable value is null, never a fabricated placeholder.
+    var data = await info.GetAsync();
+    var identity = SystemInfoService.WithLiveUptime(data.Identity);
 
     return new
     {
@@ -114,13 +93,11 @@ app.MapGet("/api/system/info", (ISystemInfoProvider provider) =>
         processArchitecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
         frameworkDescription = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
         machineName = Environment.MachineName,
-        cpuModel = string.IsNullOrWhiteSpace(cpuModel) ? null : cpuModel,
+        cpuModel = data.CpuModel,
         physicalCores = identity.PhysicalCores,
         logicalProcessors = Environment.ProcessorCount,
         appVersion = System.Reflection.Assembly.GetExecutingAssembly()
             .GetName().Version?.ToString() ?? "unknown",
-        // Extended identity (spec §6-§8, §24) — null when the underlying
-        // query is unavailable, never a fabricated placeholder.
         manufacturer = identity.Manufacturer,
         model = identity.Model,
         biosVersion = identity.BiosVersion,
