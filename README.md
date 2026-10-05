@@ -30,6 +30,7 @@ There is no backend cloud service, no account, and no external database. Everyth
 ## ✨ Features
 
 - **Live dashboard** — CPU, RAM, disk, network, and process metrics, polled and cached server-side, with a `Live · updated Ns ago` freshness indicator that degrades through `Reconnecting` → `Offline` so a stale reading is never mistaken for a current one.
+- **Fast startup from cache** — the backend keeps a small versioned cache of slow-to-read system details (`<data>/cache`), and the UI remembers the last dashboard readings, so the window shows data immediately on later launches while fresh values load in the background. A missing, corrupt, outdated or unwritable cache is silently rebuilt.
 - **System identity** — computer name, manufacturer, model, BIOS version, Windows edition/build, architecture, and uptime — read from `Win32_ComputerSystem`/`Win32_BIOS`/`Win32_OperatingSystem` on Windows, DMI sysfs + `/etc/os-release` on Linux.
 - **GPU detection** — every display adapter detected (multi-GPU laptops included), with driver info, resolution/refresh rate, and live per-engine utilization (3D, Copy, VideoDecode, …) rather than one fabricated "GPU usage" number.
 - **Real battery telemetry on Windows** — charge, charging state, voltage, remaining/full capacity, and cycle count read via the battery class driver's IOCTL interface (`IOCTL_BATTERY_QUERY_TAG`/`_INFORMATION`/`_STATUS`) — the same interface `powercfg /batteryreport` uses.
@@ -95,15 +96,24 @@ flowchart TB
 System Info/
 ├── frontend/                      # React 19 + TypeScript + Vite dashboard
 │   ├── src/
+│   │   ├── App.tsx                 # Startup gate, navigation, lazy-mounted pages
 │   │   ├── components/
-│   │   │   ├── views/              # OverviewView, AnalyticsView, ProcessesView,
-│   │   │   │                       # StorageView, NetworkView, BatteryView, SystemView, UpdatesView
-│   │   │   ├── common/              # Shared design-system primitives (Panel, InfoRow,
-│   │   │   │                       # StatTile, Sparkline, UsageBar, States, Table, ...)
-│   │   │   └── layout/              # AppShell, Sidebar, TopBar, ServiceControls
-│   │   ├── hooks/                   # useSystemMetrics, useSystemInfo, useSystemGpu,
-│   │   │                            # useAnalytics, useSpeedTest, useServiceControl, useUpdater, ...
-│   │   └── lib/                     # apiConfig.ts (env-aware API base), tauri.ts, format.ts
+│   │   │   ├── views/              # One thin page per section: OverviewView, AnalyticsView, ProcessesView,
+│   │   │   │   │                   # RamView, StorageView, NetworkView, BatteryView, SystemView, UpdatesView
+│   │   │   │   └── <view>/         # Each page's sections: overview/, analytics/, ram/, storage/,
+│   │   │   │                       # network/, battery/, system/, updates/
+│   │   │   ├── common/             # Design-system primitives: Panel, MetricCard, Sparkline, UsageBar,
+│   │   │   │                       # UsageRing, States, Table, Segmented, Button, Primitives, ...
+│   │   │   ├── layout/             # AppShell, Sidebar, TopBar, StartupScreen, ServiceControls, UpdateBanner
+│   │   │   └── *.tsx               # SpeedTestCard (used by NetworkView) and older copies of the
+│   │   │                           # analytics components that nothing imports any more
+│   │   ├── hooks/                  # usePolling (the one fetch/poll/retry loop), useSystemMetrics, useSystemInfo,
+│   │   │                           # useSystemGpu, useAnalytics, useSpeedTest, useServiceControl, useUpdater,
+│   │   │                           # useDashboardHistory, useProcessHistory, useFailureAlerts, useTheme, ...
+│   │   ├── lib/                    # apiConfig.ts (env-aware API base), api.ts, persisted.ts (startup cache),
+│   │   │                           # share.ts, format.ts, hues.ts, sections.ts, errors.ts, alerts.ts, tauri.ts
+│   │   ├── styles/                 # tokens.css, base.css, components.css, alerts.css
+│   │   └── types/                  # system.ts, analytics.ts, speedtest.ts
 │   └── src-tauri/                   # Tauri 2 desktop shell (Rust)
 │       ├── src/                     # main.rs, lib.rs, supervisor.rs (lifecycle core),
 │       │                            # process.rs (resource lookup, command building), commands.rs
@@ -111,46 +121,50 @@ System Info/
 │
 ├── backend/
 │   ├── SystemMonitor.Api/           # .NET 10 Minimal API
-│   │   ├── Endpoints/               # SystemEndpoints, AnalyticsEndpoints,
-│   │   │                            # NativeEndpoints, SpeedTestEndpoints
-│   │   ├── services/                # WindowsSystemInfoProvider, LinuxSystemInfoProvider,
-│   │   │                            # SystemMonitorBackgroundService, SystemSnapshotService,
-│   │   │                            # AnalyticsService, LocalJsonSnapshotStore, SnapshotLogger,
-│   │   │                            # WindowsBatteryInterop, AppDataPath
+│   │   ├── Program.cs
+│   │   ├── Endpoints/               # SystemEndpoints, AnalyticsEndpoints, NativeEndpoints, SpeedTestEndpoints
+│   │   ├── services/                # Providers: LinuxSystemInfoProvider, WindowsSystemInfoProvider (+ .Battery,
+│   │   │                            #   .Gpu, .Identity partials), WindowsBatteryInterop
+│   │   │                            # Snapshots & startup cache: SystemSnapshotService, SystemInfoService, SystemInfoCache
+│   │   │                            # Memory: MemoryHardwareService, MemoryHealthReader, MemoryMapping, RamDetailsReader
+│   │   │                            # History: SystemMonitorBackgroundService, SnapshotLogger, LocalJsonSnapshotStore,
+│   │   │                            #   AnalyticsService; paths: AppDataPath
 │   │   ├── interface/               # ISystemInfoProvider, ISnapshotStore
 │   │   └── Native/                  # NativeInterop.cs (P/Invoke), NativeKernels.cs (safe span wrappers)
-│   └── SystemMonitor.Tests/         # dependency-free test runner: analytics, storage, native wrappers
+│   └── SystemMonitor.Tests/         # dependency-free test runner: analytics, storage, startup cache, memory, native wrappers
 │
 ├── native/                          # C++17 native engine (CMake)
 │   ├── include/native_engine.h      # Cross-platform C ABI (extern "C")
-│   ├── src/                         # common.cpp, simd_dispatch.cpp (CPUID + kernel dispatch, self-test),
+│   ├── src/                         # common.cpp, simd_dispatch.cpp (CPUID + kernel dispatch, self-test), internal.h
 │   │   └── smbios/                  # platform-neutral SMBIOS memory-table parsing + DIMM API
-│   ├── platform/{linux,windows}/    # per-OS CPU topology, storage, fans, RAM, SMBIOS source, provider
+│   ├── platform/{linux,windows}/    # per-OS cpu, storage, fan, memory, smbios_source, snapshot_writer, provider
+│   ├── tools/                       # smbios_snapshot.cpp (Linux helper that saves the memory-only SMBIOS records)
 │   └── build.sh                     # Standalone native build used by ./build.sh
 │
 ├── assembly/                        # x86-64 NASM: cpu/ (benchmark loops), math/ (vector add, dot, sum,
-│                                     # min/max), memory/ (memcpy, XOR checksum); abi.inc = arg registers
+│                                    # min/max), memory/ (memcpy, XOR checksum); abi.inc = arg registers
 │
-├── tests/native/                    # C++/Assembly tests (ctest) — see "Tests" below
-├── packaging/linux/systeminfo.png   # Source art used to generate frontend/src-tauri/icons/
+├── tests/native/                    # C++/Assembly tests (ctest): kernel_selftest, memory_info_test,
+│                                    # memory_hardware_test, smbios_parse_test, smbios_loader_test
+├── packaging/linux/                 # systeminfo.png (icon source), install-smbios-snapshot.sh (one-time RAM-module setup)
 ├── scripts/                         # sync-version.mjs, check-version.mjs,
-│                                     # archive-changelog.mjs, make-update-manifest.mjs
+│                                    # archive-changelog.mjs, make-update-manifest.mjs
 ├── .github/workflows/               # release.yml (version → tests → build → release), tests.yml
 │
 ├── setup.sh / setup.ps1             # DEV-ONLY: first-time developer prerequisite install
 ├── start-all.sh / start-all.ps1     # DEV-ONLY: run backend + Vite together in a browser tab
-│                                     # (the installed app never uses these; Tauri starts everything itself)
+│                                    # (the installed app never uses these; Tauri starts everything itself)
 ├── build.sh                         # Fail-fast full build/validation, including the test suites
 ├── clean.sh                         # Remove generated build output before archiving/sharing the repo
 │
 ├── CHANGELOG.md                     # Recent version history (source of truth for the app
-│                                     # version — see Version Management below)
+│                                    # version — see Version Management below)
 ├── CHANGELOG_ARCHIVE.md             # Everything older, split out to keep CHANGELOG.md short
 ├── PROJECT_STATUS.md                # Detailed engineering status & history (this file's sibling)
 └── AGENT.md                         # Fast-load technical summary for AI coding agents
 ```
 
-`database/` and `docs/` currently exist as **empty placeholder directories**. Tests live next to what they test (see [Tests](#-tests)).
+There is no database directory. `docs/` is an empty placeholder. Tests live next to what they test (see [Tests](#-tests)).
 
 ---
 

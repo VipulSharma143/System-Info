@@ -52,11 +52,12 @@ function Page({ active, children }: { active: boolean; children: ReactNode }) {
 }
 
 function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
-  const { data, error, connection, lastUpdated, startupError: metricsStartupError } = useSystemMetrics();
-  const history = useDashboardHistory(data);
+  const { data, stale, error, connection, lastUpdated, startupError: metricsStartupError } = useSystemMetrics();
+  const liveData = stale ? null : data;
+  const history = useDashboardHistory(liveData);
   const { status: serviceStatus } = useServiceControl();
   const { theme, toggle } = useTheme();
-  const { findNearest } = useProcessHistory(data?.cpu.usedPercent, data?.processes);
+  const { findNearest } = useProcessHistory(liveData?.cpu.usedPercent, liveData?.processes);
 
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
   const [userCollapsed, setUserCollapsed] = useState(false);
@@ -79,7 +80,7 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
 
   // One updater for the whole app: the rail badge, the banner and the Updates tab read the same state.
   // Automatic checks begin only once the dashboard has loaded, so they never compete with startup.
-  const updater = useUpdater(data !== null);
+  const updater = useUpdater(liveData !== null);
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const updateAvailable = updater.phase === 'available' && updater.available !== null;
 
@@ -98,7 +99,7 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
 
   // In the desktop shell the backend is a child process whose readiness arrives as an event.
   const servicesReady = !isTauri() || serviceStatus.backend === 'running';
-  const metricsLoaded = data !== null;
+  const metricsLoaded = liveData !== null;
   // A genuine startup failure exists only before the first successful load; afterwards a disconnect
   // is handled by the offline banner.
   const startupFailed = !metricsLoaded && Boolean(metricsStartupError);
@@ -113,7 +114,7 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
     quiet: updater.phase === 'installing' || (isTauri() && serviceStatus.backend !== 'running'),
   });
 
-  if (!data) {
+  if (!data || startupFailed) {
     return (
       <StartupScreen
         steps={buildStartupSteps({ servicesReady, metricsLoaded })}
@@ -169,7 +170,7 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
         <OverviewView data={data} history={history} />
       </Activity>
       {show('analytics', <AnalyticsView findNearest={findNearest} />)}
-      {show('processes', <ProcessesView processes={data.processes} />)}
+      {show('processes', stale ? <LoadingState /> : <ProcessesView processes={data.processes} />)}
       {show('ram', <RamView active={activeSection === 'ram'} />)}
       {show('storage', <StorageView disks={data.disks} />)}
       {show('network', <NetworkView network={data.network} history={history} />)}

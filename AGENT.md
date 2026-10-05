@@ -12,7 +12,7 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.5.0 · **License:** none — no `LICENSE` file exists in the repo.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.4.4 · **License:** none — no `LICENSE` file exists in the repo.
 
 ## 📖 What it is
 
@@ -59,9 +59,14 @@ frontend/src/          React app: components/{views,common,layout}, hooks/, lib/
                        the identity of unchanged sections (lib/share.ts) so memo()'d panels skip renders. Visited pages stay mounted inside
                        React <Activity>, which pauses their effects/polling while hidden. Never put numbers in raw `toFixed` per page —
                        use lib/format.ts.
+                       Startup cache (frontend): lib/persisted.ts keeps the last /api/system/all snapshot (minus processes) in localStorage,
+                       keyed by schema + APP_VERSION, so the dashboard renders before the backend answers; `stale` marks it until live data
+                       arrives, and live-only features (history, updater, Processes) ignore it. Any miss is silent.
+                       components/ also holds SpeedTestCard plus four older analytics files (BottleneckTimeline, SpikeDetail,
+                       StatsSummary, TrendSummary) that nothing imports — the live ones are in views/analytics/.
   views/                OverviewView, AnalyticsView, ProcessesView, RamView, StorageView, NetworkView, BatteryView, SystemView, UpdatesView
   common/                Shared design-system primitives: Panel, MetricCard, Sparkline, UsageBar, States, Table, Segmented, StatusIndicator
-  hooks/                 useSystemMetrics, useSystemInfo, useSystemGpu, useAnalytics, useSpeedTest, useServiceControl, useUpdater, useTheme
+  hooks/                 usePolling (the one fetch loop; optional `persist` cache), useSystemMetrics, useSystemInfo, useSystemGpu, useAnalytics, useSpeedTest, useServiceControl, useUpdater, useTheme
 frontend/src-tauri/     Rust shell: supervisor.rs (Tauri-free lifecycle core), process.rs (resource lookup + command building), commands.rs
                         (start_services/stop_services/get_service_status/exit_app — ONLY 4 IPC commands, deliberately no
                         tauri-plugin-shell / no generic command execution); supervisor-tests/ = std-only test crate for supervisor.rs
@@ -69,7 +74,8 @@ backend/SystemMonitor.Api/
   Endpoints/            SystemEndpoints, AnalyticsEndpoints, NativeEndpoints, SpeedTestEndpoints
   services/             WindowsSystemInfoProvider / LinuxSystemInfoProvider, SystemMonitorBackgroundService, SystemSnapshotService
                          (/api/system/all isolation), AnalyticsService, LocalJsonSnapshotStore, SnapshotLogger,
-                         WindowsBatteryInterop, AppDataPath
+                         WindowsBatteryInterop, AppDataPath, SystemInfoService + SystemInfoCache (startup cache),
+                         MemoryHardwareService/MemoryHealthReader/MemoryMapping/RamDetailsReader
   interface/             ISystemInfoProvider, ISnapshotStore
   Native/                 NativeInterop.cs (P/Invoke bridge), NativeKernels.cs (safe span wrappers + C# reference implementations)
 backend/SystemMonitor.Tests/  dependency-free test runner (analytics, storage, native wrappers); links sources instead of referencing the Api project
@@ -78,8 +84,8 @@ native/                  C++ engine: include/native_engine.h (C ABI), src/common
 assembly/                NASM: cpu/ (benchmark_loop, simd_loop, get_constant), math/vector_math.asm, memory/memory_kernels.asm (SSE2/AVX2), abi.inc
 scripts/                 sync-version.mjs, check-version.mjs, archive-changelog.mjs, make-update-manifest.mjs
 tests/native/            C++/Assembly tests (ctest)
-packaging/linux/         only systeminfo.png (icon source). The AppImage's AppRun is generated inline by release.yml.
-database/, docs/         Empty placeholders.
+packaging/linux/         systeminfo.png (icon source) + install-smbios-snapshot.sh (one-time Linux RAM-module setup).
+docs/                    Empty placeholder (there is no database/ directory).
 ```
 
 ## 🏗️ Architecture
@@ -168,7 +174,7 @@ Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job
 
 Windows physical-RAM reader (`si_dmi_load_table` → `GetSystemFirmwareTable('RSMB')` → `si_dmi_extract_rsmb`) and the Windows C# runtime-RAM provider — the shared SMBIOS parser and the header-stripping are unit-tested (`smbios_parse_test`, `smbios_loader_test`, also run as Windows builds under Wine), but the live Windows API call has never returned a real table anywhere (Wine has no DMI source in the authoring sandbox). Linux physical RAM needs the one-time snapshot setup (see README) and degrades to an explained "unavailable" without it. The installer's systemd unit passes `systemd-analyze verify`, but the install/boot flow has not been run on a real systemd machine.
 
-Windows battery IOCTL detail + DXGI-linked GPU reads — implemented, not hardware-verified (no Windows/dotnet toolchain in the environment that most recently extended them; Windows cross-compilation via mingw-w64 was verified in isolation only). GPU detection is split across two unreconciled code paths (Windows structured provider vs. Linux native-engine path — see Architecture above). Multi-GPU engine-to-adapter attribution on Windows (parses `_phys_N_` from perf-counter instance names) is unverified against real dual-GPU hardware. No retention/TTL on snapshot storage (grows unbounded — accepted tradeoff, not a bug to silently fix). Automated tests exist for the native/Assembly layer, the C# analytics + native wrappers, and the Rust supervisor, and CI gates releases on them; there are no frontend tests and nothing automatically exercises an *installed* build — the 2.3.0 changes (supervisor rewrite, in-process analytics, new native functions) had not been run from a real installer when this was written. The Windows-only C# (WMI provider) has only ever been compiled by CI. `docs/`, `database/` are empty placeholders. No `LICENSE` file.
+Windows battery IOCTL detail + DXGI-linked GPU reads — implemented, not hardware-verified (no Windows/dotnet toolchain in the environment that most recently extended them; Windows cross-compilation via mingw-w64 was verified in isolation only). GPU detection is split across two unreconciled code paths (Windows structured provider vs. Linux native-engine path — see Architecture above). Multi-GPU engine-to-adapter attribution on Windows (parses `_phys_N_` from perf-counter instance names) is unverified against real dual-GPU hardware. No retention/TTL on snapshot storage (grows unbounded — accepted tradeoff, not a bug to silently fix). Automated tests exist for the native/Assembly layer, the C# analytics + native wrappers, and the Rust supervisor, and CI gates releases on them; there are no frontend tests and nothing automatically exercises an *installed* build — the 2.3.0 changes (supervisor rewrite, in-process analytics, new native functions) had not been run from a real installer when this was written. The Windows-only C# (WMI provider) has only ever been compiled by CI. `docs/` is an empty placeholder. No `LICENSE` file.
 
 ## 📜 Behavioral contracts (do not break)
 

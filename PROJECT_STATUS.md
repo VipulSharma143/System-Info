@@ -334,6 +334,7 @@ Not yet verified on real machines: the full download/install/relaunch cycle on W
 - [ ] Verify the Linux Tauri packaging (`tauri build` producing `.deb`/`.AppImage`) end to end on real GitHub Actions infrastructure and a real Linux install, beyond this pass's own review of the workflow file
 - [ ] Add a retention/TTL policy for `data/snapshots/`
 - [ ] Implement full SMART storage health (needs root)
+- [ ] Delete the unused root-level analytics components in `frontend/src/components/` (see the 2026-10-05 note)
 - [ ] Take real startup timings from an installed build on Windows and Linux (`logs/startup.log` records the stages) and compare against the pre-2.3.0 behaviour
 - [ ] Run the Windows installer, `.deb` and AppImage on real machines: double-click launch, shutdown, restart, uninstall/reinstall, a stale backend left over from a crash
 - [ ] Compile and exercise the Windows-only C# (WMI provider, drive-type filter) and run the native tests on real Windows/MSVC — CI will do the compile, not a real-hardware run
@@ -400,3 +401,14 @@ Open: none of the above has run in a real installer yet (still true).
 - **Native:** the 3,296-line `hardware_info.cpp` is now `src/smbios/*` (platform-neutral table parsing) and `platform/{linux,windows}/*` (CPU topology, storage, fans, runtime RAM, table source, snapshot writer, provider). Internal symbols are hidden; the exported C ABI is unchanged.
 - **Assembly:** `assembly/{cpu,math,memory}/` with a shared `abi.inc`.
 - **Frontend:** startup waits only for `/api/system/all`; System identity and GPU data load when the System page is first opened; non-overview pages are lazy chunks; one `usePolling` hook replaces three duplicate fetch loops; `RamView` split into `views/ram/*`; unused `bootstrap` removed.
+
+---
+
+## 2026-10-05: frontend startup cache (2.4.4)
+
+- **What:** `lib/persisted.ts` stores the last `/api/system/all` snapshot (processes excluded) in `localStorage` with a schema + app-version envelope, a 7-day limit and shape validation; `usePolling` seeds its first state from it and writes at most every 15 s and on `pagehide`. The dashboard renders from it immediately and shows "Connecting" until a live response replaces it.
+- **Why:** the backend already cached system info on disk (2.4.3), but the window still sat on the loading screen until `/api/system/all` answered, so that cache could not shorten what the user saw.
+- **Safety:** missing, corrupt, other-version, expired, wrong-shape and blocked-storage cases are all misses that remove the entry. Verified with a Node test of those cases. Live history, process history, the updater and the Processes tab ignore cached data.
+- **Not measured:** no timings were taken (no .NET, Rust or browser in the authoring environment). Time-to-first-dashboard before/after on Windows and Linux is still open (see Remaining Work).
+- **Docs:** README project layout rewritten to match the repo (view sub-folders, hooks, lib, styles, services, native tools, tests); `AGENT.md` version corrected to 2.4.4.
+- **Known leftover:** `frontend/src/components/{BottleneckTimeline,SpikeDetail,StatsSummary,TrendSummary}.tsx` are older copies that nothing imports; the live ones are in `views/analytics/`.

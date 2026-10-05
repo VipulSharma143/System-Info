@@ -31,10 +31,7 @@ rxKBps: number;
 txKBps: number;
 }
 
-// Mirrors BatteryInfo (Interface/ISystemInfoProvider.cs). Every numeric/string
-// field is nullable because C#'s System.Text.Json serializes a record's null
-// properties as JSON null — on a desktop (or Windows, until implemented),
-// available is false and every other field comes through as null, not 0/"".
+// Mirrors BatteryInfo in the backend. Every field except `available` is null when the platform does not report it.
 export interface BatteryInfo {
 available: boolean;
 status: string | null;
@@ -50,10 +47,7 @@ powerWatts: number | null;
 model: string | null;
 manufacturer: string | null;
 note: string | null;
-// "mAh" on Linux (sysfs charge_* files) or "mWh" on Windows (the battery
-// class driver reports energy, never charge). The capacity fields above
-// are named *Mah for backwards compatibility with the existing contract,
-// so the UI must read this to label them correctly rather than assuming.
+// "mAh" on Linux, "mWh" on Windows; the *Mah fields keep their name for contract compatibility.
 capacityUnit: string | null;
 }
 
@@ -65,18 +59,11 @@ processArchitecture: string;
 frameworkDescription: string;
 machineName: string;
 cpuModel: string | null;
-// True physical CPU core count (Win32_Processor.NumberOfCores on Windows,
-// /proc/cpuinfo grouped by socket on Linux — see WindowsSystemInfoProvider
-// / LinuxSystemInfoProvider's GetSystemIdentity()). Distinct from
-// logicalProcessors below, which counts threads, not cores — the backend
-// previously conflated the two under a field also called "coreCount"; this
-// replaces that field, it is not the same value.
+// Physical cores; `logicalProcessors` counts threads.
 physicalCores: number | null;
 logicalProcessors: number;
 appVersion: string;
-// Extended identity (Win32_ComputerSystem/Win32_BIOS/Win32_OperatingSystem
-// on Windows). Null wherever the underlying query is unavailable — show
-// "Unavailable" in the UI, never a fabricated value.
+// Null wherever the platform cannot report it; show "Unavailable", never a guess.
 manufacturer: string | null;
 model: string | null;
 biosVersion: string | null;
