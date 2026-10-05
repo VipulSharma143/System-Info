@@ -1,12 +1,4 @@
-import { useEffect, useState } from 'react';
 import type { ConnectionState } from '../../hooks/useSystemMetrics';
-
-interface StatusIndicatorProps {
-  connection: ConnectionState;
-  lastUpdated: number | null;
-  /** Status word only, without the "updated Ns ago" readout. */
-  compact?: boolean;
-}
 
 const LABEL: Record<ConnectionState, string> = {
   live: 'Live',
@@ -22,22 +14,7 @@ const COLOR: Record<ConnectionState, string> = {
   connecting: 'var(--text-muted)',
 };
 
-function useNow(enabled: boolean) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!enabled) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [enabled]);
-  return now;
-}
-
-
-
-// "● Live · updated 2s ago". The age ticks on its own timer (only when it is shown), so if polling
-// stops the number keeps climbing and the user can always tell whether the data is current.
-export default function StatusIndicator({ connection, lastUpdated, compact = false }: StatusIndicatorProps) {
-  const now = useNow(!compact);
+export default function StatusIndicator({ connection }: { connection: ConnectionState }) {
   const color = COLOR[connection];
 
   return (

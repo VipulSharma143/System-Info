@@ -7,7 +7,6 @@ import TopBar from './TopBar';
 
 interface AppShellProps {
   connection: ConnectionState;
-  lastUpdated: number | null;
   theme: Theme;
   onToggleTheme: () => void;
   navItems: NavItem[];
@@ -30,7 +29,6 @@ export default function AppShell({ title, description, hue, topBarAction, childr
     >
       <Sidebar
         connection={rail.connection}
-        lastUpdated={rail.lastUpdated}
         theme={rail.theme}
         onToggleTheme={rail.onToggleTheme}
         items={rail.navItems}

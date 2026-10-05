@@ -52,7 +52,7 @@ function Page({ active, children }: { active: boolean; children: ReactNode }) {
 }
 
 function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
-  const { data, stale, error, connection, lastUpdated, startupError: metricsStartupError } = useSystemMetrics();
+  const { data, stale, error, connection, startupError: metricsStartupError } = useSystemMetrics();
   const liveData = stale ? null : data;
   const history = useDashboardHistory(liveData);
   const { status: serviceStatus } = useServiceControl();
@@ -133,7 +133,6 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
   return (
     <AppShell
       connection={connection}
-      lastUpdated={lastUpdated}
       theme={theme}
       onToggleTheme={toggle}
       navItems={navItems}
@@ -147,7 +146,7 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
       topBarAction={
         <div className="flex items-center gap-4">
           <ServiceControls />
-          <StatusIndicator connection={connection} lastUpdated={lastUpdated} compact />
+          <StatusIndicator connection={connection} />
         </div>
       }
     >

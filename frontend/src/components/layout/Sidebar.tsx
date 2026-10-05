@@ -46,7 +46,6 @@ const ICONS: Record<string, LucideIcon> = {
 
 interface SidebarProps {
   connection: ConnectionState;
-  lastUpdated: number | null;
   theme: Theme;
   onToggleTheme: () => void;
   items: NavItem[];
@@ -62,7 +61,6 @@ interface SidebarProps {
 */
 function Sidebar({
   connection,
-  lastUpdated,
   theme,
   onToggleTheme,
   items,
@@ -124,7 +122,7 @@ function Sidebar({
       <div className="space-y-2 p-2.5 max-md:hidden">
         {!collapsed && (
           <div className="px-2">
-            <StatusIndicator connection={connection} lastUpdated={lastUpdated} />
+            <StatusIndicator connection={connection} />
           </div>
         )}
         <div className={`flex items-center gap-1 ${collapsed ? 'flex-col' : ''}`}>
