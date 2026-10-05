@@ -13,15 +13,11 @@ All notable changes to SystemInfo are documented here.
 ### Known Issues
 
 
-## [2.4.5] - 2026-10-05
+## [2.4.6] - 2026-10-05
 
-### Added
-- **GPU page, below RAM.** Lists every graphics adapter the system reports (one, two, three or more) as its own card: name, vendor, integrated/discrete, driver, PCI address, dedicated and shared memory, plus live usage, video-memory use, temperature, power and limit, clocks, fan, voltage and performance state wherever the driver exposes them. Anything a platform does not report shows as "Not reported" instead of a made-up zero.
-- **Linux GPU support.** Adapters and telemetry are read from the kernel's DRM/sysfs interfaces (AMD, Intel, nouveau) and from NVIDIA's management library for NVIDIA cards. On Windows, adapters come from WMI/DXGI, per-engine load and video-memory use from performance counters, and NVIDIA telemetry from NVML.
-- **GPU hardware is cached.** Adapter details are saved between launches, so the GPU page shows instantly while live values load.
 
 ### Changed
-- **Simpler connection indicator.** The "updated Ns ago" readout next to the Live status is gone; the indicator now shows only Live, Connecting, Reconnecting or Offline.
+- **GPU Memory Usage.** Fixed an issue where GPU memory usage could be reported significantly higher than the actual amount being used in real-world scenarios.
 
 
 ## [2.4.4] - 2026-10-05

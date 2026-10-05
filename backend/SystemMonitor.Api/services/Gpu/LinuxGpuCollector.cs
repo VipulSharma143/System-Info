@@ -160,11 +160,9 @@ public sealed partial class LinuxGpuCollector : IGpuCollector
             note = "The Intel driver does not expose a usage percentage through sysfs.";
         }
 
-        double? memPercent = used is { } u && adapter.DedicatedMemoryBytes is > 0 and var total
-            ? Math.Round(u * 100.0 / total, 1)
-            : null;
+        var memPercent = GpuMath.Percent(used, adapter.DedicatedMemoryBytes);
 
-        return new GpuLiveReading(adapter.Id, utilization, used, sharedUsed, memPercent, temp, memTemp, coreClock, memClock,
+        return new GpuLiveReading(adapter.Id, utilization, used, adapter.DedicatedMemoryBytes, sharedUsed, memPercent, temp, memTemp, coreClock, memClock,
             power, limit, fanRpm, fanPct, hw.VoltageV, pstate, null, source, note);
     }
 
@@ -291,7 +289,7 @@ public sealed partial class LinuxGpuCollector : IGpuCollector
     }
 
     private static GpuLiveReading Empty(string id, string note) =>
-        new(id, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, note);
+        new(id, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, note);
 
     private static string? ReadAll(string path)
     {

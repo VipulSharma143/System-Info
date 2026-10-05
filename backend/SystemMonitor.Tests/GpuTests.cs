@@ -1,3 +1,4 @@
+using SystemMonitor.Api.Interface;
 using Microsoft.Extensions.Logging.Abstractions;
 using SystemMonitor.Api.Services;
 
@@ -26,7 +27,7 @@ static class GpuTests
         public IReadOnlyList<GpuLiveReading> ReadLive(IReadOnlyList<GpuAdapter> a)
         {
             LiveReads++;
-            return a.Select(x => new GpuLiveReading(x.Id, 10, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)).ToList();
+            return a.Select(x => new GpuLiveReading(x.Id, 10, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)).ToList();
         }
     }
 
@@ -131,6 +132,14 @@ static class GpuTests
             Check(m[0]?.MemoryTotalBytes == 2 && m[1]?.MemoryTotalBytes == 1 && m[2] is null, "NVML devices are paired by name and Intel gets none");
             var dup = NvmlMatching.ByName(["NVIDIA X", "NVIDIA X"], [new NvmlDevice("NVIDIA X", null, null, null, 1), new NvmlDevice("NVIDIA X", null, null, null, 2)]);
             Check(dup[0]?.MemoryTotalBytes == 1 && dup[1]?.MemoryTotalBytes == 2, "identical GPUs are paired one-to-one");
+            Check(GpuMath.Percent(829_700_000, 128_000_000) == 100.0, "usage above the pool total is clamped, never 648%");
+            Check(GpuMath.Percent(1_000, 0) is null && GpuMath.Percent(null, 10) is null, "no total or no usage means no percentage");
+            var agg = GpuMath.AggregateEngines([
+                new GpuEngineUsage("pid_1_luid_0x0_0x1_phys_0_eng_0_engtype_3D", 23), new GpuEngineUsage("pid_2_luid_0x0_0x1_phys_0_eng_0_engtype_3D", 7),
+                new GpuEngineUsage("pid_3_luid_0x0_0x1_phys_0_eng_0_engtype_3D", 1), new GpuEngineUsage("pid_2_luid_0x0_0x1_phys_0_eng_1_engtype_Copy", 2),
+                new GpuEngineUsage("pid_4_luid_0x0_0x1_phys_0_eng_0_engtype_VideoDecode", 80), new GpuEngineUsage("pid_5_luid_0x0_0x1_phys_0_eng_0_engtype_VideoDecode", 60)]);
+            Check(agg.Count == 3 && agg[0].InstanceName == "VideoDecode" && agg[0].UsagePercent == 100 && agg[1].InstanceName == "3D" && agg[1].UsagePercent == 31, "engine instances are summed per engine across processes, capped at 100");
+            Check(GpuMath.AggregateEngines([new GpuEngineUsage("garbage", 5)]).Count == 0, "unrecognised engine names are ignored");
             Check(NvmlGpuSource.NormalizePci("00000000:01:00.0") == "0000:01:00.0", "NVML bus ids normalise to sysfs form");
 
             // GpuService: cached across launches, live sampling shared, failures isolated.

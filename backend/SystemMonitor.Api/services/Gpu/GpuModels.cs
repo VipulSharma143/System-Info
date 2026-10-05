@@ -19,11 +19,16 @@ public sealed record GpuAdapter(
     long? DedicatedMemoryBytes,
     long? SharedMemoryBytes);
 
-/// <summary>One live sample for the adapter with the same <see cref="Id"/>. Null means the platform did not report it.</summary>
+/// <summary>
+/// One live sample for the adapter with the same <see cref="Id"/>. Null means the platform did not report it.
+/// <see cref="MemoryUsedBytes"/> and <see cref="MemoryTotalBytes"/> are the pair <see cref="MemoryUsagePercent"/> is
+/// computed from: dedicated VRAM for discrete GPUs, dedicated + shared system memory for integrated ones.
+/// </summary>
 public sealed record GpuLiveReading(
     string Id,
     double? UtilizationPercent,
     long? MemoryUsedBytes,
+    long? MemoryTotalBytes,
     long? SharedMemoryUsedBytes,
     double? MemoryUsagePercent,
     double? TemperatureC,

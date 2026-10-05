@@ -222,6 +222,8 @@ export interface GpuLiveReading {
   id: string;
   utilizationPercent: number | null;
   memoryUsedBytes: number | null;
+  /** The pool `memoryUsagePercent` is measured against (VRAM, or VRAM + shared for integrated GPUs). */
+  memoryTotalBytes: number | null;
   sharedMemoryUsedBytes: number | null;
   memoryUsagePercent: number | null;
   temperatureC: number | null;

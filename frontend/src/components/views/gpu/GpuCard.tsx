@@ -21,7 +21,7 @@ function Metric({ label, value, detail, percent }: { label: string; value: React
   return <StatTile label={label} value={value} detail={detail} percentForColor={percent} hue="gpu" />;
 }
 
-function Utilization({ reading }: { reading: GpuLiveReading | undefined }) {
+function Utilization({ reading, memoryLabel }: { reading: GpuLiveReading | undefined; memoryLabel: string }) {
   const percent = reading?.utilizationPercent ?? undefined;
   const history = useMetricHistory(percent);
 
@@ -33,7 +33,7 @@ function Utilization({ reading }: { reading: GpuLiveReading | undefined }) {
           {percent === undefined ? <NotReported hint={reading?.note ?? undefined} /> : <UsageBar percent={percent} hue="gpu" />}
         </div>
         <div>
-          <div className="mb-1.5 text-[12px] text-muted">Video memory</div>
+          <div className="mb-1.5 text-[12px] text-muted">{memoryLabel}</div>
           {reading?.memoryUsagePercent == null ? <NotReported /> : <UsageBar percent={reading.memoryUsagePercent} hue="gpu" />}
         </div>
       </div>
@@ -55,6 +55,9 @@ function Engines({ reading }: { reading: GpuLiveReading }) {
 function GpuCard({ adapter, reading }: { adapter: GpuAdapter; reading: GpuLiveReading | undefined }) {
   const memory = adapter.dedicatedMemoryBytes;
   const used = reading?.memoryUsedBytes;
+  const total = reading?.memoryTotalBytes ?? memory;
+  const unified = adapter.integrated === true;
+  const memoryLabel = unified ? 'Graphics memory' : 'Video memory';
   const fan = reading?.fanPercent != null ? `${reading.fanPercent}%` : reading?.fanRpm != null ? `${reading.fanRpm} RPM` : null;
 
   return (
@@ -70,14 +73,14 @@ function GpuCard({ adapter, reading }: { adapter: GpuAdapter; reading: GpuLiveRe
       }
     >
       <div className="space-y-4">
-        <Utilization reading={reading} />
+        <Utilization reading={reading} memoryLabel={memoryLabel} />
         {reading && <Engines reading={reading} />}
 
         <TileGrid>
           <Metric label="Temperature" value={val(reading?.temperatureC, celsius)} percent={reading?.temperatureC ?? undefined} detail={reading?.memoryTemperatureC != null ? `Memory ${celsius(reading.memoryTemperatureC)}` : undefined} />
           <Metric label="Power" value={val(reading?.powerWatts, watts)} detail={reading?.powerLimitWatts != null ? `Limit ${watts(reading.powerLimitWatts)}` : undefined} />
           <Metric label="Core clock" value={val(reading?.coreClockMhz, mhz)} detail={reading?.memoryClockMhz != null ? `Memory ${mhz(reading.memoryClockMhz)}` : undefined} />
-          <Metric label="VRAM" value={used != null ? formatMemory(used) : <NotReported />} detail={memory ? `of ${formatMemory(memory)}` : undefined} />
+          <Metric label={unified ? 'Graphics memory' : 'VRAM'} value={used != null ? formatMemory(used) : <NotReported />} detail={total ? `of ${formatMemory(total)}` : undefined} />
         </TileGrid>
 
         <div className="grid grid-cols-1 gap-x-8 md:grid-cols-2">
@@ -94,7 +97,7 @@ function GpuCard({ adapter, reading }: { adapter: GpuAdapter; reading: GpuLiveRe
             {fan && <InfoRow label="Fan" value={fan} />}
             {reading?.voltageV != null && <InfoRow label="Voltage" value={`${formatNumber(reading.voltageV, 2)} V`} />}
             {reading?.performanceState && <InfoRow label="Performance state" value={reading.performanceState} />}
-            {reading?.sharedMemoryUsedBytes != null && <InfoRow label="Shared memory used" value={formatMemory(reading.sharedMemoryUsedBytes)} />}
+            {!unified && reading?.sharedMemoryUsedBytes != null && <InfoRow label="Shared memory used" value={formatMemory(reading.sharedMemoryUsedBytes)} />}
           </div>
         </div>
 
