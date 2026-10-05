@@ -30,6 +30,19 @@ builder.Services.AddSingleton<SystemMonitorBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemMonitorBackgroundService>());
 builder.Services.AddSingleton<SystemSnapshotService>();
 builder.Services.AddSingleton<MemoryHardwareService>();
+builder.Services.AddSingleton<INvmlSource>(NvmlGpuSource.Shared);
+builder.Services.AddSingleton(new PciIds());
+if (OperatingSystem.IsWindows())
+{
+    builder.Services.AddSingleton<IGpuCollector>(sp => new WindowsGpuCollector(
+        (WindowsSystemInfoProvider)sp.GetRequiredService<ISystemInfoProvider>(), sp.GetRequiredService<INvmlSource>()));
+}
+else
+{
+    builder.Services.AddSingleton<IGpuCollector>(sp => new LinuxGpuCollector(
+        sp.GetRequiredService<INvmlSource>(), sp.GetRequiredService<PciIds>()));
+}
+builder.Services.AddSingleton<GpuService>();
 builder.Services.AddSingleton<AnalyticsService>();
 
 builder.Services.AddOpenApi();
@@ -91,7 +104,8 @@ _ = Task.Run(async () =>
 app.Lifetime.ApplicationStarted.Register(() => _ = Task.WhenAll(
     app.Services.GetRequiredService<SystemSnapshotService>().WarmUpAsync(),
     app.Services.GetRequiredService<SystemInfoService>().WarmUpAsync(),
-    app.Services.GetRequiredService<MemoryHardwareService>().WarmUpAsync())
+    app.Services.GetRequiredService<MemoryHardwareService>().WarmUpAsync(),
+    app.Services.GetRequiredService<GpuService>().WarmUpAsync())
     .ContinueWith(t => app.Logger.LogWarning(t.Exception, "Cache warm-up failed (non-fatal)."), TaskContinuationOptions.OnlyOnFaulted));
 
 app.Run();

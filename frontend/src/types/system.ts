@@ -192,3 +192,54 @@ export interface MemoryHealth {
   source: 'edac' | 'unavailable';
   note: string | null;
 }
+
+/** Stable facts about one display adapter (cached across launches). Null means the platform did not report it. */
+export interface GpuAdapter {
+  id: string;
+  index: number;
+  name: string;
+  vendor: string | null;
+  vendorId: string | null;
+  deviceId: string | null;
+  pciAddress: string | null;
+  driver: string | null;
+  driverVersion: string | null;
+  driverDate: string | null;
+  integrated: boolean | null;
+  primary: boolean | null;
+  dedicatedMemoryBytes: number | null;
+  sharedMemoryBytes: number | null;
+}
+
+export interface GpuHardwareInfo {
+  available: boolean;
+  adapters: GpuAdapter[];
+  note: string | null;
+}
+
+/** One live sample for the adapter with the same `id`. */
+export interface GpuLiveReading {
+  id: string;
+  utilizationPercent: number | null;
+  memoryUsedBytes: number | null;
+  sharedMemoryUsedBytes: number | null;
+  memoryUsagePercent: number | null;
+  temperatureC: number | null;
+  memoryTemperatureC: number | null;
+  coreClockMhz: number | null;
+  memoryClockMhz: number | null;
+  powerWatts: number | null;
+  powerLimitWatts: number | null;
+  fanRpm: number | null;
+  fanPercent: number | null;
+  voltageV: number | null;
+  performanceState: string | null;
+  engines: GpuEngineUsage[] | null;
+  source: string | null;
+  note: string | null;
+}
+
+export interface GpuLiveInfo {
+  readings: GpuLiveReading[];
+  sampledAtUnixMs: number;
+}

@@ -32,6 +32,9 @@ public partial class WindowsSystemInfoProvider
     // Start-up cache hooks (see SystemInfoService): seed with the last launch's list, then re-read.
     public void SeedGpuAdapters(List<GpuInfo> adapters) => _gpuAdapters ??= adapters;
 
+    /// <summary>The adapter list without engine sampling: the cached/seeded one when present, otherwise a fresh read.</summary>
+    public List<GpuInfo> GetAdapters() => _gpuAdapters ?? RefreshGpuAdapters();
+
     public List<GpuInfo> RefreshGpuAdapters()
     {
         var adapters = ReadAdapters();
@@ -255,7 +258,7 @@ public partial class WindowsSystemInfoProvider
     // such adapter. 16 is a generous sanity ceiling — no real system has
     // more DXGI adapters than that; it only exists to guarantee this loop
     // terminates even if the native side ever returns 1 unexpectedly forever.
-    private static List<(string? Name, long DedicatedBytes, long SharedBytes)> ReadDxgiAdapters()
+    internal static List<(string? Name, long DedicatedBytes, long SharedBytes)> ReadDxgiAdapters()
     {
         var results = new List<(string?, long, long)>();
         var nameBuffer = new System.Text.StringBuilder(256);
@@ -334,5 +337,23 @@ public partial class WindowsSystemInfoProvider
         }
 
         return result.OrderByDescending(e => e.UsagePercent).Take(20).ToList();
+    }
+
+    /// <summary>Per-adapter dedicated/shared memory in use, keyed by the "_phys_N" index (the adapter's WMI order).</summary>
+    internal static Dictionary<int, (long? Dedicated, long? Shared)> ReadGpuMemoryUsage()
+    {
+        var result = new Dictionary<int, (long? Dedicated, long? Shared)>();
+        if (!PerformanceCounterCategory.Exists("GPU Adapter Memory")) return result;
+
+        foreach (var instance in new PerformanceCounterCategory("GPU Adapter Memory").GetInstanceNames())
+        {
+            var marker = instance.LastIndexOf("_phys_", StringComparison.OrdinalIgnoreCase);
+            if (marker < 0 || !int.TryParse(instance.AsSpan(marker + "_phys_".Length), out var index)) continue;
+
+            using var dedicated = new PerformanceCounter("GPU Adapter Memory", "Dedicated Usage", instance, readOnly: true);
+            using var shared = new PerformanceCounter("GPU Adapter Memory", "Shared Usage", instance, readOnly: true);
+            result[index] = ((long)dedicated.NextValue(), (long)shared.NextValue());
+        }
+        return result;
     }
 }

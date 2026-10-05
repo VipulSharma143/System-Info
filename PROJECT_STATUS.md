@@ -90,7 +90,7 @@ This is the sixth architectural shape the project has taken (see [Historical Arc
 |---|:-:|---|
 | Seven dashboard sections (`components/views/`) | ✅ | Overview, Analytics, Processes, Storage, Network, Battery, System — routed from `App.tsx`'s `SECTIONS` array |
 | Shared design-system primitives (`components/common/Primitives.tsx`) | ✅ | One spacing scale, one type scale, one card shape, one responsive grid, including a reused `Unavailable` component for any unsupported metric |
-| Live-freshness indicator | ✅ | `Live · updated Ns ago` → `Reconnecting` → `Offline`, driven by `useSystemMetrics` |
+| Connection indicator | ✅ | `Live` → `Reconnecting` → `Offline`, driven by `useSystemMetrics` |
 | Analytics time-range selector (1h/6h/24h/7d) | ✅ | Backed by `/api/analytics/*`'s `minutes`/`window` query params |
 | `apiConfig.ts` centralized API base resolution | ✅ | Covers Vite dev server, Tauri desktop, and the legacy browser-hosted launcher, replacing three duplicated `API_BASE` constants |
 | `ServiceControls.tsx` (Start/Stop/Exit) | ✅ | Only rendered inside the Tauri shell (`lib/tauri.ts` detects the runtime) |
@@ -123,7 +123,7 @@ This is the sixth architectural shape the project has taken (see [Historical Arc
 | `ISystemInfoProvider.GetGpus()` | Windows | `GET /api/system/gpu` | Every adapter via `Win32_VideoController` (name, video processor, adapter memory, driver version/date, status, resolution, refresh rate) + live per-engine utilization from the `GPU Engine` performance-counter category |
 | Native engine `get_gpu_vendor()` / `get_amd_gpu_usage_percent()` | Linux (primarily) | `GET /api/native/gpu` | Vendor detection via `/sys/class/drm` (dynamic scan, not hardcoded `card0`) and AMD usage via sysfs |
 
-These have not yet been unified — the Windows path is the newer, more structured one; the native-engine path predates it and remains Linux's only GPU source.
+**Since 2.4.5** the GPU page uses a third, newer pipeline (`GpuService`, `/api/system/gpus/*`) that covers both platforms and any number of adapters; the two paths below remain for the System tab and the native endpoint. These have not yet been unified — the Windows path is the newer, more structured one; the native-engine path predates it and remains Linux's only GPU source.
 
 **Battery:**
 
@@ -302,6 +302,7 @@ Not yet verified on real machines: the full download/install/relaunch cycle on W
 | 16 | Native & Assembly Expansion | C++ / NASM / C# | ✅ Done (Linux verified; Windows build verified under Wine; not on real Windows) | CPU feature detection with CPUID **and** XGETBV (so a CPU feature the OS has masked is never used); SSE2/AVX2 kernels for vector add, dot, int32 sum/min/max, memcpy and XOR checksum with scalar tails and runtime dispatch; `si_kernel_selftest` against C++ references with boundary lengths, misaligned pointers and guard bytes, mutation-tested; topology, storage and fan enumeration; memory-bandwidth benchmark; fixed the SIMD-loop hang for n < 4; exception-free native filesystem access; safe span-based C# wrappers with C# references |
 | 17 | Python Retired | C# / CI / docs | ✅ Done (2.3.0) | Analytics ported to `AnalyticsService`; Python source, proxy, port 8001, PyInstaller/pip CI steps and Python handling in the dev scripts deleted; tests and CI stamping no longer use Python; releases gated on `tests.yml`. See [Why Analytics Moved from Python to C#](#-why-analytics-moved-from-python-to-c) |
 | 18 | RAM Monitoring (2.4.0) | C++ / C# / React | ✅ Done (Linux verified; Windows native build verified under Wine; not on real Windows) | Runtime RAM (`RamDetails`, bytes, nullable unknowns) separated from physical memory (`MemoryHardwareSummary` + `MemoryModule[]`, SMBIOS Type 16/17) and memory health (EDAC). New RAM tab with per-section loading/partial/error states. Shared byte-buffer SMBIOS parser with a Linux file loader and a Windows `GetSystemFirmwareTable` loader; `smbios_parse_test` (195 checks) and `smbios_loader_test` (26 checks). Channel mode intentionally always "Unknown"; ECC enabled never guessed. |
+| 19 | GPU page (2.4.5) | C# / React | ✅ Done (Linux unit-tested with a fake sysfs/NVML; not run on real GPUs or on Windows) | One card per adapter; `services/Gpu/` collectors for Linux (DRM/sysfs) and Windows (WMI/DXGI/perf counters), NVIDIA via NVML, cached adapter list, `/api/system/gpus/hardware` + `/live` |
 
 ---
 
@@ -334,6 +335,7 @@ Not yet verified on real machines: the full download/install/relaunch cycle on W
 - [ ] Verify the Linux Tauri packaging (`tauri build` producing `.deb`/`.AppImage`) end to end on real GitHub Actions infrastructure and a real Linux install, beyond this pass's own review of the workflow file
 - [ ] Add a retention/TTL policy for `data/snapshots/`
 - [ ] Implement full SMART storage health (needs root)
+- [ ] Test the GPU page on real AMD, Intel and NVIDIA hardware, Linux and Windows
 - [ ] Delete the unused root-level analytics components in `frontend/src/components/` (see the 2026-10-05 note)
 - [ ] Take real startup timings from an installed build on Windows and Linux (`logs/startup.log` records the stages) and compare against the pre-2.3.0 behaviour
 - [ ] Run the Windows installer, `.deb` and AppImage on real machines: double-click launch, shutdown, restart, uninstall/reinstall, a stale backend left over from a crash
@@ -412,3 +414,13 @@ Open: none of the above has run in a real installer yet (still true).
 - **Not measured:** no timings were taken (no .NET, Rust or browser in the authoring environment). Time-to-first-dashboard before/after on Windows and Linux is still open (see Remaining Work).
 - **Docs:** README project layout rewritten to match the repo (view sub-folders, hooks, lib, styles, services, native tools, tests); `AGENT.md` version corrected to 2.4.4.
 - **Known leftover:** `frontend/src/components/{BottleneckTimeline,SpikeDetail,StatsSummary,TrendSummary}.tsx` are older copies that nothing imports; the live ones are in `views/analytics/`.
+
+---
+
+## 2026-10-05: GPU page (2.4.5)
+
+- **What:** a GPU page after RAM that renders one card per adapter. Backend: `services/Gpu/` — `IGpuCollector` per OS (`LinuxGpuCollector` reads `/sys/class/drm` + hwmon + pci.ids names; `WindowsGpuCollector` reuses the provider's WMI/DXGI adapter list and the GPU Engine / GPU Adapter Memory counters), `NvmlGpuSource` (NVML loaded at run time for NVIDIA on both OSes), and `GpuService`. Endpoints: `/api/system/gpus/hardware` (stable, persisted as `cache/gpu-hardware.json`, also remembered by the frontend) and `/api/system/gpus/live` (one shared sample per second, polled only while the page is open).
+- **Honesty rules:** null means "platform did not report it"; Windows utilization for non-NVIDIA is the busiest engine and says so; Intel on Linux has no usage percentage in sysfs and says so.
+- **Failure isolation:** each collector failure becomes "no adapter / empty readings"; CPU, RAM and the rest are unaffected.
+- **Verified:** 154 .NET checks pass on Linux (fake sysfs for Intel iGPU, AMD discrete, NVIDIA via a fake NVML, missing NVML, missing card, corrupt cache), the API project builds and serves both endpoints on Linux, and the card renders for one/two/unknown adapters. The sandbox had no GPU, so real AMD/Intel/NVIDIA hardware and everything on Windows (WindowsGpuCollector, the GPU Adapter Memory counters, NVML on Windows) are untested.
+- **Not done from the optimization spec:** startup timings, C++/assembly review, process-enumeration changes and the frontend visual cleanup.

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson } from '../lib/api';
 import { reportDiagnostic } from '../lib/errors';
+import { loadPersisted, savePersisted, type PersistSpec } from '../lib/persisted';
 import { shareUnchanged } from '../lib/share';
 
 interface Options {
@@ -10,6 +11,8 @@ interface Options {
   intervalMs?: number;
   /** Failed attempts (with no data yet) before `error` is raised. */
   errorAfter?: number;
+  /** Seeds the first render from the previous launch and keeps the latest response for the next one. Must be a stable object. */
+  persist?: PersistSpec<unknown>;
 }
 
 export interface JsonResource<T> {
@@ -37,9 +40,9 @@ const RETRY_DELAYS_MS = [1000, 3000, 10_000];
 */
 export function useJsonResource<T>(
   path: string,
-  { active, intervalMs, errorAfter = 2 }: Options
+  { active, intervalMs, errorAfter = 2, persist }: Options
 ): JsonResource<T> {
-  const [data, setData] = useState<T | null>(null);
+  const [data, setData] = useState<T | null>(() => (persist ? (loadPersisted(persist)?.value as T | undefined) ?? null : null));
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const loaded = useRef(false);
@@ -61,6 +64,7 @@ export function useJsonResource<T>(
         failures = 0;
         loaded.current = true;
         setData((prev) => shareUnchanged(prev, json));
+        if (persist) savePersisted(persist, json);
         setError(false);
         if (intervalMs) timer = setTimeout(run, intervalMs);
       } catch (err) {
@@ -80,7 +84,7 @@ export function useJsonResource<T>(
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [active, path, intervalMs, errorAfter, attempt]);
+  }, [active, path, intervalMs, errorAfter, persist, attempt]);
 
   const retry = useCallback(() => {
     setError(false);

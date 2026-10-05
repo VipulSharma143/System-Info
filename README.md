@@ -29,8 +29,9 @@ There is no backend cloud service, no account, and no external database. Everyth
 
 ## ✨ Features
 
-- **Live dashboard** — CPU, RAM, disk, network, and process metrics, polled and cached server-side, with a `Live · updated Ns ago` freshness indicator that degrades through `Reconnecting` → `Offline` so a stale reading is never mistaken for a current one.
+- **Live dashboard** — CPU, RAM, disk, network, and process metrics, polled and cached server-side, with a connection indicator that degrades from `Live` through `Reconnecting` to `Offline`, so a stale reading is never mistaken for a current one.
 - **Fast startup from cache** — the backend keeps a small versioned cache of slow-to-read system details (`<data>/cache`), and the UI remembers the last dashboard readings, so the window shows data immediately on later launches while fresh values load in the background. A missing, corrupt, outdated or unwritable cache is silently rebuilt.
+- **GPU page** — one card per adapter (any number), with hardware details and live usage, VRAM, temperature, power, clocks and fan where the platform reports them. Linux reads DRM/sysfs plus NVML for NVIDIA; Windows uses WMI/DXGI, performance counters and NVML. Adapter details are cached between launches.
 - **System identity** — computer name, manufacturer, model, BIOS version, Windows edition/build, architecture, and uptime — read from `Win32_ComputerSystem`/`Win32_BIOS`/`Win32_OperatingSystem` on Windows, DMI sysfs + `/etc/os-release` on Linux.
 - **GPU detection** — every display adapter detected (multi-GPU laptops included), with driver info, resolution/refresh rate, and live per-engine utilization (3D, Copy, VideoDecode, …) rather than one fabricated "GPU usage" number.
 - **Real battery telemetry on Windows** — charge, charging state, voltage, remaining/full capacity, and cycle count read via the battery class driver's IOCTL interface (`IOCTL_BATTERY_QUERY_TAG`/`_INFORMATION`/`_STATUS`) — the same interface `powercfg /batteryreport` uses.
@@ -99,8 +100,8 @@ System Info/
 │   │   ├── App.tsx                 # Startup gate, navigation, lazy-mounted pages
 │   │   ├── components/
 │   │   │   ├── views/              # One thin page per section: OverviewView, AnalyticsView, ProcessesView,
-│   │   │   │   │                   # RamView, StorageView, NetworkView, BatteryView, SystemView, UpdatesView
-│   │   │   │   └── <view>/         # Each page's sections: overview/, analytics/, ram/, storage/,
+│   │   │   │   │                   # RamView, GpuView, StorageView, NetworkView, BatteryView, SystemView, UpdatesView
+│   │   │   │   └── <view>/         # Each page's sections: overview/, analytics/, ram/, gpu/, storage/,
 │   │   │   │                       # network/, battery/, system/, updates/
 │   │   │   ├── common/             # Design-system primitives: Panel, MetricCard, Sparkline, UsageBar,
 │   │   │   │                       # UsageRing, States, Table, Segmented, Button, Primitives, ...
@@ -108,7 +109,7 @@ System Info/
 │   │   │   └── *.tsx               # SpeedTestCard (used by NetworkView) and older copies of the
 │   │   │                           # analytics components that nothing imports any more
 │   │   ├── hooks/                  # usePolling (the one fetch/poll/retry loop), useSystemMetrics, useSystemInfo,
-│   │   │                           # useSystemGpu, useAnalytics, useSpeedTest, useServiceControl, useUpdater,
+│   │   │                           # useSystemGpu, useGpu, useAnalytics, useSpeedTest, useServiceControl, useUpdater,
 │   │   │                           # useDashboardHistory, useProcessHistory, useFailureAlerts, useTheme, ...
 │   │   ├── lib/                    # apiConfig.ts (env-aware API base), api.ts, persisted.ts (startup cache),
 │   │   │                           # share.ts, format.ts, hues.ts, sections.ts, errors.ts, alerts.ts, tauri.ts
@@ -126,12 +127,14 @@ System Info/
 │   │   ├── services/                # Providers: LinuxSystemInfoProvider, WindowsSystemInfoProvider (+ .Battery,
 │   │   │                            #   .Gpu, .Identity partials), WindowsBatteryInterop
 │   │   │                            # Snapshots & startup cache: SystemSnapshotService, SystemInfoService, SystemInfoCache
+│   │   │                            # GPU (services/Gpu/): GpuService, LinuxGpuCollector, WindowsGpuCollector,
+│   │   │                            #   NvmlGpuSource, NvmlMatching, PciIds, GpuModels
 │   │   │                            # Memory: MemoryHardwareService, MemoryHealthReader, MemoryMapping, RamDetailsReader
 │   │   │                            # History: SystemMonitorBackgroundService, SnapshotLogger, LocalJsonSnapshotStore,
 │   │   │                            #   AnalyticsService; paths: AppDataPath
 │   │   ├── interface/               # ISystemInfoProvider, ISnapshotStore
 │   │   └── Native/                  # NativeInterop.cs (P/Invoke), NativeKernels.cs (safe span wrappers)
-│   └── SystemMonitor.Tests/         # dependency-free test runner: analytics, storage, startup cache, memory, native wrappers
+│   └── SystemMonitor.Tests/         # dependency-free test runner: analytics, storage, startup cache, memory, GPU (fake sysfs/NVML), native wrappers
 │
 ├── native/                          # C++17 native engine (CMake)
 │   ├── include/native_engine.h      # Cross-platform C ABI (extern "C")

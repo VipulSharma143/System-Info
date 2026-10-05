@@ -23,5 +23,11 @@
     <Compile Include="../SystemMonitor.Api/services/MemoryMapping.cs" Link="linked/MemoryMapping.cs" />
     <Compile Include="../SystemMonitor.Api/services/MemoryHealthReader.cs" Link="linked/MemoryHealthReader.cs" />
     <Compile Include="../SystemMonitor.Api/services/SystemInfoCache.cs" Link="linked/SystemInfoCache.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Gpu/GpuModels.cs" Link="linked/GpuModels.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Gpu/GpuService.cs" Link="linked/GpuService.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Gpu/LinuxGpuCollector.cs" Link="linked/LinuxGpuCollector.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlGpuSource.cs" Link="linked/NvmlGpuSource.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlMatching.cs" Link="linked/NvmlMatching.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Gpu/PciIds.cs" Link="linked/PciIds.cs" />
   </ItemGroup>
 </Project>

@@ -12,7 +12,7 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.4.4 · **License:** none — no `LICENSE` file exists in the repo.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.4.5 · **License:** none — no `LICENSE` file exists in the repo.
 
 ## 📖 What it is
 
@@ -22,7 +22,7 @@ Real-time hardware telemetry (CPU/RAM/disk/network/processes/battery/GPU/system 
 
 ## ✨ Features (what actually exists today)
 
-- Live dashboard: CPU/RAM/disk/network/process metrics, server-cached, with a `Live · updated Ns ago` freshness indicator degrading `Reconnecting` → `Offline`.
+- Live dashboard: CPU/RAM/disk/network/process metrics, server-cached, with a connection indicator (`Live` → `Reconnecting` → `Offline`).
 - System identity: computer name, manufacturer, model, BIOS version, OS edition/build, uptime.
 - GPU: every adapter detected (multi-GPU laptops included) with live per-engine utilization on Windows, not one fabricated "GPU usage" number.
 - Real Windows battery telemetry via the battery-class-driver IOCTL interface (same one `powercfg /batteryreport` uses).
@@ -66,7 +66,7 @@ frontend/src/          React app: components/{views,common,layout}, hooks/, lib/
                        StatsSummary, TrendSummary) that nothing imports — the live ones are in views/analytics/.
   views/                OverviewView, AnalyticsView, ProcessesView, RamView, StorageView, NetworkView, BatteryView, SystemView, UpdatesView
   common/                Shared design-system primitives: Panel, MetricCard, Sparkline, UsageBar, States, Table, Segmented, StatusIndicator
-  hooks/                 usePolling (the one fetch loop; optional `persist` cache), useSystemMetrics, useSystemInfo, useSystemGpu, useAnalytics, useSpeedTest, useServiceControl, useUpdater, useTheme
+  hooks/                 useGpu (adapter list persisted, live polled only while the GPU tab is open), usePolling (the one fetch loop; optional `persist` cache), useSystemMetrics, useSystemInfo, useSystemGpu, useAnalytics, useSpeedTest, useServiceControl, useUpdater, useTheme
 frontend/src-tauri/     Rust shell: supervisor.rs (Tauri-free lifecycle core), process.rs (resource lookup + command building), commands.rs
                         (start_services/stop_services/get_service_status/exit_app — ONLY 4 IPC commands, deliberately no
                         tauri-plugin-shell / no generic command execution); supervisor-tests/ = std-only test crate for supervisor.rs
@@ -75,7 +75,9 @@ backend/SystemMonitor.Api/
   services/             WindowsSystemInfoProvider / LinuxSystemInfoProvider, SystemMonitorBackgroundService, SystemSnapshotService
                          (/api/system/all isolation), AnalyticsService, LocalJsonSnapshotStore, SnapshotLogger,
                          WindowsBatteryInterop, AppDataPath, SystemInfoService + SystemInfoCache (startup cache),
-                         MemoryHardwareService/MemoryHealthReader/MemoryMapping/RamDetailsReader
+                         MemoryHardwareService/MemoryHealthReader/MemoryMapping/RamDetailsReader,
+                         services/Gpu/: GpuService (cached hardware + 1 s shared live sample), LinuxGpuCollector (DRM/sysfs), WindowsGpuCollector,
+                         NvmlGpuSource (NVML via NativeLibrary, optional), PciIds (pci.ids names). API: /api/system/gpus/hardware and /gpus/live
   interface/             ISystemInfoProvider, ISnapshotStore
   Native/                 NativeInterop.cs (P/Invoke bridge), NativeKernels.cs (safe span wrappers + C# reference implementations)
 backend/SystemMonitor.Tests/  dependency-free test runner (analytics, storage, native wrappers); links sources instead of referencing the Api project

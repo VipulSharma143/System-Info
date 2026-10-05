@@ -6,6 +6,7 @@ export type Hue =
   | 'analytics'
   | 'cpu'
   | 'ram'
+  | 'gpu'
   | 'disk'
   | 'net'
   | 'power'

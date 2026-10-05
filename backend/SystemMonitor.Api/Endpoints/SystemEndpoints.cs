@@ -118,5 +118,13 @@ app.MapGet("/api/system/gpu", (ISystemInfoProvider provider) =>
     return provider.GetGpus();
 })
 .WithName("GetGpuInfo");
+
+// Stable adapter facts (cached across launches) and live telemetry are separate: the first is fetched once,
+// the second polled only while the GPU page is open. Both are lists, so any number of adapters works.
+app.MapGet("/api/system/gpus/hardware", async (GpuService gpus) => await gpus.GetHardwareAsync())
+        .WithName("GetGpuHardware");
+
+app.MapGet("/api/system/gpus/live", async (GpuService gpus) => await gpus.GetLiveAsync())
+        .WithName("GetGpuLive");
     }
 }

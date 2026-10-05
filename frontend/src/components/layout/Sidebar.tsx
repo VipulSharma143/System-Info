@@ -14,6 +14,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Sun,
+  Gpu,
   type LucideIcon,
 } from 'lucide-react';
 import type { Theme } from '../../hooks/useTheme';
@@ -37,6 +38,7 @@ const ICONS: Record<string, LucideIcon> = {
   analytics: Activity,
   processes: ListTree,
   ram: MemoryStick,
+  gpu: Gpu,
   storage: HardDrive,
   network: Network,
   battery: BatteryMedium,
