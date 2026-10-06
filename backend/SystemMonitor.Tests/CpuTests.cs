@@ -16,11 +16,15 @@ static class CpuTests
         }
     }
 
-    static void Write(string path, string text)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, text);
-    }
+static void Write(string path, string text)
+{
+    var directory = Path.GetDirectoryName(path);
+
+    if (!string.IsNullOrEmpty(directory))
+        Directory.CreateDirectory(directory);
+
+    File.WriteAllText(path, text);
+}
 
     static void Stat(string proc, params string[] lines) => Write(Path.Combine(proc, "stat"), string.Join('\n', lines) + "\n");
 
@@ -90,8 +94,7 @@ static class CpuTests
             var zoneDetail = collector.Read();
             Check(zoneDetail.PackageTemperatureC == 55 && zoneDetail.TemperatureSource == "thermal-zone", "thermal zone fallback ignores the generic acpitz zone");
 
-            var rapl = Path.Combine(sys, "class", "powercap", "intel-rapl:0");
-            Write(Path.Combine(rapl, "energy_uj"), "100000000\n");
+            var rapl = Path.Combine(sys, "class", "powercap", "intel-rapl-0");            Write(Path.Combine(rapl, "energy_uj"), "100000000\n");
             now = 20_000; Check(collector.Read().PowerWatts is null, "the first RAPL read has no power");
             Write(Path.Combine(rapl, "energy_uj"), "130000000\n");
             now = 22_000; Check(collector.Read().PowerWatts == 15.0, "package watts from the RAPL energy delta (30 J over 2 s)");

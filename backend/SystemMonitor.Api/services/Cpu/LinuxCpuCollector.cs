@@ -173,26 +173,54 @@ public sealed class LinuxCpuCollector : ICpuCollector
 
     // RAPL reports energy, not power: watts = delta energy / delta time, so the first read has none.
     // The counter is root-only on recent kernels (CVE-2020-8694); an unreadable file simply means no power figure.
-    private double? ReadPackagePower(long now)
+private double? ReadPackagePower(long now)
+{
+    var powercapRoot = Path.Combine(_sys, "class", "powercap");
+    if (!Directory.Exists(powercapRoot))
+        return null;
+
+    var domain = Directory
+        .EnumerateDirectories(powercapRoot, "intel-rapl*")
+        .OrderBy(path => path, StringComparer.Ordinal)
+        .FirstOrDefault();
+
+    if (domain is null)
+        return null;
+
+    if (ReadLong(Path.Combine(domain, "energy_uj")) is not { } raw || raw < 0)
+        return null;
+
+    var energy = (ulong)raw;
+
+    var previous = _previousEnergyUj;
+    var previousMs = _previousEnergyMs;
+
+    _previousEnergyUj = energy;
+    _previousEnergyMs = now;
+
+    if (previous is null || now <= previousMs)
+        return null;
+
+    ulong delta;
+
+    if (energy >= previous.Value)
     {
-        var domain = Path.Combine(_sys, "class", "powercap", "intel-rapl:0");
-        if (ReadLong(Path.Combine(domain, "energy_uj")) is not { } raw || raw < 0) return null;
-        var energy = (ulong)raw;
-
-        var previous = _previousEnergyUj;
-        var previousMs = _previousEnergyMs;
-        _previousEnergyUj = energy;
-        _previousEnergyMs = now;
-        if (previous is null || now <= previousMs) return null;
-
-        ulong delta;
-        if (energy >= previous.Value) delta = energy - previous.Value;
-        else if (ReadLong(Path.Combine(domain, "max_energy_range_uj")) is { } range and > 0) delta = (ulong)range - previous.Value + energy;
-        else return null;
-
-        return Math.Round(delta / 1_000_000.0 / ((now - previousMs) / 1000.0), 1);
+        delta = energy - previous.Value;
+    }
+    else if (ReadLong(Path.Combine(domain, "max_energy_range_uj")) is { } range && range > 0)
+    {
+        delta = (ulong)range - previous.Value + energy;
+    }
+    else
+    {
+        return null;
     }
 
+    return Math.Round(
+        delta / 1_000_000.0 /
+        ((now - previousMs) / 1000.0),
+        1);
+}
     private double[]? ReadLoadAverage()
     {
         var parts = ReadAll(Path.Combine(_proc, "loadavg"))?.Split(' ', StringSplitOptions.RemoveEmptyEntries);
