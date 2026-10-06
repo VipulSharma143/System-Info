@@ -56,7 +56,7 @@ public sealed class SystemMonitorBackgroundService : BackgroundService
                 {
                     var cpuTask = _provider.GetCpuAsync();
                     var netTask = _provider.GetNetworkAsync();
-                    var cpu = await cpuTask;
+                    var cpu = (await cpuTask) with { SampledAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
                     var network = await netTask;
 
                     // The first reading spans the backend's own start-up work, so it is a

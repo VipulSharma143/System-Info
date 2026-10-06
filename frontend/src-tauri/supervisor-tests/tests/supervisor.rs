@@ -112,4 +112,67 @@ mod tests {
         assert!(stale.try_wait().unwrap().is_some(), "stale process still alive");
         s.stop(&logs);
     }
+
+    // ---- Phase 1: update preparation. stop() alone is not proof that an installer may overwrite files. ----
+
+    #[test]
+    fn released_immediately_when_nothing_is_held() {
+        let logs = tmp("rel-free");
+        let file = logs.join("lib.so");
+        std::fs::write(&file, b"x").unwrap();
+        let r = wait_released(&[18141], &[file, logs.join("does-not-exist.dll")], Duration::from_secs(2));
+        assert!(r.released, "{r:?}");
+        assert!(r.waited_ms < 500, "a free system must not be waited on: {r:?}");
+    }
+
+    #[test]
+    fn a_port_that_stays_busy_is_reported_not_ignored() {
+        let _hold = std::net::TcpListener::bind(("127.0.0.1", 18142)).unwrap();
+        let t = Instant::now();
+        let r = wait_released(&[18142], &[], Duration::from_millis(400));
+        assert!(!r.released && r.detail.contains("18142"), "{r:?}");
+        assert!(t.elapsed() < Duration::from_secs(2), "the wait must be bounded");
+    }
+
+    #[test]
+    fn a_port_freed_during_the_wait_ends_it_early() {
+        let hold = std::net::TcpListener::bind(("127.0.0.1", 18143)).unwrap();
+        let t = Instant::now();
+        let r = std::thread::scope(|sc| {
+            sc.spawn(move || { std::thread::sleep(Duration::from_millis(300)); drop(hold); });
+            wait_released(&[18143], &[], Duration::from_secs(5))
+        });
+        assert!(r.released, "{r:?}");
+        assert!(t.elapsed() < Duration::from_secs(2), "released as soon as the port freed, not at the timeout: {:?}", t.elapsed());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_running_executable_counts_as_locked_until_it_exits() {
+        // Copy the fake service so the file under test is only ever this test's own process.
+        let dir = tmp("rel-lock");
+        let exe = dir.join("running-copy");
+        std::fs::copy(FAKE_EXE, &exe).unwrap();
+        let mut child = Command::new(&exe).args(["18144", "0.1"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(is_locked(&exe), "a running executable cannot be overwritten");
+        let blocked = wait_released(&[], std::slice::from_ref(&exe), Duration::from_millis(300));
+        assert!(!blocked.released && blocked.detail.contains("running-copy"), "{blocked:?}");
+        child.kill().unwrap(); child.wait().unwrap();
+        let free = wait_released(&[18144], std::slice::from_ref(&exe), Duration::from_secs(3));
+        assert!(free.released, "once the process is gone the file is free: {free:?}");
+    }
+
+    #[test]
+    fn stop_and_wait_released_leaves_nothing_behind_and_logs_it() {
+        let s = sup(18145, 18146); let logs = tmp("rel-stop");
+        let st = s.start(&logs, vec![launch(fake(18145, 0.2), 10), launch(fake(18146, 0.2), 10)], &|_| {});
+        assert_eq!(st[0], ServiceHealth::Running);
+        let (status, report) = s.stop_and_wait_released(&logs, &[], Duration::from_secs(5));
+        assert_eq!(status[0], ServiceHealth::Stopped);
+        assert!(report.released, "{report:?}");
+        assert!(port_free(18145) && port_free(18146));
+        let log = std::fs::read_to_string(logs.join("update.log")).unwrap();
+        assert!(log.contains("released=true"), "{log}");
+    }
 }

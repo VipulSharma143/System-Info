@@ -68,11 +68,11 @@ double get_cpu_usage_percent() {
     return (1.0 - (double)idleDelta / totalDelta) * 100.0;
 }
 
-// No reliable, universally-supported public API exists for CPU temperature on
-// Windows — WMI's MSAcpi_ThermalZoneTemperature is notoriously unsupported on
-// most consumer hardware/OEM BIOSes. Rather than fake a number, report honestly.
+// No reliable, universally-supported public API exists for CPU temperature on Windows (the ACPI thermal zone is a
+// generic zone, not the CPU). Report "unavailable" through the same entry point as Linux.
 double get_cpu_temperature() {
-    return -1.0; // matches the Linux "unavailable" convention
+    double celsius = 0.0;
+    return si_cpu_temperature(&celsius, nullptr, 0) == 1 ? celsius : -1.0;
 }
 
 // DXGI enumerates graphics adapters and exposes their PCI vendor ID directly —

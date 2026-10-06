@@ -5,7 +5,7 @@
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::process::{ServiceManager, ServiceStatus};
+use crate::process::{PrepareResult, ServiceManager, ServiceStatus};
 
 // Sync Tauri commands run on the main (UI) thread. Anything that can wait —
 // starting services, stopping them (kill + wait) — is therefore async and
@@ -34,6 +34,27 @@ pub async fn stop_services(app: AppHandle) -> Result<ServiceStatus, String> {
     })
     .await
     .map_err(|e| format!("stop task failed: {e}"))
+}
+
+/// Stops the backend and waits for the OS to release its port, process and files, so the installer can replace
+/// them on the FIRST attempt. Returns `released: false` (with what is still held) instead of letting the
+/// installer run into a locked file; the frontend then retries this bounded wait, never the installer blindly.
+#[tauri::command]
+pub async fn prepare_for_update(app: AppHandle, timeout_ms: Option<u64>) -> Result<PrepareResult, String> {
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(500, 60_000));
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = app.state::<ServiceManager>().prepare_for_update(&app, timeout);
+        let _ = app.emit("services-status", app.state::<ServiceManager>().status());
+        result
+    })
+    .await
+    .map_err(|e| format!("prepare task failed: {e}"))
+}
+
+/// Writes one diagnostic line to the updater log. The only file the frontend can write, and only through here.
+#[tauri::command]
+pub fn log_update_event(line: String) {
+    crate::process::log_update_event(&line);
 }
 
 #[tauri::command]

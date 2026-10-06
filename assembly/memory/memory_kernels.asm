@@ -1,7 +1,9 @@
 ; ============================================================
 ; memory/memory_kernels.asm — bulk memory kernels (SSE2 baseline + AVX2 variants).
 ;
-;   si_memcpy_{sse2,avx2}  (void* dst, const void* src, size_t n)   (regions must NOT overlap)
+; (A hand-written memcpy lived here until 2.4.8. Measured against libc memcpy it was never faster, 0.95-1.0x, so it
+; was removed: libc's is already vectorised and tuned per CPU. Do not re-add it without a benchmark that beats libc.)
+;
 ;   si_xor_u64_{sse2,avx2} (const uint64_t* a, size_t nwords)       -> uint64 (rax)
 ;
 ; Same register/ABI rules as math/vector_math.asm.
@@ -11,89 +13,8 @@ default rel
 %include "abi.inc"
 
 section .text
-    global si_memcpy_sse2
-    global si_memcpy_avx2
     global si_xor_u64_sse2
     global si_xor_u64_avx2
-
-; ---------------- memcpy (non-overlapping) ----------------
-; 64 B (SSE2) / 128 B (AVX2) unrolled main loop, then one vector per step,
-; then a byte tail. All accesses unaligned; the C++ wrapper falls back to
-; memmove when the regions overlap.
-si_memcpy_sse2:                 ; dst=ARG1 src=ARG2 n=ARG3
-    xor r10d, r10d
-    mov r11, ARG3
-    and r11, -64
-.b64:
-    cmp r10, r11
-    jae .v16
-    movdqu xmm0, [ARG2 + r10]
-    movdqu xmm1, [ARG2 + r10 + 16]
-    movdqu xmm2, [ARG2 + r10 + 32]
-    movdqu xmm3, [ARG2 + r10 + 48]
-    movdqu [ARG1 + r10], xmm0
-    movdqu [ARG1 + r10 + 16], xmm1
-    movdqu [ARG1 + r10 + 32], xmm2
-    movdqu [ARG1 + r10 + 48], xmm3
-    add r10, 64
-    jmp .b64
-.v16:
-    mov r11, ARG3
-    and r11, -16
-.l16:
-    cmp r10, r11
-    jae .t
-    movdqu xmm0, [ARG2 + r10]
-    movdqu [ARG1 + r10], xmm0
-    add r10, 16
-    jmp .l16
-.t:
-    cmp r10, ARG3
-    jae .d
-    mov al, [ARG2 + r10]
-    mov [ARG1 + r10], al
-    inc r10
-    jmp .t
-.d:
-    ret
-
-si_memcpy_avx2:
-    xor r10d, r10d
-    mov r11, ARG3
-    and r11, -128
-.b128:
-    cmp r10, r11
-    jae .v32
-    vmovdqu ymm0, [ARG2 + r10]
-    vmovdqu ymm1, [ARG2 + r10 + 32]
-    vmovdqu ymm2, [ARG2 + r10 + 64]
-    vmovdqu ymm3, [ARG2 + r10 + 96]
-    vmovdqu [ARG1 + r10], ymm0
-    vmovdqu [ARG1 + r10 + 32], ymm1
-    vmovdqu [ARG1 + r10 + 64], ymm2
-    vmovdqu [ARG1 + r10 + 96], ymm3
-    sub r10, -128
-    jmp .b128
-.v32:
-    mov r11, ARG3
-    and r11, -32
-.l32:
-    cmp r10, r11
-    jae .t
-    vmovdqu ymm0, [ARG2 + r10]
-    vmovdqu [ARG1 + r10], ymm0
-    add r10, 32
-    jmp .l32
-.t:
-    cmp r10, ARG3
-    jae .d
-    mov al, [ARG2 + r10]
-    mov [ARG1 + r10], al
-    inc r10
-    jmp .t
-.d:
-    vzeroupper
-    ret
 
 ; ---------------- XOR checksum of 64-bit words ----------------
 ; A pure read workload (one load per 8 bytes, one XOR): the C++ bandwidth

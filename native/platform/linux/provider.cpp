@@ -93,13 +93,8 @@ double get_cpu_usage_percent() {
 }
 
 double get_cpu_temperature() {
-    std::ifstream file("/sys/class/thermal/thermal_zone0/temp");
-    if (!file.is_open()) return -1.0;
-
-    long milliDegrees;
-    file >> milliDegrees;
-
-    return milliDegrees / 1000.0;
+    double celsius = 0.0;
+    return si_cpu_temperature(&celsius, nullptr, 0) == 1 ? celsius : -1.0;
 }
 
 int get_gpu_vendor() {

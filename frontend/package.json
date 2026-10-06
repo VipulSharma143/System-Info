@@ -1,13 +1,14 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "2.4.7",
+  "version": "2.4.8",
   "author": "Vipul Sharma",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "node --test --experimental-strip-types tests/*.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },

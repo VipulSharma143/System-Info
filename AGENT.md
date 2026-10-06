@@ -12,7 +12,7 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.4.6 · **License:** none — no `LICENSE` file exists in the repo.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.4.8 · **License:** none — no `LICENSE` file exists in the repo.
 
 ## 📖 What it is
 
@@ -39,7 +39,7 @@ Real-time hardware telemetry (CPU/RAM/disk/network/processes/battery/GPU/system 
 | Desktop shell | Tauri 2 (Rust, `win32job` on Windows) — native window, spawns/supervises the backend as a child process |
 | Backend | C#, .NET 10 Minimal API. No auth (loopback-only, single user). No ORM. |
 | Native engine | C++17 (CMake), called via P/Invoke — CPU topology/features, storage volumes, fans, GPU/VRAM, battery, benchmarks, memory bandwidth |
-| Assembly | x86-64 NASM: benchmark loops + SSE2/AVX2 vector kernels (`math/vector_math.asm`: add, dot, int32 sum) behind runtime CPUID/XGETBV dispatch in `simd_dispatch.cpp`; every kernel is verified against a C++ reference by `si_kernel_selftest()` |
+| Assembly | x86-64 NASM: benchmark loops + SSE2/AVX2 vector kernels (`math/vector_math.asm`: add, dot, int32 sum; `memory/memory_kernels.asm`: xor checksum) behind runtime CPUID/XGETBV dispatch in `simd_dispatch.cpp`. Three tiers: AVX2 asm → SSE2 asm → portable C++; the start-up selftest demotes a failing tier, `SYSTEMINFO_NO_ASM=1` / `si_force_portable(1)` forces the portable one. A hand-written memcpy was removed in 2.4.8 (never beat libc, 0.95-1.0x) — re-add nothing without a benchmark that beats the portable path |
 | Analytics | `AnalyticsService.cs` (in-process; was Python/FastAPI on :8001) — trend/bottleneck/stats over local snapshot files, 5 s result cache |
 | Storage | **No database.** Append-only local JSON Lines: `data/snapshots/{yyyy}/{MM}/{dd}.jsonl`. (Previously MongoDB Atlas, before that PostgreSQL was the original target — both replaced deliberately for offline capability. Don't reintroduce a DB without discussion.) |
 | CI/CD | `.github/workflows/release.yml`: `version → tests → build-windows + build-linux (parallel) → release`, triggered by a new top `CHANGELOG.md` entry. `tests` is the reusable `tests.yml` (native/Assembly ctest on Linux + Windows/MSVC, C# tests, Rust supervisor tests); `tests.yml` also runs on every PR and non-main push. |
@@ -79,7 +79,9 @@ backend/SystemMonitor.Api/
                          services/Gpu/: GpuService (cached hardware + 1 s shared live sample), LinuxGpuCollector (DRM/sysfs), WindowsGpuCollector,
                          GpuCounters/GpuMath (Windows counters are matched to adapters by LUID via native get_gpu_luid; per-engine sums), NvmlGpuSource (NVML via NativeLibrary, optional), PciIds (pci.ids names). API: /api/system/gpus/hardware and /gpus/live.
                          services/Cpu/: CpuService (1 s shared sample), LinuxCpuCollector (/proc/stat deltas, cpufreq, hwmon, RAPL), WindowsCpuCollector
-                         (Processor Information counters, ACPI thermal zone). API: /api/system/cpu/detail. Frontend: OverlayView (CPU + all GPUs)
+                         (Processor Information counters, ACPI thermal zone + TemperatureFlatlineGuard), CpuTemperatureSelection (hwmon/thermal sensor choice — same rules as native cpu_temperature.cpp, contract-tested; acpitz is NEVER a CPU temperature).
+                         HostSnapshotService + Native/HostSnapshot.cs: ONE native call (si_read_host_snapshot) for CPU ticks + memory + CPU temperature, shared by the Linux provider.
+                         API: /api/system/cpu/detail. Frontend: OverlayView (compact tiles: CPU, memory, each GPU — no clock/fan/power sections, by decision)
   interface/             ISystemInfoProvider, ISnapshotStore
   Native/                 NativeInterop.cs (P/Invoke bridge), NativeKernels.cs (safe span wrappers + C# reference implementations)
 backend/SystemMonitor.Tests/  dependency-free test runner (analytics, storage, native wrappers); links sources instead of referencing the Api project
@@ -159,6 +161,11 @@ node scripts/archive-changelog.mjs [--keep N]  # manual, post-release: move old 
 Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job parses it and checks the tag doesn't already exist → `build-windows` + `build-linux` (parallel, each builds native engine → self-contained backend publish → embeds frontend into `wwwroot` → `tauri build`), after the reusable `tests.yml` workflow (native/Assembly ctest on Linux+Windows, C# tests, Rust supervisor tests) has passed → `release` (only if both succeed) creates the git tag + GitHub Release atomically, attaches installers + `latest.json`. **Never hand-create a git tag** — see traps below.
 
 ## 🐛 Known traps (don't repeat these)
+
+- **2.4.8 — CPU temperature:** never read `thermal_zone0` or any `acpitz` zone as the CPU; it is a constant ~28 °C. Select by hwmon name (coretemp/k10temp/zenpower) or thermal type (x86_pkg_temp/cpu-thermal). Missing sensor = `null` + a note, never 0 or -1. Native (`cpu_temperature.cpp`) and managed (`CpuTemperatureSelection.cs`) must stay in agreement — `CpuTemperatureTests` checks it.
+- **2.4.8 — updates:** `stop_services` returning is NOT proof the installer may overwrite files. Use `prepare_for_update` (waits for port/process/file release) and never start the installer when it reports `released: false`. Retry only failures `classifyUpdateError` calls transient (`frontend/src/lib/updateFlow.ts`); failures are logged to `update.log`.
+- **2.4.8 — tests:** never assert a specific CPU/GPU/RAM/temperature of the machine running the test. Use fixture trees, fakes and temp dirs; live-host checks assert only universal properties.
+- **2.4.8 — polling:** use `scheduleWhenVisible` (lib/visibility.ts) for any new poll loop so hidden windows stop fetching.
 
 - **Never hardcode an API host/port** outside `frontend/src/lib/apiConfig.ts`. Packaged builds get an OS-assigned/non-fixed backend port — a hardcoded `localhost:5132` broke the shipped app once already. Prod uses same-origin relative URLs (`import.meta.env.DEV ? 'http://localhost:5132' : ''`).
 - **`wwwroot` copy must happen as a CI shell step before `dotnet publish`**, not an MSBuild `BeforeTargets="Publish"` target — the SDK decides publishable `wwwroot` content at project-evaluation time, before any target runs, so a target-based copy silently ships an empty `wwwroot`.

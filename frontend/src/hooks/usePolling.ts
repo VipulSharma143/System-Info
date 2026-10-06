@@ -4,6 +4,7 @@ import { STARTUP_GRACE_MS } from '../lib/apiConfig';
 import { reportDiagnostic } from '../lib/errors';
 import { loadPersisted, savePersisted, type PersistSpec } from '../lib/persisted';
 import { shareUnchanged } from '../lib/share';
+import { scheduleWhenVisible } from '../lib/visibility';
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'offline';
 
@@ -66,7 +67,7 @@ export function usePolling<T>(path: string, { intervalMs, enabled = true, persis
     if (intervalMs === null && loaded.current && attempt === 0) return;   // fetch-once: already have it
 
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelTimer: (() => void) | undefined;
     const controller = new AbortController();
     const startedAt = Date.now();
     let failures = 0;
@@ -90,7 +91,8 @@ export function usePolling<T>(path: string, { intervalMs, enabled = true, persis
           lastSaved.current = Date.now();
           savePersisted(persist, data);
         }
-        if (intervalMs !== null) timer = setTimeout(run, intervalMs);
+        // Hidden window: wait for it to be visible again instead of polling for nobody.
+        if (intervalMs !== null) cancelTimer = scheduleWhenVisible(() => void run(), intervalMs);
       } catch (err) {
         if (cancelled) return;
         failures += 1;
@@ -99,7 +101,7 @@ export function usePolling<T>(path: string, { intervalMs, enabled = true, persis
         if (!loaded.current) {
           const startupError = Date.now() - startedAt >= STARTUP_GRACE_MS;
           setState((prev) => ({ ...prev, connection: 'connecting', startupError }));
-          timer = setTimeout(run, STARTUP_RETRY_MS[Math.min(failures - 1, STARTUP_RETRY_MS.length - 1)]);
+          cancelTimer = scheduleWhenVisible(() => void run(), STARTUP_RETRY_MS[Math.min(failures - 1, STARTUP_RETRY_MS.length - 1)]);
           return;
         }
 
@@ -107,7 +109,7 @@ export function usePolling<T>(path: string, { intervalMs, enabled = true, persis
           ...prev,
           connection: failures >= OFFLINE_AFTER_FAILURES ? 'offline' : 'reconnecting',
         }));
-        timer = setTimeout(run, intervalMs ?? 2000);
+        cancelTimer = scheduleWhenVisible(() => void run(), intervalMs ?? 2000);
       }
     };
 
@@ -115,7 +117,7 @@ export function usePolling<T>(path: string, { intervalMs, enabled = true, persis
     return () => {
       cancelled = true;
       controller.abort();
-      if (timer) clearTimeout(timer);
+      cancelTimer?.();
     };
   }, [path, intervalMs, enabled, persist, attempt]);
 

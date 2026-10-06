@@ -22,6 +22,8 @@ pub fn run() {
             commands::stop_services,
             commands::get_service_status,
             commands::exit_app,
+            commands::prepare_for_update,
+            commands::log_update_event,
             commands::diagnose_update_check,
         ])
         .setup(|app| {

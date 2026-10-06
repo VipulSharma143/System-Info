@@ -50,6 +50,12 @@ static class CacheTests
             var shared = New();
             await Task.WhenAll(Enumerable.Range(0, 8).Select(i => shared.WriteAsync("c" + i, new Sample("z", i))));
             Check(Enumerable.Range(0, 8).All(i => File.Exists(Path.Combine(dir, $"c{i}.json"))), "concurrent writes survive the version sweep");
+            // Many writers to ONE file at once: each write is whole (never torn), the last one wins, and no temp file is left.
+            var hot = New();
+            await Task.WhenAll(Enumerable.Range(0, 200).Select(i => hot.WriteAsync("hot", new Sample("hot", i))));
+            var settled = await New().ReadAsync<Sample>("hot");
+            Check(settled is { Value: >= 0 and < 200 }, "200 concurrent writes to one file leave a complete, readable value");
+            Check(!Directory.EnumerateFiles(dir, "*.tmp").Any(), "no temporary files are left behind");
 
             // A path that cannot be a directory: never throws, always a miss.
             var blocked = Path.Combine(root, "blocked");

@@ -4,6 +4,9 @@ using SystemMonitor.Api.Native;
 // Non-async on purpose: Span<T> locals are not allowed in async methods.
 static class NativeTests
 {
+    /// <summary>Path of the native library the tests loaded, or null when it could not be found. Other test files use it to skip native contract checks.</summary>
+    public static string? LoadedLibrary { get; private set; }
+
     public static (int Failures, int Checks) Run()
     {
         int failures = 0, checks = 0;
@@ -27,6 +30,7 @@ static class NativeTests
             foreach (var n in d.EnumerateDirectories("native"))
                 foreach (var b in n.EnumerateDirectories("build*"))
                     libraryPath ??= FindLibrary(b.FullName);
+        LoadedLibrary = libraryPath;
         if (libraryPath is null)
         {
             Console.WriteLine("SKIPPED native tests: native library not found (build native/ or set SYSTEMINFO_NATIVE_DIR).");

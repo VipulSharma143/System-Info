@@ -7,8 +7,23 @@ namespace SystemMonitor.Api.Services;
 
 public class LinuxSystemInfoProvider : ISystemInfoProvider
 {
+    // RAM tolerates a reading this old, so the dashboard poll and the sampler share one native read.
+    private static readonly TimeSpan RamMaxAge = TimeSpan.FromMilliseconds(400);
+    private readonly HostSnapshotService _host;
+
+    public LinuxSystemInfoProvider(HostSnapshotService host) => _host = host;
+
     public Task<RamInfo> GetRamAsync()
     {
+        if (_host.Read(RamMaxAge) is { HasMemory: true, MemTotalKb: > 0 } snap)
+        {
+            var total = (long)snap.MemTotalKb;
+            var available = (long)Math.Min(snap.MemAvailableKb, snap.MemTotalKb);
+            var used = total - available;
+            return Task.FromResult(new RamInfo(total / 1024, used / 1024, available / 1024, Math.Round((double)used / total * 100, 1)));
+        }
+
+        // Managed fallback: the native library is missing or could not read /proc/meminfo.
         var lines = File.ReadAllLines("/proc/meminfo");
 
         long GetValueKb(string key)
@@ -45,8 +60,12 @@ public class LinuxSystemInfoProvider : ISystemInfoProvider
     private readonly object _cpuLock = new();
     private (long Idle, long Total, long Tick)? _prevCpu;
 
-    private static (long Idle, long Total, long Tick) ReadCpuTimes()
+    private (long Idle, long Total, long Tick) ReadCpuTimes()
     {
+        // Fresh sample (a CPU figure is a delta between two real readings), but through the shared native path.
+        if (_host.Read(TimeSpan.Zero) is { HasCpuTicks: true } snap)
+            return ((long)(snap.CpuTotalTicks - snap.CpuBusyTicks), (long)snap.CpuTotalTicks, Environment.TickCount64);
+
         // The first line of /proc/stat is the aggregate "cpu" row: user nice system idle iowait ...
         using var reader = new StreamReader("/proc/stat");
         var line = reader.ReadLine() ?? throw new IOException("/proc/stat is empty");

@@ -41,6 +41,8 @@ endif()
 add_library(systemmonitor_objects OBJECT
     src/common.cpp
     src/simd_dispatch.cpp
+    src/cpu_temperature.cpp
+    src/host_snapshot.cpp
     src/smbios/reader.cpp
     src/smbios/table_source.cpp
     src/smbios/decode.cpp
@@ -98,6 +100,26 @@ if(BUILD_NATIVE_TESTS)
     target_link_libraries(memory_hardware_test systemmonitor_native)
     add_test(NAME memory_hardware_test COMMAND memory_hardware_test)
     set_tests_properties(memory_hardware_test PROPERTIES TIMEOUT 30)
+
+    # CPU temperature sensor selection against fake sysfs trees (no hardware needed).
+    add_executable(cpu_temperature_test ../tests/native/cpu_temperature_test.cpp)
+    target_link_libraries(cpu_temperature_test systemmonitor_native)
+    add_test(NAME cpu_temperature_test COMMAND cpu_temperature_test)
+    set_tests_properties(cpu_temperature_test PROPERTIES TIMEOUT 30)
+
+    # Assembly tiers: normal run, then the SYSTEMINFO_NO_ASM kill switch (must pick the portable tier, same answers).
+    add_executable(asm_tiers_test ../tests/native/asm_tiers_test.cpp)
+    target_link_libraries(asm_tiers_test systemmonitor_native)
+    add_test(NAME asm_tiers_test COMMAND asm_tiers_test)
+    add_test(NAME asm_tiers_test_no_asm COMMAND asm_tiers_test no-asm)
+    set_tests_properties(asm_tiers_test_no_asm PROPERTIES ENVIRONMENT "SYSTEMINFO_NO_ASM=1")
+    set_tests_properties(asm_tiers_test asm_tiers_test_no_asm PROPERTIES TIMEOUT 60)
+
+    # Host snapshot: pure parsers against fixture text, plus a live sanity read. No hardware assumptions.
+    add_executable(host_snapshot_test ../tests/native/host_snapshot_test.cpp)
+    target_link_libraries(host_snapshot_test systemmonitor_native)
+    add_test(NAME host_snapshot_test COMMAND host_snapshot_test)
+    set_tests_properties(host_snapshot_test PROPERTIES TIMEOUT 30)
 
     # SMBIOS Type 16/17 parser against hand-built tables: no hardware, no root,
     # identical on Linux and Windows.

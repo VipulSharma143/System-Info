@@ -176,6 +176,14 @@ finally { try { Directory.Delete(dir, true); } catch { } }
     var (nf, nc) = await CpuTests.RunAsync();
     failures += nf; checks += nc;
 }
+{
+    var (nf, nc) = CpuTemperatureTests.Run();
+    failures += nf; checks += nc;
+}
+{
+    var (nf, nc) = HostSnapshotTests.Run();
+    failures += nf; checks += nc;
+}
 
 Console.WriteLine(failures == 0 ? $"all {checks} checks passed" : $"{failures} of {checks} checks FAILED");
 return failures == 0 ? 0 : 1;

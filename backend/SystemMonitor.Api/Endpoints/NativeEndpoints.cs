@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using SystemMonitor.Api.Native;
 
@@ -37,8 +38,12 @@ public static class NativeEndpoints
 
         app.MapGet("/api/native/cputemp", () =>
         {
-            double temp = NativeInterop.GetCpuTemperature();
-            return new { temperatureC = Math.Round(temp, 1) };
+            // Live read every call. "No sensor" is an explicit answer (available: false, temperatureC: null),
+            // never -1 or 0 dressed up as a temperature.
+            var source = new StringBuilder(64);
+            return NativeInterop.CpuTemperature(out double celsius, source, source.Capacity) == 1
+                ? Results.Json(new { available = true, temperatureC = Math.Round(celsius, 1), source = source.ToString(), sampledAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() })
+                : Results.Json(new { available = false, temperatureC = (double?)null, source = (string?)null, sampledAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
         })
         .WithName("GetCpuTemperature");
 

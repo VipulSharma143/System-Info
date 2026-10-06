@@ -18,7 +18,16 @@
      applies to `dotnet publish -r <rid>`; dev builds are unaffected. -->
 <PublishReadyToRun>true</PublishReadyToRun>
 <TieredPGO>false</TieredPGO>
+<!-- Lightweight-utility GC settings: workstation, non-concurrent (no extra background GC thread), and a small
+     conserve-memory bias so a long-running monitor hands memory back instead of holding its high-water mark. -->
+<ServerGarbageCollector>false</ServerGarbageCollector>
+<ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+<UseSystemResourceKeys>true</UseSystemResourceKeys>
 </PropertyGroup>
+
+<ItemGroup>
+<RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+</ItemGroup>
 
 <ItemGroup>
 <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />

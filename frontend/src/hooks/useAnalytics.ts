@@ -1,3 +1,4 @@
+import { scheduleWhenVisible } from '../lib/visibility';
 import { useCallback, useEffect, useState } from 'react';
 import type { BottlenecksResponse, StatsResponse, TrendResponse } from '../types/analytics';
 import { API_BASE } from '../lib/apiConfig';
@@ -63,9 +64,18 @@ export function useAnalytics(windowMinutes: number = DEFAULT_WINDOW_MINUTES) {
   }, [windowMinutes]);
 
   useEffect(() => {
-    fetchAnalytics();
-    const interval = setInterval(fetchAnalytics, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+    // Self-rescheduling and visibility-aware: a minimised window stops fetching three endpoints every few seconds.
+    let cancelTimer: (() => void) | undefined;
+    let stopped = false;
+    const tick = async () => {
+      await fetchAnalytics();
+      if (!stopped) cancelTimer = scheduleWhenVisible(() => void tick(), POLL_INTERVAL_MS);
+    };
+    void tick();
+    return () => {
+      stopped = true;
+      cancelTimer?.();
+    };
   }, [fetchAnalytics]);
 
   return state;

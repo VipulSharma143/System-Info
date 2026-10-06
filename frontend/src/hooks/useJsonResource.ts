@@ -3,6 +3,7 @@ import { fetchJson } from '../lib/api';
 import { reportDiagnostic } from '../lib/errors';
 import { loadPersisted, savePersisted, type PersistSpec } from '../lib/persisted';
 import { shareUnchanged } from '../lib/share';
+import { scheduleWhenVisible } from '../lib/visibility';
 
 interface Options {
   /** Only fetch/poll while true — the RAM tab is mounted even when hidden. */
@@ -53,7 +54,7 @@ export function useJsonResource<T>(
     if (!intervalMs && loaded.current && attempt === 0) return;
 
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelTimer: (() => void) | undefined;
     const controller = new AbortController();
     let failures = 0;
 
@@ -66,7 +67,7 @@ export function useJsonResource<T>(
         setData((prev) => shareUnchanged(prev, json));
         if (persist) savePersisted(persist, json);
         setError(false);
-        if (intervalMs) timer = setTimeout(run, intervalMs);
+        if (intervalMs) cancelTimer = scheduleWhenVisible(() => void run(), intervalMs);
       } catch (err) {
         if (cancelled) return;
         failures += 1;
@@ -74,7 +75,7 @@ export function useJsonResource<T>(
         if (!loaded.current && failures >= errorAfter) setError(true);
         const delay = intervalMs ?? RETRY_DELAYS_MS[Math.min(failures - 1, RETRY_DELAYS_MS.length - 1)];
         // Fetch-once resources stop after the backoff list is used up; Retry restarts them.
-        if (intervalMs || failures <= RETRY_DELAYS_MS.length) timer = setTimeout(run, delay);
+        if (intervalMs || failures <= RETRY_DELAYS_MS.length) cancelTimer = scheduleWhenVisible(() => void run(), delay);
       }
     };
 
@@ -82,7 +83,7 @@ export function useJsonResource<T>(
     return () => {
       cancelled = true;
       controller.abort();
-      if (timer) clearTimeout(timer);
+      cancelTimer?.();
     };
   }, [active, path, intervalMs, errorAfter, persist, attempt]);
 

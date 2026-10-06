@@ -16,7 +16,8 @@ public record RamDetails(
     double UsedPercent,
     string Source,             // "native" or "managed-fallback"
     string? Note);
-public record CpuInfo(double UsedPercent);
+/// <summary>CPU usage from the background sampler. <c>SampledAtUnixMs</c> is when it was measured, so a consumer can tell live from old.</summary>
+public record CpuInfo(double UsedPercent, long? SampledAtUnixMs = null);
 public record ProcessInfo(int Pid, string Name, long MemoryMB);
 public record DiskInfo(string Name, string VolumeLabel, string DriveType, string DriveFormat,
 double TotalGB, double FreeGB, double UsedGB, double UsedPercent);

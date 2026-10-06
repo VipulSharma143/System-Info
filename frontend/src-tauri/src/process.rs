@@ -23,7 +23,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
-use crate::supervisor::{self, Launch, Service, Supervisor};
+use crate::supervisor::{self, Launch, ReleaseReport, Service, Supervisor};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -67,6 +67,46 @@ impl From<supervisor::ServiceStatus> for ServiceStatus {
     }
 }
 
+/// Result of `prepare_for_update`, sent to the frontend. `released == false` means the installer must NOT run.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareResult {
+    pub released: bool,
+    pub waited_ms: u64,
+    pub detail: String,
+}
+
+impl From<ReleaseReport> for PrepareResult {
+    fn from(r: ReleaseReport) -> Self {
+        Self { released: r.released, waited_ms: r.waited_ms.min(u64::MAX as u128) as u64, detail: r.detail }
+    }
+}
+
+/// Appends one line from the frontend's updater to `update.log` (bounded, rotated). The cause chain of a failed
+/// update is written at the moment it fails; re-running the check afterwards would only ever see the retry.
+pub fn log_update_event(line: &str) {
+    let dir = data_root().join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    supervisor::rotate_log(&dir.join("update.log"), 512 * 1024);
+    let clipped: String = line.chars().take(4000).collect();
+    supervisor::log_line(&dir, "update.log", &clipped);
+}
+
+/// Executables and libraries shipped next to the backend: exactly what an installer has to overwrite.
+fn backend_files(app: &AppHandle) -> Vec<PathBuf> {
+    let Ok(resource_dir) = app.path().resource_dir() else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(resource_dir.join("backend")) else { return Vec::new() };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && matches!(p.extension().and_then(|e| e.to_str()), Some("exe" | "dll" | "so"))
+        })
+        .take(256)
+        .collect()
+}
+
 pub struct ServiceManager {
     sup: Supervisor,
 }
@@ -89,6 +129,14 @@ impl ServiceManager {
 
     pub fn stop(&self) -> ServiceStatus {
         self.sup.stop(&data_root().join("logs")).into()
+    }
+
+    /// Stops the backend and waits until its port, process and every file in the install's backend folder are
+    /// released, so an installer never races the operating system for them. Blocking: worker thread only.
+    pub fn prepare_for_update(&self, app: &AppHandle, timeout: Duration) -> PrepareResult {
+        let watch = backend_files(app);
+        let (_, report) = self.sup.stop_and_wait_released(&data_root().join("logs"), &watch, timeout);
+        report.into()
     }
 
     /// Non-blocking; never performs network I/O. Safe to call from any thread.

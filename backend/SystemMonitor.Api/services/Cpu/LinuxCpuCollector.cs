@@ -3,8 +3,8 @@ using System.Globalization;
 namespace SystemMonitor.Api.Services;
 
 /// <summary>
-/// /proc/stat for usage, cpufreq for clocks, hwmon (coretemp, k10temp) or thermal zones for temperature and RAPL
-/// for package power. Everything beyond usage is optional: virtual machines and locked-down kernels expose little.
+/// /proc/stat for usage, cpufreq for clocks, the CPU's own hwmon/thermal sensor for temperature (see
+/// <see cref="CpuTemperatureSelection"/>; the generic acpitz zone is never used) and RAPL for package power. Everything beyond usage is optional: virtual machines and locked-down kernels expose little.
 /// </summary>
 public sealed class LinuxCpuCollector : ICpuCollector
 {
@@ -58,7 +58,7 @@ public sealed class LinuxCpuCollector : ICpuCollector
             PowerWatts: power,
             LoadAverage: ReadLoadAverage(),
             TemperatureSource: source,
-            Note: null,
+            Note: packageTemp is null ? "No CPU temperature sensor is exposed by this system." : null,
             SampledAtUnixMs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
     }
 
@@ -116,59 +116,13 @@ public sealed class LinuxCpuCollector : ICpuCollector
         return result;
     }
 
-    /// <summary>Per-core temperatures keyed by the kernel's core id, plus the package temperature.</summary>
+    /// <summary>Per-core temperatures keyed by the kernel's core id, plus the package temperature. Live on every call.</summary>
     private Dictionary<int, double> ReadTemperatures(out double? package, out string? source)
     {
-        var cores = new Dictionary<int, double>();
-        package = null;
-        source = null;
-
-        var hwmonRoot = Path.Combine(_sys, "class", "hwmon");
-        if (Directory.Exists(hwmonRoot))
-        {
-            foreach (var dir in Directory.EnumerateDirectories(hwmonRoot).Order())
-            {
-                var name = ReadText(Path.Combine(dir, "name"));
-                if (name is not ("coretemp" or "k10temp" or "zenpower")) continue;
-
-                double? tdie = null, tctl = null, pkg = null;
-                foreach (var file in Directory.EnumerateFiles(dir, "temp*_input"))
-                {
-                    var celsius = ReadLong(file) is { } milli ? milli / 1000.0 : (double?)null;
-                    if (celsius is null) continue;
-                    var label = ReadText(file[..^"_input".Length] + "_label") ?? "";
-
-                    if (label.StartsWith("Core ", StringComparison.Ordinal) && int.TryParse(label.AsSpan(5), out var core)) cores[core] = celsius.Value;
-                    else if (label.StartsWith("Package", StringComparison.Ordinal)) pkg ??= celsius;
-                    else if (label == "Tdie") tdie = celsius;
-                    else if (label == "Tctl") tctl = celsius;
-                }
-
-                package = pkg ?? tdie ?? tctl;
-                if (package is not null || cores.Count > 0)
-                {
-                    source = name;
-                    package ??= cores.Count > 0 ? cores.Values.Max() : null;
-                    return cores;
-                }
-            }
-        }
-
-        var thermalRoot = Path.Combine(_sys, "class", "thermal");
-        if (Directory.Exists(thermalRoot))
-        {
-            foreach (var zone in Directory.EnumerateDirectories(thermalRoot, "thermal_zone*").Order())
-            {
-                if (ReadText(Path.Combine(zone, "type")) is not ("x86_pkg_temp" or "cpu-thermal" or "soc-thermal" or "cpu_thermal")) continue;
-                if (ReadLong(Path.Combine(zone, "temp")) is { } milli)
-                {
-                    package = milli / 1000.0;
-                    source = "thermal-zone";
-                    break;
-                }
-            }
-        }
-        return cores;
+        var reading = CpuTemperatureSelection.Read(_sys);
+        package = reading?.PackageCelsius;
+        source = reading?.Source;
+        return reading is null ? [] : new Dictionary<int, double>(reading.Cores);
     }
 
     // RAPL reports energy, not power: watts = delta energy / delta time, so the first read has none.

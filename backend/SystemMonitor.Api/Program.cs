@@ -10,6 +10,7 @@ var snapshotStore = new LocalJsonSnapshotStore(dataDir);
 SnapshotLogger.Initialize(snapshotStore);
 builder.Services.AddSingleton<ISnapshotStore>(snapshotStore);
 
+builder.Services.AddSingleton<HostSnapshotService>();
 if (OperatingSystem.IsWindows())
 {
     builder.Services.AddSingleton<ISystemInfoProvider, WindowsSystemInfoProvider>();
@@ -109,6 +110,9 @@ app.Lifetime.ApplicationStarted.Register(() => _ = Task.WhenAll(
     app.Services.GetRequiredService<MemoryHardwareService>().WarmUpAsync(),
     app.Services.GetRequiredService<GpuService>().WarmUpAsync())
     .ContinueWith(t => app.Logger.LogWarning(t.Exception, "Cache warm-up failed (non-fatal)."), TaskContinuationOptions.OnlyOnFaulted));
+
+app.Lifetime.ApplicationStarted.Register(() =>
+    Console.WriteLine($"[Startup] listening {(DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).TotalMilliseconds:F0} ms after process start"));
 
 app.Run();
 

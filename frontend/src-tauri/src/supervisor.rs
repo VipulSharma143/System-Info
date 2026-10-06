@@ -302,6 +302,100 @@ impl Supervisor {
         }
         self.status()
     }
+
+    /// Stops every service, then WAITS until the operating system has really let go of what an installer is
+    /// about to replace: each service's port is free, its process is gone, and none of `watch` (the backend
+    /// executable and its native library) is still held open or mapped.
+    ///
+    /// `stop()` returning only proves the child was signalled and reaped. It does not prove the files are
+    /// writable: on Windows a just-exited executable stays locked for a moment while the kernel tears down
+    /// the image section and antivirus/indexers finish scanning it, and on Linux the text of a killed binary
+    /// is busy until the last mapping goes. Starting an installer inside that window is the intermittent
+    /// "first attempt fails, immediate Retry works" failure, because by the time Retry runs the files are free.
+    /// Waiting on the actual condition (not a fixed sleep) makes the first attempt as safe as the second.
+    pub fn stop_and_wait_released(
+        &self,
+        log_dir: &Path,
+        watch: &[PathBuf],
+        timeout: Duration,
+    ) -> (ServiceStatus, ReleaseReport) {
+        let started = Instant::now();
+        let status = self.stop(log_dir);
+        let report = wait_released(self.services.iter().map(|s| s.port).collect::<Vec<_>>().as_slice(), watch, timeout);
+        log_line(
+            log_dir,
+            "update.log",
+            &format!(
+                "[prepare] released={} waited={} ms (stop took {} ms) {}",
+                report.released,
+                report.waited_ms,
+                started.elapsed().as_millis().saturating_sub(report.waited_ms),
+                report.detail
+            ),
+        );
+        (status, report)
+    }
+}
+
+/// Outcome of waiting for the OS to release ports and files after a stop.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReleaseReport {
+    pub released: bool,
+    pub waited_ms: u128,
+    /// Empty when released; otherwise names what was still held when the wait gave up.
+    pub detail: String,
+}
+
+/// Polls until every port is free and every watched file can be opened for writing, or `timeout` passes.
+/// The poll interval backs off from 25 ms to 250 ms: the normal case (already free) costs one pass, a slow
+/// release does not busy-loop.
+pub fn wait_released(ports: &[u16], watch: &[PathBuf], timeout: Duration) -> ReleaseReport {
+    let started = Instant::now();
+    let mut delay = Duration::from_millis(25);
+    loop {
+        let blockers = held_resources(ports, watch);
+        if blockers.is_empty() {
+            return ReleaseReport { released: true, waited_ms: started.elapsed().as_millis(), detail: String::new() };
+        }
+        if started.elapsed() >= timeout {
+            return ReleaseReport { released: false, waited_ms: started.elapsed().as_millis(), detail: blockers.join("; ") };
+        }
+        std::thread::sleep(delay);
+        delay = (delay * 2).min(Duration::from_millis(250));
+    }
+}
+
+fn held_resources(ports: &[u16], watch: &[PathBuf]) -> Vec<String> {
+    let mut held = Vec::new();
+    for port in ports {
+        if !port_free(*port) {
+            held.push(format!("port {port} still in use"));
+        }
+    }
+    for path in watch {
+        if is_locked(path) {
+            held.push(format!("{} is still locked", path.display()));
+        }
+    }
+    held
+}
+
+/// True when `path` exists but cannot currently be opened for writing (Windows sharing violation, Linux
+/// ETXTBSY on a running executable). A missing file is NOT locked: there is nothing to block replacement.
+/// Opening for write without `truncate` or `create` never modifies the file.
+pub fn is_locked(path: &Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    match OpenOptions::new().write(true).open(path) {
+        Ok(_) => false,
+        Err(e) => {
+            // Windows: ERROR_SHARING_VIOLATION (32) / ERROR_LOCK_VIOLATION (33); Linux: ETXTBSY (26).
+            // Permission problems are not a lock: they would not clear by waiting, and the installer
+            // is the one that runs elevated or reports them.
+            matches!(e.raw_os_error(), Some(32) | Some(33)) || (cfg!(unix) && e.raw_os_error() == Some(26))
+        }
+    }
 }
 
 /// Minimal HTTP/1.0 GET /health against loopback using only std — the whole
@@ -368,7 +462,7 @@ pub fn log_line(dir: &Path, name: &str, line: &str) {
 }
 
 /// Keeps logs bounded: if the file exceeds `max` bytes, keep one `.old` copy.
-fn rotate_log(path: &Path, max: u64) {
+pub fn rotate_log(path: &Path, max: u64) {
     if std::fs::metadata(path).map(|m| m.len() > max).unwrap_or(false) {
         let _ = std::fs::rename(path, path.with_extension("log.old"));
     }

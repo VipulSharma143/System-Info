@@ -22,6 +22,8 @@ public sealed partial class WindowsCpuCollector : ICpuCollector
     private List<PerformanceCounter> _frequency = [];
     private List<PerformanceCounter> _thermal = [];
     private string? _note;
+    private readonly TemperatureFlatlineGuard _flatline = new();
+    private bool _zoneIsConstant;
 
     [GeneratedRegex(@"^\d+,\d+$")]
     private static partial Regex LogicalInstance();
@@ -48,6 +50,11 @@ public sealed partial class WindowsCpuCollector : ICpuCollector
             var totalUsage = _total is null ? null : Next(_total);
             var clocks = cores.Where(c => c.ClockMhz is not null).Select(c => c.ClockMhz!.Value).ToList();
             var temperature = ReadThermalZone();
+            var load = !_primed || totalUsage is not { } tu ? (double?)null : Math.Clamp(tu, 0, 100);
+            // A generic ACPI zone that never moves while the CPU load swings is not the CPU: withhold it (latched for
+            // the session) instead of showing a constant as a live temperature.
+            if (temperature is { } zone && !_zoneIsConstant && _flatline.Observe(zone, load)) _zoneIsConstant = true;
+            if (_zoneIsConstant) temperature = null;
             var first = !_primed;
             _primed = true;
 
@@ -62,7 +69,10 @@ public sealed partial class WindowsCpuCollector : ICpuCollector
                 PowerWatts: null,
                 LoadAverage: null,
                 TemperatureSource: temperature is null ? null : "acpi-thermal-zone",
-                Note: _note ?? (temperature is null ? null : "Temperature is the ACPI thermal zone: an approximation, not the individual core sensors."),
+                Note: _note
+                    ?? (_zoneIsConstant ? "This PC's ACPI thermal zone does not follow CPU load, so no CPU temperature is shown."
+                    : temperature is null ? "Windows exposes no built-in CPU temperature sensor on this PC."
+                    : "Temperature is the ACPI thermal zone: an approximation, not the individual core sensors."),
                 SampledAtUnixMs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         }
     }
@@ -122,7 +132,8 @@ public sealed partial class WindowsCpuCollector : ICpuCollector
         }
     }
 
-    // The counter is in kelvin; zones that report nothing sensible (0, or a constant 27 C) are ignored.
+    // The counter is in kelvin; zones that report nothing sensible (outside 1..125 C) are ignored. A zone that is
+    // plausible but constant is caught by the flatline guard in Read().
     private double? ReadThermalZone()
     {
         double? best = null;

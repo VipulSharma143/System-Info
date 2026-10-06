@@ -1,6 +1,6 @@
 [package]
 name = "system-info"
-version = "2.4.7"
+version = "2.4.8"
 description = "System Info — native desktop shell"
 authors = ["Vipul Sharma"]
 edition = "2021"
@@ -40,6 +40,15 @@ serde_json = "1"
 # `tauri build` refuses mismatched pairs, which is why Cargo.lock is committed.
 tauri-plugin-updater = "2.12"
 tauri-plugin-process = "2.3"
+
+# Release builds optimise for a small, quiet shell: whole-program optimisation, one codegen unit, stripped symbols,
+# size-oriented code and abort-on-panic (no unwinding tables). The shell only supervises a child process and hosts a webview.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
 
 [features]
 # This feature is used for production builds where `devPath` points to the

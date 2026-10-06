@@ -7,6 +7,8 @@ usedPercent: number;
 
 export interface CpuInfo {
 usedPercent: number;
+  /** Unix ms when this reading was measured; absent on responses from older backends. */
+  sampledAtUnixMs?: number | null;
 }
 
 export interface ProcessInfo {

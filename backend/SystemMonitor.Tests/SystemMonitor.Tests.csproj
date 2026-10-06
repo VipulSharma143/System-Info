@@ -17,6 +17,8 @@
     <Compile Include="../SystemMonitor.Api/services/LocalJsonSnapshotStore.cs" Link="linked/LocalJsonSnapshotStore.cs" />
     <Compile Include="../SystemMonitor.Api/interface/ISnapshotStore.cs" Link="linked/ISnapshotStore.cs" />
     <Compile Include="../SystemMonitor.Api/Native/NativeInterop.cs" Link="linked/NativeInterop.cs" />
+    <Compile Include="../SystemMonitor.Api/Native/HostSnapshot.cs" Link="linked/HostSnapshot.cs" />
+    <Compile Include="../SystemMonitor.Api/services/HostSnapshotService.cs" Link="linked/HostSnapshotService.cs" />
     <Compile Include="../SystemMonitor.Api/Native/NativeKernels.cs" Link="linked/NativeKernels.cs" />
     <Compile Include="../SystemMonitor.Api/interface/ISystemInfoProvider.cs" Link="linked/ISystemInfoProvider.cs" />
     <Compile Include="../SystemMonitor.Api/interface/MemoryModels.cs" Link="linked/MemoryModels.cs" />
@@ -32,6 +34,7 @@
     <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlMatching.cs" Link="linked/NvmlMatching.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/PciIds.cs" Link="linked/PciIds.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuModels.cs" Link="linked/CpuModels.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Cpu/CpuTemperatureSelection.cs" Link="linked/CpuTemperatureSelection.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuService.cs" Link="linked/CpuService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/LinuxCpuCollector.cs" Link="linked/LinuxCpuCollector.cs" />
   </ItemGroup>

@@ -105,18 +105,26 @@ public sealed class SystemInfoCache
 
             var bytes = JsonSerializer.SerializeToUtf8Bytes(value, Json);
             var path = PathOf(name);
-            var temp = $"{path}.{Environment.CurrentManagedThreadId}.tmp";
+            // Unique per write. A name derived from the thread id could be reused by a second writer on the same
+            // pool thread, whose temp file the first writer's cleanup would then delete mid-write.
+            var temp = $"{path}.{Guid.NewGuid():N}.tmp";
 
             await _io.WaitAsync();
             try
             {
-                await File.WriteAllBytesAsync(temp, bytes);
-                File.Move(temp, path, overwrite: true);
+                try
+                {
+                    await File.WriteAllBytesAsync(temp, bytes);
+                    File.Move(temp, path, overwrite: true);
+                }
+                finally
+                {
+                    TryDelete(temp);   // inside the lock: nobody else can be using this name anyway, and it never outlives the write
+                }
             }
             finally
             {
                 _io.Release();
-                TryDelete(temp);
             }
         }
         catch (Exception ex)

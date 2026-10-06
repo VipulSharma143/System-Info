@@ -33,8 +33,9 @@ app.MapGet("/api/system/memory/health", (MemoryHardwareService memory) => memory
         .WithName("GetMemoryHealth");
 app.MapGet("/api/system/cpu", (SystemMonitorBackgroundService sampler) =>
 {
-var cached = sampler.GetCachedCpu();
-return cached ?? new CpuInfo(0); // 0% until the first sample completes
+    // Never a made-up 0%: until the first real sample exists the honest answer is "not ready".
+    var cached = sampler.GetCachedCpu();
+    return cached is null ? Results.Json(new { error = "CPU usage is not ready yet." }, statusCode: StatusCodes.Status503ServiceUnavailable) : Results.Json(cached);
 })
 .WithName("GetCpuUsage");
 

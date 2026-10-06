@@ -17,6 +17,18 @@ public static class NativeInterop
     [DllImport("systemmonitor_native", EntryPoint = "get_cpu_temperature")]
     public static extern double GetCpuTemperature();
 
+    // CPU ticks + memory + CPU temperature in one call. 1 = at least one field valid (see ValidMask), 0 = nothing readable, -1 = bad arguments.
+    [DllImport("systemmonitor_native", EntryPoint = "si_read_host_snapshot")]
+    public static extern int ReadHostSnapshot(ref SiHostSnapshot snapshot);
+
+    // Live CPU package temperature: 1 = value read, 0 = no CPU sensor on this machine, -1 = invalid arguments.
+    [DllImport("systemmonitor_native", EntryPoint = "si_cpu_temperature")]
+    public static extern int CpuTemperature(out double celsius, StringBuilder? source, int sourceCapacity);
+
+    // Same against another sysfs root (tests use a temporary directory tree).
+    [DllImport("systemmonitor_native", EntryPoint = "si_cpu_temperature_at", CharSet = CharSet.Ansi)]
+    public static extern int CpuTemperatureAt(string sysRoot, out double celsius, StringBuilder? source, int sourceCapacity);
+
     [DllImport("systemmonitor_native", EntryPoint = "get_gpu_vendor")]
     public static extern int GetGpuVendor();
 

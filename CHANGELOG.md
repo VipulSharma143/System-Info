@@ -13,6 +13,30 @@ All notable changes to SystemInfo are documented here.
 ### Known Issues
 
 
+## [2.4.8] - 2026-10-06
+
+### Fixed
+- **Updates now work the first time.** The installer used to start the moment the background service had been told to stop, but the operating system keeps a just-stopped program's files locked for a short while. The first attempt could therefore fail while an immediate Retry (by then the files were free) succeeded. The app now waits until the service's port, process and files are confirmed released before it installs, and never starts the installer on a locked file. Brief network problems while checking or downloading are retried automatically (a few times, with growing pauses); problems that cannot fix themselves (a bad signature, a missing file, a cancelled password prompt, a full disk) are reported immediately and not retried. A finished download is kept, so Retry no longer downloads it again, and a download that arrives short is detected before install. Every failure's full cause is now written to `update.log` in the app's data folder at the moment it happens.
+- **CPU temperature stuck near 28 °C.** The app read the first thermal zone the system lists, which on most PCs is a generic firmware zone that sits at a fixed temperature whatever the CPU is doing. It now reads the CPU's own sensor (Intel coretemp, AMD k10temp/zenpower, or a real package thermal zone), reads it fresh every time, and ignores broken readings. If the PC exposes no real CPU sensor, the temperature shows "Not reported" with a reason instead of a made-up number. On Windows, where only the generic zone exists, a zone that never moves while the CPU load swings is recognised and withheld.
+- **No more 0% while the first CPU sample is pending.** The CPU endpoint now says "not ready" instead of answering 0%, and every CPU reading carries the time it was measured.
+- **Startup-cache write race.** Two writes to the same cache file at the same moment could delete each other's temporary file, losing that write. Each write now uses its own temporary file.
+
+### Changed
+- **Overlay tab redesigned.** One compact row of live tiles: CPU, memory and every graphics adapter, each with a big usage number, a short trend, and just the readings that matter (CPU temperature; GPU video memory and temperature). The clock, fan and power sections, the per-core grid and the stacked detail cards are gone.
+- **Lighter on your PC.** The app stops polling while its window is minimised or hidden and catches up the moment it is shown again; the update check, analytics and live pages all follow this. The background service uses a non-concurrent, memory-conserving garbage collector (no background GC thread), and the desktop shell is built size-optimised.
+- **One native read for the basics.** Memory, CPU ticks and CPU temperature now come from a single call into the native engine (persistent file handles, no per-call allocation worth mentioning) shared by every part of the app that needs them, instead of several separate parses of /proc. Measured on a test machine: the memory read dropped from about 21 µs and 14 KB of allocations to about 10 µs and under 100 bytes, while also returning CPU ticks and temperature.
+- **Assembly kept only where it measurably helps.** The vector sum kernel is about 1.2-1.3x faster than the compiler's code; the hand-written memory copy was never faster than the system's own and has been removed, and the vector add shows no measurable gain on the test machine (it is memory-bound) but is kept, as it is verified and costs nothing. If a kernel ever fails its start-up self-check on a given CPU, it is switched off automatically and the app uses plain, safe code instead. Setting `SYSTEMINFO_NO_ASM=1` forces the plain path.
+- **Native functions say when they have nothing.** The new temperature and snapshot calls report "available / not available" explicitly rather than returning zero or -1 values that look like readings.
+
+### Added
+- Tests that no longer depend on the machine they run on: CPU temperature selection, the host snapshot parsers, the update-release wait, the update retry rules and the polling pause all run against fixture folders, fakes and temporary directories. The suite now has 9 native tests (including a no-assembly run), 638 C# checks, 11 Rust tests and 23 frontend tests, and CI now runs the frontend checks and a no-assembly pass as well.
+- `scripts/measure-startup.mjs`: measures cold vs. warm start (with and without the cache), memory and thread count, and can run a long soak that reports memory growth per hour.
+
+### Known Issues
+- The Windows parts of this release (updater wait, ACPI zone guard, snapshot reader) have been checked as far as possible without a real Windows PC, but have not been run on one yet. The Tauri shell code itself was syntax-checked but not compiled in the environment used for this release; CI builds it.
+- The first-attempt update failure was fixed from the code path rather than reproduced on a real PC. If it still happens, `update.log` now contains the exact cause.
+
+
 ## [2.4.7] - 2026-10-06
 
 ### Added

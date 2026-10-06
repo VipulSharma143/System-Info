@@ -14,6 +14,9 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include <atomic>
+#include <cstdlib>
+#include <mutex>
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -35,11 +38,11 @@ long long si_sum_i32_sse2(const int*, size_t);
 long long si_sum_i32_avx2(const int*, size_t);
 void si_minmax_i32_sse2(const int*, size_t, int*, int*);
 void si_minmax_i32_avx2(const int*, size_t, int*, int*);
-void si_memcpy_sse2(void*, const void*, size_t);
-void si_memcpy_avx2(void*, const void*, size_t);
 unsigned long long si_xor_u64_sse2(const unsigned long long*, size_t);
 unsigned long long si_xor_u64_avx2(const unsigned long long*, size_t);
 }
+
+extern "C" int si_kernel_selftest_impl(int onlyTier);
 
 namespace {
 struct Features { long long mask = 0; char vendor[13] = {0}; };
@@ -75,7 +78,35 @@ Features detect() {
     return f;
 }
 const Features& features() { static const Features f = detect(); return f; }
-bool useAvx2() { return (features().mask & SI_FEAT_AVX2) != 0; }
+bool hwAvx2() { return (features().mask & SI_FEAT_AVX2) != 0; }
+bool hwSse2() { return (features().mask & SI_FEAT_SSE2) != 0; }
+
+// Active tier: 2 = AVX2 asm, 1 = SSE2 asm, 0 = portable C++. Decided once, after the kernels have proven themselves:
+//   * SYSTEMINFO_NO_ASM=1 (or si_force_portable(1)) forces the portable path — a kill switch for field problems;
+//   * a CPU without SSE2 (not x86-64, or a masked hypervisor) never reaches assembly;
+//   * the selftest runs the candidate tier against the C++ reference; a tier that fails is demoted
+//     (AVX2 -> SSE2 -> portable) instead of being trusted. A wrong answer is never an acceptable failure mode.
+std::atomic<int> g_tier{-1};
+std::atomic<bool> g_forced{false};
+std::once_flag g_once;
+int g_demotions = 0;
+
+int selftest_tier(int t) { return si_kernel_selftest_impl(t); }   // runs one tier against the C++ reference
+
+int decide_tier() {
+    if (g_forced.load()) return 0;
+    if (const char* e = std::getenv("SYSTEMINFO_NO_ASM"); e && *e && *e != '0') return 0;
+    int tier = hwAvx2() ? 2 : (hwSse2() ? 1 : 0);
+    while (tier > 0 && selftest_tier(tier) != 0) { --tier; ++g_demotions; }
+    return tier;
+}
+int tier() {
+    int t = g_tier.load(std::memory_order_acquire);
+    if (t >= 0) return t;
+    std::call_once(g_once, [] { if (g_tier.load() < 0) g_tier.store(decide_tier(), std::memory_order_release); });
+    return g_tier.load(std::memory_order_acquire);
+}
+bool useAvx2() { return tier() == 2; }
 }
 
 // ---- reference implementations (also used for verification) ----
@@ -83,6 +114,13 @@ static unsigned long long ref_xor(const unsigned long long* a, size_t n) { unsig
 static void ref_add(const float* a, const float* b, float* o, size_t n) { for (size_t i = 0; i < n; i++) o[i] = a[i] + b[i]; }
 static double ref_dot(const float* a, const float* b, size_t n) { double s = 0; for (size_t i = 0; i < n; i++) s += (double)a[i] * b[i]; return s; }
 static long long ref_sum(const int* a, size_t n) { long long s = 0; for (size_t i = 0; i < n; i++) s += a[i]; return s; }
+
+// ---- portable kernels: plain C++, correct on any CPU, used when assembly is unavailable, disabled or demoted ----
+static void port_add(const float* a, const float* b, float* o, size_t n) { for (size_t i = 0; i < n; i++) o[i] = a[i] + b[i]; }
+static float port_dot(const float* a, const float* b, size_t n) { double s = 0; for (size_t i = 0; i < n; i++) s += (double)a[i] * b[i]; return (float)s; }
+static long long port_sum(const int* a, size_t n) { long long s = 0; for (size_t i = 0; i < n; i++) s += a[i]; return s; }
+static void port_minmax(const int* a, size_t n, int* mn, int* mx) { int lo = a[0], hi = a[0]; for (size_t i = 1; i < n; i++) { lo = std::min(lo, a[i]); hi = std::max(hi, a[i]); } *mn = lo; *mx = hi; }
+static unsigned long long port_xor(const unsigned long long* a, size_t n) { return ref_xor(a, n); }
 
 extern "C" {
 
@@ -95,24 +133,33 @@ int si_get_cpu_vendor(char* out, int size) {
     return (int)std::strlen(out);
 }
 
-int si_active_isa() { return useAvx2() ? 2 : 1; }   // 2 = AVX2, 1 = SSE2
+int si_active_isa() { return tier(); }   // 2 = AVX2 asm, 1 = SSE2 asm, 0 = portable C++
+
+// Forces (1) or releases (0) the portable path. Only effective before the first kernel call decides the tier, or
+// as a switch to portable at any time; it never re-enables a tier that was demoted.
+void si_force_portable(int on) {
+    g_forced.store(on != 0);
+    if (on) g_tier.store(0, std::memory_order_release);
+}
+// How many tiers the startup selftest rejected (0 on a healthy machine).
+int si_asm_demotions() { (void)tier(); return g_demotions; }
 
 void si_vec_add_f32(const float* a, const float* b, float* out, long long n) {
     if (n <= 0 || !a || !b || !out) return;
-    useAvx2() ? si_vec_add_f32_avx2(a, b, out, (size_t)n) : si_vec_add_f32_sse2(a, b, out, (size_t)n);
+    switch (tier()) { case 2: si_vec_add_f32_avx2(a, b, out, (size_t)n); break; case 1: si_vec_add_f32_sse2(a, b, out, (size_t)n); break; default: port_add(a, b, out, (size_t)n); }
 }
 float si_dot_f32(const float* a, const float* b, long long n) {
     if (n <= 0 || !a || !b) return 0.0f;
-    return useAvx2() ? si_dot_f32_avx2(a, b, (size_t)n) : si_dot_f32_sse2(a, b, (size_t)n);
+    switch (tier()) { case 2: return si_dot_f32_avx2(a, b, (size_t)n); case 1: return si_dot_f32_sse2(a, b, (size_t)n); default: return port_dot(a, b, (size_t)n); }
 }
 long long si_sum_i32(const int* a, long long n) {
     if (n <= 0 || !a) return 0;
-    return useAvx2() ? si_sum_i32_avx2(a, (size_t)n) : si_sum_i32_sse2(a, (size_t)n);
+    switch (tier()) { case 2: return si_sum_i32_avx2(a, (size_t)n); case 1: return si_sum_i32_sse2(a, (size_t)n); default: return port_sum(a, (size_t)n); }
 }
 
 long long si_minmax_i32(const int* a, long long n, int* minOut, int* maxOut) {
     if (n <= 0 || !a || !minOut || !maxOut) return 0;
-    useAvx2() ? si_minmax_i32_avx2(a, (size_t)n, minOut, maxOut) : si_minmax_i32_sse2(a, (size_t)n, minOut, maxOut);
+    switch (tier()) { case 2: si_minmax_i32_avx2(a, (size_t)n, minOut, maxOut); break; case 1: si_minmax_i32_sse2(a, (size_t)n, minOut, maxOut); break; default: port_minmax(a, (size_t)n, minOut, maxOut); }
     return 1;
 }
 
@@ -124,20 +171,23 @@ int si_memcpy(void* dst, const void* src, long long n) {
     auto d = reinterpret_cast<uintptr_t>(dst), s = reinterpret_cast<uintptr_t>(src);
     if (d == s) return 1;
     if (d < s + (uintptr_t)n && s < d + (uintptr_t)n) { std::memmove(dst, src, (size_t)n); return 1; }
-    useAvx2() ? si_memcpy_avx2(dst, src, (size_t)n) : si_memcpy_sse2(dst, src, (size_t)n);
+    std::memcpy(dst, src, (size_t)n);   // libc's memcpy matched or beat the hand-written assembly in benchmarks (removed in 2.4.8)
     return 1;
 }
 
 unsigned long long si_xor_u64(const unsigned long long* a, long long nwords) {
     if (nwords <= 0 || !a) return 0;
-    return useAvx2() ? si_xor_u64_avx2(a, (size_t)nwords) : si_xor_u64_sse2(a, (size_t)nwords);
+    switch (tier()) { case 2: return si_xor_u64_avx2(a, (size_t)nwords); case 1: return si_xor_u64_sse2(a, (size_t)nwords); default: return port_xor(a, (size_t)nwords); }
 }
 
 // Verifies every kernel that this CPU can run against the C++ reference,
 // across boundary lengths and deliberately misaligned pointers.
 // Returns 0 on success; otherwise a bitmask: 1=add, 2=dot, 4=sum, 16=minmax,
 // 32=memcpy, 64=xor checksum (bit 8 set additionally if the AVX2 path failed).
-int si_kernel_selftest() {
+int si_kernel_selftest_impl(int onlyTier);
+int si_kernel_selftest() { return si_kernel_selftest_impl(0); }
+
+int si_kernel_selftest_impl(int onlyTier) {
     const size_t lens[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 33, 1000, 4099};
     const size_t maxN = 4099 + 8;
     std::vector<float> fa(maxN + 4), fb(maxN + 4), fo(maxN + 4), fr(maxN + 4);
@@ -150,7 +200,7 @@ int si_kernel_selftest() {
         ia[i] = (int)rnd();   // full int32 range: exercises sign extension and 64-bit accumulation
     }
     int fail = 0;
-    for (int isa = 1; isa <= (useAvx2() ? 2 : 1); isa++) {
+    for (int isa = onlyTier ? onlyTier : 1; isa <= (onlyTier ? onlyTier : (hwAvx2() ? 2 : 1)); isa++) {
         for (size_t off = 0; off < 4; off++) {          // off != 0 -> unaligned pointers
             for (size_t n : lens) {
                 const float* a = fa.data() + off; const float* b = fb.data() + off;
@@ -188,7 +238,7 @@ int si_kernel_selftest() {
                     std::vector<unsigned char> src(bytes + 1), dst(bytes + 64, 0xCD), want(bytes + 64, 0xCD);
                     for (size_t i = 0; i < src.size(); i++) src[i] = (unsigned char)(i * 131 + 7);
                     std::memcpy(want.data() + 16, src.data(), bytes);
-                    if (isa == 2) si_memcpy_avx2(dst.data() + 16, src.data(), bytes); else si_memcpy_sse2(dst.data() + 16, src.data(), bytes);
+                    si_memcpy(dst.data() + 16, src.data(), (long long)bytes);
                     if (dst != want) fail |= 32 | (isa == 2 ? 8 : 0);
                 }
 
