@@ -245,3 +245,26 @@ export interface GpuLiveInfo {
   readings: GpuLiveReading[];
   sampledAtUnixMs: number;
 }
+
+export interface CpuCoreReading {
+  index: number;
+  usagePercent: number | null;
+  clockMhz: number | null;
+  temperatureC: number | null;
+}
+
+/** Live CPU detail. Null means the platform did not report it. */
+export interface CpuDetail {
+  totalUsagePercent: number | null;
+  cores: CpuCoreReading[];
+  averageClockMhz: number | null;
+  highestClockMhz: number | null;
+  baseClockMhz: number | null;
+  maxClockMhz: number | null;
+  packageTemperatureC: number | null;
+  powerWatts: number | null;
+  loadAverage: number[] | null;
+  temperatureSource: string | null;
+  note: string | null;
+  sampledAtUnixMs: number;
+}

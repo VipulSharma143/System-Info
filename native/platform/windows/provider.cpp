@@ -179,4 +179,32 @@ int get_gpu_vram_bytes(int adapterIndex, char* nameOut, int nameBufferSize,
     return 1;
 }
 
+int get_gpu_luid(int adapterIndex, long long* luidOut) {
+    if (luidOut) *luidOut = 0;
+    if (!luidOut) return 0;
+
+    IDXGIFactory* factory = nullptr;
+    if (FAILED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&factory))) {
+        return 0;
+    }
+
+    IDXGIAdapter* adapter = nullptr;
+    HRESULT hr = factory->EnumAdapters((UINT)adapterIndex, &adapter);
+    if (FAILED(hr) || adapter == nullptr) {
+        factory->Release();
+        return 0;
+    }
+
+    DXGI_ADAPTER_DESC desc;
+    int ok = 0;
+    if (SUCCEEDED(adapter->GetDesc(&desc))) {
+        *luidOut = ((long long)(unsigned int)desc.AdapterLuid.HighPart << 32) | (long long)desc.AdapterLuid.LowPart;
+        ok = 1;
+    }
+
+    adapter->Release();
+    factory->Release();
+    return ok;
+}
+
 } // extern "C"

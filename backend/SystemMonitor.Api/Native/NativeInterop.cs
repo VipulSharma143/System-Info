@@ -50,6 +50,9 @@ public static class NativeInterop
         out long dedicatedBytes,
         out long sharedSystemBytes);
 
+    [DllImport("systemmonitor_native", EntryPoint = "get_gpu_luid")]
+    public static extern int GetGpuLuid(int adapterIndex, out long luid);
+
     // ---- CPU features + Assembly kernels (native/src/simd_dispatch.cpp) ----
     // Every 64-bit quantity crosses the boundary as C# long (== C++ long long);
     // nothing here narrows to int. Feature bits mirror SI_FEAT_* in native_engine.h.

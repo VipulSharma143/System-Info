@@ -258,9 +258,9 @@ public partial class WindowsSystemInfoProvider
     // such adapter. 16 is a generous sanity ceiling — no real system has
     // more DXGI adapters than that; it only exists to guarantee this loop
     // terminates even if the native side ever returns 1 unexpectedly forever.
-    internal static List<(string? Name, long DedicatedBytes, long SharedBytes)> ReadDxgiAdapters()
+    internal static List<DxgiAdapter> ReadDxgiAdapters()
     {
-        var results = new List<(string?, long, long)>();
+        var results = new List<DxgiAdapter>();
         var nameBuffer = new System.Text.StringBuilder(256);
 
         for (int i = 0; i < 16; i++)
@@ -268,7 +268,7 @@ public partial class WindowsSystemInfoProvider
             nameBuffer.Clear();
             int found = NativeInterop.GetGpuVramBytes(i, nameBuffer, nameBuffer.Capacity, out long dedicated, out long shared);
             if (found == 0) break;
-            results.Add((nameBuffer.ToString(), dedicated, shared));
+            results.Add(new DxgiAdapter(nameBuffer.ToString(), dedicated, shared, ReadLuid(i)));
         }
 
         return results;
@@ -279,7 +279,7 @@ public partial class WindowsSystemInfoProvider
     // the CPU counter's warm-up above). Only engines with non-trivial
     // utilization are returned; an idle engine isn't reported as "0% GPU",
     // it's simply absent (spec §12).
-    private static List<GpuEngineUsage> ReadGpuEngineUsage()
+    internal static List<GpuEngineUsage> ReadGpuEngineUsage()
     {
         var result = new List<GpuEngineUsage>();
 
@@ -339,20 +339,32 @@ public partial class WindowsSystemInfoProvider
         return result.OrderByDescending(e => e.UsagePercent).Take(20).ToList();
     }
 
-    /// <summary>Per-adapter dedicated/shared memory in use, keyed by the "_phys_N" index (the adapter's WMI order).</summary>
-    internal static Dictionary<int, (long? Dedicated, long? Shared)> ReadGpuMemoryUsage()
+    // An older native library without this export just means adapters cannot be told apart by LUID.
+    private static long? ReadLuid(int adapterIndex)
     {
-        var result = new Dictionary<int, (long? Dedicated, long? Shared)>();
+        try
+        {
+            return NativeInterop.GetGpuLuid(adapterIndex, out var luid) != 0 ? luid : null;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Per-adapter dedicated/shared memory in use, keyed by adapter LUID (see <see cref="GpuMath.TryParseLuid"/>).</summary>
+    internal static Dictionary<long, (long? Dedicated, long? Shared)> ReadGpuMemoryUsage()
+    {
+        var result = new Dictionary<long, (long? Dedicated, long? Shared)>();
         if (!PerformanceCounterCategory.Exists("GPU Adapter Memory")) return result;
 
         foreach (var instance in new PerformanceCounterCategory("GPU Adapter Memory").GetInstanceNames())
         {
-            var marker = instance.LastIndexOf("_phys_", StringComparison.OrdinalIgnoreCase);
-            if (marker < 0 || !int.TryParse(instance.AsSpan(marker + "_phys_".Length), out var index)) continue;
+            if (!GpuMath.TryParseLuid(instance, out var luid)) continue;
 
             using var dedicated = new PerformanceCounter("GPU Adapter Memory", "Dedicated Usage", instance, readOnly: true);
             using var shared = new PerformanceCounter("GPU Adapter Memory", "Shared Usage", instance, readOnly: true);
-            result[index] = ((long)dedicated.NextValue(), (long)shared.NextValue());
+            result[luid] = ((long)dedicated.NextValue(), (long)shared.NextValue());
         }
         return result;
     }

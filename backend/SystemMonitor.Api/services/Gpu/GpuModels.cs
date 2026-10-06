@@ -17,7 +17,8 @@ public sealed record GpuAdapter(
     bool? Integrated,
     bool? Primary,
     long? DedicatedMemoryBytes,
-    long? SharedMemoryBytes);
+    long? SharedMemoryBytes,
+    long? Luid = null);
 
 /// <summary>
 /// One live sample for the adapter with the same <see cref="Id"/>. Null means the platform did not report it.
@@ -44,6 +45,9 @@ public sealed record GpuLiveReading(
     IReadOnlyList<GpuEngineUsage>? Engines,
     string? Source,
     string? Note);
+
+/// <summary>One adapter as DXGI enumerates it; the LUID is what Windows' performance counters are named by.</summary>
+public sealed record DxgiAdapter(string? Name, long DedicatedBytes, long SharedBytes, long? Luid);
 
 public sealed record GpuHardwareInfo(bool Available, IReadOnlyList<GpuAdapter> Adapters, string? Note);
 

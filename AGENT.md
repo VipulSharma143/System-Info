@@ -12,7 +12,7 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.4.5 · **License:** none — no `LICENSE` file exists in the repo.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.4.6 · **License:** none — no `LICENSE` file exists in the repo.
 
 ## 📖 What it is
 
@@ -77,7 +77,9 @@ backend/SystemMonitor.Api/
                          WindowsBatteryInterop, AppDataPath, SystemInfoService + SystemInfoCache (startup cache),
                          MemoryHardwareService/MemoryHealthReader/MemoryMapping/RamDetailsReader,
                          services/Gpu/: GpuService (cached hardware + 1 s shared live sample), LinuxGpuCollector (DRM/sysfs), WindowsGpuCollector,
-                         NvmlGpuSource (NVML via NativeLibrary, optional), PciIds (pci.ids names). API: /api/system/gpus/hardware and /gpus/live
+                         GpuCounters/GpuMath (Windows counters are matched to adapters by LUID via native get_gpu_luid; per-engine sums), NvmlGpuSource (NVML via NativeLibrary, optional), PciIds (pci.ids names). API: /api/system/gpus/hardware and /gpus/live.
+                         services/Cpu/: CpuService (1 s shared sample), LinuxCpuCollector (/proc/stat deltas, cpufreq, hwmon, RAPL), WindowsCpuCollector
+                         (Processor Information counters, ACPI thermal zone). API: /api/system/cpu/detail. Frontend: OverlayView (CPU + all GPUs)
   interface/             ISystemInfoProvider, ISnapshotStore
   Native/                 NativeInterop.cs (P/Invoke bridge), NativeKernels.cs (safe span wrappers + C# reference implementations)
 backend/SystemMonitor.Tests/  dependency-free test runner (analytics, storage, native wrappers); links sources instead of referencing the Api project

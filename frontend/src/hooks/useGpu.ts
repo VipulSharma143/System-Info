@@ -23,11 +23,11 @@ const HARDWARE_CACHE: PersistSpec<unknown> = {
 };
 
 /** Adapter facts are fetched once and remembered between launches; telemetry is polled only while the page is open. */
-export function useGpu(active: boolean) {
+export function useGpu(active: boolean, pollMs = LIVE_POLL_MS) {
   const hardware = useJsonResource<GpuHardwareInfo>('/api/system/gpus/hardware', { active, persist: HARDWARE_CACHE });
   const live = useJsonResource<GpuLiveInfo>('/api/system/gpus/live', {
     active: active && hardware.data?.available === true,
-    intervalMs: LIVE_POLL_MS,
+    intervalMs: pollMs,
   });
   return { hardware, live };
 }

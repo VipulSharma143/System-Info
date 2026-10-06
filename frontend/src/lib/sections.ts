@@ -6,6 +6,7 @@ export const SECTIONS = [
   { id: 'processes', label: 'Processes', hue: 'cpu', title: 'Processes', description: 'What is running, by memory' },
   { id: 'ram', label: 'RAM', hue: 'ram', title: 'Memory', description: 'Usage, installed modules and health' },
   { id: 'gpu', label: 'GPU', hue: 'gpu', title: 'Graphics', description: 'Adapters, video memory and live telemetry' },
+  { id: 'overlay', label: 'Overlay', hue: 'overlay', title: 'Performance overlay', description: 'CPU and GPU together, live — for games and heavy work' },
   { id: 'storage', label: 'Storage', hue: 'disk', title: 'Storage', description: 'Drives, capacity and free space' },
   { id: 'network', label: 'Network', hue: 'net', title: 'Network', description: 'Traffic, interfaces and connection speed' },
   { id: 'battery', label: 'Battery', hue: 'power', title: 'Battery', description: 'Charge, health and power draw' },

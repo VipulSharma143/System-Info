@@ -139,6 +139,29 @@ static class GpuTests
                 new GpuEngineUsage("pid_3_luid_0x0_0x1_phys_0_eng_0_engtype_3D", 1), new GpuEngineUsage("pid_2_luid_0x0_0x1_phys_0_eng_1_engtype_Copy", 2),
                 new GpuEngineUsage("pid_4_luid_0x0_0x1_phys_0_eng_0_engtype_VideoDecode", 80), new GpuEngineUsage("pid_5_luid_0x0_0x1_phys_0_eng_0_engtype_VideoDecode", 60)]);
             Check(agg.Count == 3 && agg[0].InstanceName == "VideoDecode" && agg[0].UsagePercent == 100 && agg[1].InstanceName == "3D" && agg[1].UsagePercent == 31, "engine instances are summed per engine across processes, capped at 100");
+            // Hybrid laptop: both GPUs report "_phys_0"; only the LUID separates them.
+            const string intelLuid = "luid_0x00000000_0x0000f1a2", nvidiaLuid = "luid_0x00000000_0x0000f1b4";
+            Check(GpuMath.TryParseLuid($"pid_9_{intelLuid}_phys_0_eng_0_engtype_3D", out var il) && il == 0xf1a2 &&
+                  GpuMath.TryParseLuid($"{nvidiaLuid}_phys_0", out var nl) && nl == 0xf1b4 &&
+                  GpuMath.TryParseLuid("luid_0xffffffff_0x00000001_phys_0", out var big) && big == unchecked((long)0xffffffff00000001UL) &&
+                  !GpuMath.TryParseLuid("pid_9_engtype_3D", out _), "LUIDs are parsed from counter instance names");
+            var hybrid = new[]
+            {
+                new GpuEngineUsage($"pid_1_{intelLuid}_phys_0_eng_0_engtype_3D", 20), new GpuEngineUsage($"pid_2_{intelLuid}_phys_0_eng_0_engtype_3D", 3),
+                new GpuEngineUsage($"pid_3_{nvidiaLuid}_phys_0_eng_0_engtype_3D", 90), new GpuEngineUsage($"pid_3_{nvidiaLuid}_phys_0_eng_3_engtype_Copy", 5),
+            };
+            var intelEngines = GpuCounters.EnginesFor(0xf1a2, false, hybrid);
+            var nvEngines = GpuCounters.EnginesFor(0xf1b4, false, hybrid);
+            Check(intelEngines.Count == 2 && GpuMath.AggregateEngines(intelEngines)[0].UsagePercent == 23, "the iGPU only counts its own processes, not the NVIDIA GPU's game");
+            Check(nvEngines.Count == 2 && GpuMath.AggregateEngines(nvEngines)[0].UsagePercent == 90, "the NVIDIA GPU gets its own engine load");
+            Check(GpuCounters.EnginesFor(null, false, hybrid).Count == 0 && GpuCounters.EnginesFor(null, true, hybrid).Count == 4, "without a LUID counters are only used for a single adapter");
+            var mem = new Dictionary<long, (long? Dedicated, long? Shared)> { [0xf1a2] = (50, 60), [0xf1b4] = (900, 10) };
+            Check(GpuCounters.MemoryFor(0xf1a2, false, mem) is (50, 60) && GpuCounters.MemoryFor(0xf1b4, false, mem) is (900, 10), "memory counters are not mixed between GPUs");
+            Check(GpuCounters.MemoryFor(null, false, mem) is null && GpuCounters.MemoryFor(0x1, false, mem) is null, "an unknown adapter gets no borrowed memory figures");
+            var dx = new List<DxgiAdapter> { new("Intel(R) Iris(R) Xe Graphics", 128, 7800, 0xf1a2), new("NVIDIA GeForce RTX 4060 Laptop GPU", 8000, 7800, 0xf1b4), new("Microsoft Basic Render Driver", 0, 7800, 0x5) };
+            Check(GpuCounters.MatchDxgi("NVIDIA GeForce RTX 4060 Laptop GPU", 2, dx)?.Luid == 0xf1b4 && GpuCounters.MatchDxgi("Intel(R) Iris(R) Xe Graphics", 2, dx)?.Luid == 0xf1a2, "WMI adapters find their DXGI entry by name");
+            Check(GpuCounters.MatchDxgi("Something else", 2, dx) is null, "an unmatched name is not guessed");
+            Check(GpuCounters.MatchDxgi("Anything", 1, [dx[0], dx[2]])?.Luid == 0xf1a2, "the software renderer is ignored when matching a single adapter");
             Check(GpuMath.AggregateEngines([new GpuEngineUsage("garbage", 5)]).Count == 0, "unrecognised engine names are ignored");
             Check(NvmlGpuSource.NormalizePci("00000000:01:00.0") == "0000:01:00.0", "NVML bus ids normalise to sysfs form");
 

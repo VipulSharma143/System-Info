@@ -43,6 +43,8 @@ else
         sp.GetRequiredService<INvmlSource>(), sp.GetRequiredService<PciIds>()));
 }
 builder.Services.AddSingleton<GpuService>();
+builder.Services.AddSingleton<ICpuCollector>(_ => OperatingSystem.IsWindows() ? CreateWindowsCpuCollector() : new LinuxCpuCollector());
+builder.Services.AddSingleton<CpuService>();
 builder.Services.AddSingleton<AnalyticsService>();
 
 builder.Services.AddOpenApi();
@@ -109,3 +111,6 @@ app.Lifetime.ApplicationStarted.Register(() => _ = Task.WhenAll(
     .ContinueWith(t => app.Logger.LogWarning(t.Exception, "Cache warm-up failed (non-fatal)."), TaskContinuationOptions.OnlyOnFaulted));
 
 app.Run();
+
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
+static ICpuCollector CreateWindowsCpuCollector() => new WindowsCpuCollector();

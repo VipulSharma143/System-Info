@@ -26,6 +26,7 @@ import OverviewView from './components/views/OverviewView';
 const AnalyticsView = lazy(() => import('./components/views/AnalyticsView'));
 const ProcessesView = lazy(() => import('./components/views/ProcessesView'));
 const RamView = lazy(() => import('./components/views/RamView'));
+const OverlayView = lazy(() => import('./components/views/OverlayView'));
 const GpuView = lazy(() => import('./components/views/GpuView'));
 const StorageView = lazy(() => import('./components/views/StorageView'));
 const NetworkView = lazy(() => import('./components/views/NetworkView'));
@@ -173,6 +174,7 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
       {show('processes', stale ? <LoadingState /> : <ProcessesView processes={data.processes} />)}
       {show('ram', <RamView active={activeSection === 'ram'} />)}
       {show('gpu', <GpuView active={activeSection === 'gpu'} />)}
+      {show('overlay', <OverlayView active={activeSection === 'overlay'} ram={liveData?.ram ?? null} />)}
       {show('storage', <StorageView disks={data.disks} />)}
       {show('network', <NetworkView network={data.network} history={history} />)}
       {show('battery', <BatteryView battery={data.battery} chargeHistory={history.charge} />)}

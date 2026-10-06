@@ -30,6 +30,11 @@ NATIVE_API int get_battery_info_json(char* bufferOut, int bufferSize);
 NATIVE_API int get_gpu_vram_bytes(int adapterIndex, char* nameOut, int nameBufferSize,
                                    long long* dedicatedBytesOut, long long* sharedSystemBytesOut);
 
+// Locally unique identifier (LUID) of the DXGI adapter at adapterIndex, packed as (high << 32) | low. Windows'
+// "GPU Engine" / "GPU Adapter Memory" performance counters name their instances by LUID, so this is the only
+// reliable way to attribute counters to an adapter on a multi-GPU machine. Returns 1 on success, 0 otherwise.
+NATIVE_API int get_gpu_luid(int adapterIndex, long long* luidOut);
+
 // ---------------------------------------------------------------------
 // CPU features + Assembly kernels (simd_dispatch.cpp / math/vector_math.asm, memory/memory_kernels.asm)
 // ---------------------------------------------------------------------

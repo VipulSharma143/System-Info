@@ -303,6 +303,7 @@ Not yet verified on real machines: the full download/install/relaunch cycle on W
 | 17 | Python Retired | C# / CI / docs | ✅ Done (2.3.0) | Analytics ported to `AnalyticsService`; Python source, proxy, port 8001, PyInstaller/pip CI steps and Python handling in the dev scripts deleted; tests and CI stamping no longer use Python; releases gated on `tests.yml`. See [Why Analytics Moved from Python to C#](#-why-analytics-moved-from-python-to-c) |
 | 18 | RAM Monitoring (2.4.0) | C++ / C# / React | ✅ Done (Linux verified; Windows native build verified under Wine; not on real Windows) | Runtime RAM (`RamDetails`, bytes, nullable unknowns) separated from physical memory (`MemoryHardwareSummary` + `MemoryModule[]`, SMBIOS Type 16/17) and memory health (EDAC). New RAM tab with per-section loading/partial/error states. Shared byte-buffer SMBIOS parser with a Linux file loader and a Windows `GetSystemFirmwareTable` loader; `smbios_parse_test` (195 checks) and `smbios_loader_test` (26 checks). Channel mode intentionally always "Unknown"; ECC enabled never guessed. |
 | 19 | GPU page (2.4.5) | C# / React | ✅ Done (Linux unit-tested with a fake sysfs/NVML; not run on real GPUs or on Windows) | One card per adapter; `services/Gpu/` collectors for Linux (DRM/sysfs) and Windows (WMI/DXGI/perf counters), NVIDIA via NVML, cached adapter list, `/api/system/gpus/hardware` + `/live` |
+| 20 | Overlay tab + CPU detail + GPU counter fix (2.4.6) | C# / C++ / React | ✅ Done (Linux unit-tested; not run on Windows or real GPUs) | `/api/system/cpu/detail`, per-core grid, LUID-based GPU counter matching |
 
 ---
 
@@ -335,7 +336,7 @@ Not yet verified on real machines: the full download/install/relaunch cycle on W
 - [ ] Verify the Linux Tauri packaging (`tauri build` producing `.deb`/`.AppImage`) end to end on real GitHub Actions infrastructure and a real Linux install, beyond this pass's own review of the workflow file
 - [ ] Add a retention/TTL policy for `data/snapshots/`
 - [ ] Implement full SMART storage health (needs root)
-- [ ] Test the GPU page on real AMD, Intel and NVIDIA hardware, Linux and Windows
+- [ ] Test the GPU page and Overlay tab on real AMD, Intel and NVIDIA hardware, Linux and Windows (incl. a hybrid laptop while gaming)
 - [ ] Delete the unused root-level analytics components in `frontend/src/components/` (see the 2026-10-05 note)
 - [ ] Take real startup timings from an installed build on Windows and Linux (`logs/startup.log` records the stages) and compare against the pre-2.3.0 behaviour
 - [ ] Run the Windows installer, `.deb` and AppImage on real machines: double-click launch, shutdown, restart, uninstall/reinstall, a stale backend left over from a crash
@@ -425,3 +426,13 @@ Open: none of the above has run in a real installer yet (still true).
 - **Failure isolation:** each collector failure becomes "no adapter / empty readings"; CPU, RAM and the rest are unaffected.
 - **Verified:** 154 .NET checks pass on Linux (fake sysfs for Intel iGPU, AMD discrete, NVIDIA via a fake NVML, missing NVML, missing card, corrupt cache), the API project builds and serves both endpoints on Linux, and the card renders for one/two/unknown adapters. The sandbox had no GPU, so real AMD/Intel/NVIDIA hardware and everything on Windows (WindowsGpuCollector, the GPU Adapter Memory counters, NVML on Windows) are untested.
 - **Not done from the optimization spec:** startup timings, C++/assembly review, process-enumeration changes and the frontend visual cleanup.
+
+---
+
+## 2026-10-06: GPU counter fix, CPU detail and Overlay tab (2.4.6)
+
+- **Why 2.4.6, not 2.4.5.1:** `scripts/sync-version.mjs` accepts only plain x.y.z, and Tauri, Cargo and npm require semver, so a four-part hotfix number cannot be built.
+- **Bug found on a hybrid laptop (Intel Iris Xe + RTX 4060):** every GPU's performance counters end in `_phys_0`, so counters were keyed by `phys` index and one GPU's memory overwrote the other's (Iris Xe showed 648% video memory), and engine load from both GPUs landed on adapter 0. Counters are now keyed by LUID: native `get_gpu_luid` (DXGI, Windows; stub on Linux) feeds `GpuAdapter.Luid`, `GpuCounters` selects per-adapter instances, and an adapter without a LUID gets counters only if it is the sole adapter. Also: integrated GPUs measure memory against dedicated + shared, percentages are clamped, engine load is summed per engine across processes, NVIDIA device ID comes from NVML.
+- **CPU detail:** `services/Cpu/` mirrors the GPU design (collector per OS, one shared 1 s sample, endpoint `/api/system/cpu/detail`). Linux: /proc/stat deltas, cpufreq, coretemp/k10temp/thermal zone, RAPL watts (root-only on newer kernels, otherwise "Not reported"). Windows: Processor Information counters and the ACPI thermal zone (labelled approximate; there is no built-in per-core temperature).
+- **Overlay tab:** `OverlayView` (`OverlayTable` first: CPU row, one row per GPU, system-memory row, with usage/temp/clock/power/memory/fan columns; then `CpuPanel` with `CoreGrid`, then a `GpuCard` per adapter; system RAM comes from the dashboard poll, so no extra request), polled every 1.5 s only while open.
+- **Verified:** 184 .NET checks pass on Linux (including LUID parsing, a simulated two-GPU counter set, fake /proc and /sys for Intel/AMD/thermal-zone/RAPL layouts), the Linux native library builds with the new export, `native/platform/windows/provider.cpp` passes a MinGW syntax check, the API builds and serves `/api/system/cpu/detail` on Linux, and the Overlay components render with sample data. Not verified: anything on real Windows (WindowsCpuCollector, WindowsGpuCollector, the LUID export at run time) or on real discrete/AMD/NVIDIA hardware.

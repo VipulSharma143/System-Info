@@ -284,4 +284,10 @@ int get_gpu_vram_bytes(int adapterIndex, char* nameOut, int nameBufferSize,
     return 0;
 }
 
+int get_gpu_luid(int adapterIndex, long long* luidOut) {
+    (void)adapterIndex;
+    if (luidOut) *luidOut = 0;
+    return 0;
+}
+
 } // extern "C"

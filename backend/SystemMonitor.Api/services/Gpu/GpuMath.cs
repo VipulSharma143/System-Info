@@ -9,6 +9,25 @@ public static partial class GpuMath
     public static double? Percent(long? used, long? total) =>
         used is { } u && total is > 0 and var t ? Math.Round(Math.Min(100.0, u * 100.0 / t), 1) : null;
 
+    [GeneratedRegex(@"luid_0x([0-9a-f]+)_0x([0-9a-f]+)", RegexOptions.IgnoreCase)]
+    private static partial Regex LuidPattern();
+
+    /// <summary>
+    /// Packs the LUID in a counter instance name ("..._luid_0xHIGH_0xLOW_phys_0...") as (high &lt;&lt; 32) | low,
+    /// the same layout the native layer reports. Two GPUs both end in "_phys_0", so the LUID is the only
+    /// thing that tells their counters apart.
+    /// </summary>
+    public static bool TryParseLuid(string instanceName, out long luid)
+    {
+        luid = 0;
+        var match = LuidPattern().Match(instanceName);
+        if (!match.Success ||
+            !uint.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, null, out var high) ||
+            !uint.TryParse(match.Groups[2].Value, System.Globalization.NumberStyles.HexNumber, null, out var low)) return false;
+        luid = (long)(((ulong)high << 32) | low);
+        return true;
+    }
+
     [GeneratedRegex(@"_eng_(\d+)_engtype_(.+)$", RegexOptions.IgnoreCase)]
     private static partial Regex EnginePattern();
 

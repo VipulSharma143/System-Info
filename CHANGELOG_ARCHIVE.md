@@ -7,6 +7,12 @@ exact text that used to live in CHANGELOG.md before it aged out.
 
 See CHANGELOG.md for the current and most recent releases.
 
+## [2.4.4] - 2026-10-05
+
+### Changed
+- **Dashboard appears instantly on later launches.** The app now remembers your last CPU, memory, storage, network and battery readings and shows them the moment the window opens, marked as "Connecting" until live values arrive a moment later. The process list is never kept. A cache from another app version, too old, or damaged is discarded and rebuilt automatically.
+
+
 ## [2.4.3] - 2026-10-04
 
 ### Changed

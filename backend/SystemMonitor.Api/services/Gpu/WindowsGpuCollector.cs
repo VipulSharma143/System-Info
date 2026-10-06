@@ -43,13 +43,15 @@ public sealed class WindowsGpuCollector : IGpuCollector
                 deviceId = n.DeviceId;
             }
 
-            var shared = SharedFor(name, gpus.Count, dxgi);
+            var dxgiMatch = GpuCounters.MatchDxgi(name, gpus.Count, dxgi);
+            long? shared = dxgiMatch is { } m && m.SharedBytes > 0 ? m.SharedBytes : null;
+            long? luid = dxgiMatch?.Luid;
             bool? integrated = null;
             if (IsUnifiedMemory(vendor, name, dedicated, shared)) integrated = true;
             else if (vendor == "NVIDIA" || name.Contains("Arc", StringComparison.OrdinalIgnoreCase)) integrated = false;
 
             adapters.Add(new GpuAdapter(
-                Id: $"adapter{i}",
+                Id: luid is { } l ? $"luid-{l:x}" : $"adapter{i}",
                 Index: i,
                 Name: name,
                 Vendor: vendor,
@@ -62,26 +64,29 @@ public sealed class WindowsGpuCollector : IGpuCollector
                 Integrated: integrated,
                 Primary: null,
                 DedicatedMemoryBytes: dedicated is > 0 ? dedicated : null,
-                SharedMemoryBytes: shared));
+                SharedMemoryBytes: shared,
+                Luid: luid));
         }
         return adapters;
     }
 
     public IReadOnlyList<GpuLiveReading> ReadLive(IReadOnlyList<GpuAdapter> adapters)
     {
-        var engines = _provider.GetGpus();
+        var instances = SafeEngineInstances();
         var memory = SafeMemoryUsage();
         var nvmlMatch = NvmlMatching.ByName(adapters.Select(a => (string?)a.Name).ToList(), _nvml.Devices);
+        var onlyAdapter = adapters.Count == 1;
 
         var readings = new List<GpuLiveReading>(adapters.Count);
         for (var i = 0; i < adapters.Count; i++)
         {
             var adapter = adapters[i];
-            var usage = adapter.Index < engines.Count ? engines[adapter.Index].EngineUsage : null;
-            var engineLoad = usage is { Count: > 0 } ? GpuMath.AggregateEngines(usage) : null;
+            var engines = GpuCounters.EnginesFor(adapter.Luid, onlyAdapter, instances);
+            var engineLoad = engines.Count > 0 ? GpuMath.AggregateEngines(engines) : null;
             double? utilization = engineLoad is { Count: > 0 } ? engineLoad[0].UsagePercent : null;
+
             long? used = null, sharedUsed = null, memoryTotal = adapter.DedicatedMemoryBytes;
-            if (memory.TryGetValue(adapter.Index, out var m))
+            if (GpuCounters.MemoryFor(adapter.Luid, onlyAdapter, memory) is { } m)
             {
                 (used, sharedUsed) = (m.Dedicated, m.Shared);
                 if (adapter.Integrated == true)
@@ -95,11 +100,15 @@ public sealed class WindowsGpuCollector : IGpuCollector
 
             double? temperature = null, power = null, limit = null;
             int? core = null, memClock = null, fan = null;
-            string? pstate = null, source = utilization is null ? null : "performance-counter";
-            string? note = utilization is null ? null : "Utilization is the busiest engine, summed across processes as Task Manager does.";
+            string? pstate = null;
+            var source = utilization is null ? null : "performance-counter";
+            var note = utilization is null
+                ? adapter.Luid is null && !onlyAdapter ? "This adapter cannot be told apart from the others, so its load is not shown." : null
+                : "Utilization is the busiest engine, summed across processes as Task Manager does.";
 
-            if (nvmlMatch[i] is not null && _nvml.Devices.ToList().IndexOf(nvmlMatch[i]!) is var idx && idx >= 0 &&
-                _nvml.Sample(idx) is { } s)
+            var nvml = nvmlMatch[i];
+            var nvmlIndex = nvml is null ? -1 : IndexOf(_nvml.Devices, nvml);
+            if (nvmlIndex >= 0 && _nvml.Sample(nvmlIndex) is { } s)
             {
                 utilization = s.UtilizationPercent ?? utilization;
                 used = s.MemoryUsedBytes ?? used;
@@ -115,13 +124,34 @@ public sealed class WindowsGpuCollector : IGpuCollector
                 note = null;
             }
 
-            readings.Add(new GpuLiveReading(adapter.Id, utilization, used, memoryTotal, sharedUsed, GpuMath.Percent(used, memoryTotal), temperature, null, core, memClock,
-                power, limit, null, fan, null, pstate, engineLoad, source, note));
+            readings.Add(new GpuLiveReading(adapter.Id, utilization, used, memoryTotal, sharedUsed, GpuMath.Percent(used, memoryTotal),
+                temperature, null, core, memClock, power, limit, null, fan, null, pstate, engineLoad, source, note));
         }
         return readings;
     }
 
-    private static Dictionary<int, (long? Dedicated, long? Shared)> SafeMemoryUsage()
+    private static int IndexOf(IReadOnlyList<NvmlDevice> devices, NvmlDevice device)
+    {
+        for (var i = 0; i < devices.Count; i++)
+        {
+            if (ReferenceEquals(devices[i], device)) return i;
+        }
+        return -1;
+    }
+
+    private static List<GpuEngineUsage> SafeEngineInstances()
+    {
+        try
+        {
+            return WindowsSystemInfoProvider.ReadGpuEngineUsage();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            return [];
+        }
+    }
+
+    private static Dictionary<long, (long? Dedicated, long? Shared)> SafeMemoryUsage()
     {
         try
         {
@@ -143,14 +173,4 @@ public sealed class WindowsGpuCollector : IGpuCollector
         : name.Contains("AMD", StringComparison.OrdinalIgnoreCase) || name.Contains("Radeon", StringComparison.OrdinalIgnoreCase) ? "AMD"
         : name.Contains("Intel", StringComparison.OrdinalIgnoreCase) ? "Intel"
         : null;
-
-    // DXGI's order differs from WMI's, so a multi-GPU system is only matched when exactly one DXGI name fits.
-    private static long? SharedFor(string name, int adapterCount, List<(string? Name, long DedicatedBytes, long SharedBytes)> dxgi)
-    {
-        if (adapterCount == 1 && dxgi.Count == 1) return dxgi[0].SharedBytes > 0 ? dxgi[0].SharedBytes : null;
-
-        var matches = dxgi.Where(d => d.Name is { Length: > 0 } &&
-            (d.Name.Contains(name, StringComparison.OrdinalIgnoreCase) || name.Contains(d.Name, StringComparison.OrdinalIgnoreCase))).ToList();
-        return matches.Count == 1 && matches[0].SharedBytes > 0 ? matches[0].SharedBytes : null;
-    }
 }

@@ -34,6 +34,7 @@
   --hue-cpu: #ff8a3d;
   --hue-ram: #a78bfa;
   --hue-gpu: #34d399;
+  --hue-overlay: #f472b6;
   --hue-disk: #22d3ee;
   --hue-net: #5b9bff;
   --hue-power: #a3e635;
@@ -84,6 +85,7 @@
   --hue-cpu: #d4600a;
   --hue-ram: #6d4fe0;
   --hue-gpu: #0f9f6e;
+  --hue-overlay: #c4337f;
   --hue-disk: #0e8fb0;
   --hue-net: #1d6fe0;
   --hue-power: #5f8f0c;

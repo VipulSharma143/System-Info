@@ -14,6 +14,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Sun,
+  Gauge,
   Gpu,
   type LucideIcon,
 } from 'lucide-react';
@@ -39,6 +40,7 @@ const ICONS: Record<string, LucideIcon> = {
   processes: ListTree,
   ram: MemoryStick,
   gpu: Gpu,
+  overlay: Gauge,
   storage: HardDrive,
   network: Network,
   battery: BatteryMedium,
