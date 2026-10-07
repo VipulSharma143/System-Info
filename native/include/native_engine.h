@@ -88,6 +88,15 @@ NATIVE_API int si_memory_bandwidth(long long bytes, int repeats, double* copyGBp
 // stay -1 when the OS does not expose topology (some VMs/containers).
 NATIVE_API int si_get_cpu_topology(int* physicalCores, int* logicalCores, int* packages);
 
+// One logical processor, `index` = 0, 1, 2... in the OS's own order (Linux: ascending CPU number among online CPUs;
+// Windows: ascending processor group, then number). Returns 1 while `index` is valid, 0 past the end.
+//   coreId          opaque id shared by SMT siblings of one physical core; -1 if the OS does not say.
+//   efficiencyClass 0 = slowest class ... classCount-1 = fastest, for hybrid CPUs (Intel P/E cores) only.
+//                   -1 when the CPU is not hybrid or the OS does not expose the split. Never guessed.
+//   classCount      number of distinct classes (2 on Alder Lake), or -1 together with efficiencyClass.
+// Linux: /sys/devices/cpu_core, cpu_atom, cpu_lowpower.  Windows: GetLogicalProcessorInformationEx EfficiencyClass.
+NATIVE_API int si_get_cpu_logical_info(int index, int* coreId, int* efficiencyClass, int* classCount);
+
 // Enumerate real (block-device) volumes: call with index = 0, 1, 2... until 0 is returned.
 // Byte counts are 64-bit; freeBytes is the space available to an unprivileged user.
 NATIVE_API int si_get_storage_volume(int index, char* mountOut, int mountSize, char* fsOut, int fsSize,

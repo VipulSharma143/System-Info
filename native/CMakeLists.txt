@@ -107,6 +107,12 @@ if(BUILD_NATIVE_TESTS)
     add_test(NAME cpu_temperature_test COMMAND cpu_temperature_test)
     set_tests_properties(cpu_temperature_test PROPERTIES TIMEOUT 30)
 
+    # Logical-processor identity and hybrid core classes: parser, fake /sys tree, live self-consistency.
+    add_executable(cpu_logical_test ../tests/native/cpu_logical_test.cpp)
+    target_link_libraries(cpu_logical_test systemmonitor_native)
+    add_test(NAME cpu_logical_test COMMAND cpu_logical_test)
+    set_tests_properties(cpu_logical_test PROPERTIES TIMEOUT 30)
+
     # Assembly tiers: normal run, then the SYSTEMINFO_NO_ASM kill switch (must pick the portable tier, same answers).
     add_executable(asm_tiers_test ../tests/native/asm_tiers_test.cpp)
     target_link_libraries(asm_tiers_test systemmonitor_native)

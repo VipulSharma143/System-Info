@@ -1,65 +1,90 @@
 import { memo } from 'react';
 import { Cpu } from 'lucide-react';
 
-import { useMetricHistory } from '../../../hooks/useMetricHistory';
 import { formatNumber } from '../../../lib/format';
-import { usageColor } from '../../../lib/hues';
-import type { CpuDetail, SystemIdentification } from '../../../types/system';
+import type { CpuDetail } from '../../../types/system';
 
-import Panel from '../../common/Panel';
-import Sparkline from '../../common/Sparkline';
-import UsageBar from '../../common/UsageBar';
-import { InfoRow } from '../../common/Primitives';
-import { NotReported, val } from '../ram/cells';
+import { Badge } from '../../common/Primitives';
 
 import CoreGrid from './CoreGrid';
+import { hotness, topologyLabel, type CpuView } from './model';
+import { Meter, Metric, MetricGrid, Section, SubHeading } from './parts';
 
-const mhz = (n: number) => `${formatNumber(n, 0)} MHz`;
+const degrees = (n: number | null) => (n == null ? null : `${formatNumber(n, 0)} °C`);
 
-function CpuPanel({ cpu, info }: { cpu: CpuDetail | null; info: SystemIdentification | null }) {
-  const usage = cpu?.totalUsagePercent ?? undefined;
-  const usageHistory = useMetricHistory(usage);
-  const temperatureHistory = useMetricHistory(cpu?.packageTemperatureC ?? undefined);
-  const load = cpu?.loadAverage;
+const STATUS = {
+  live: { tone: 'ok', text: 'Live' },
+  measuring: { tone: 'info', text: 'Measuring…' },
+  unavailable: { tone: 'muted', text: 'Unavailable' },
+} as const;
 
+function CpuSummary({ view }: { view: CpuView }) {
   return (
-    <Panel title={info?.cpuModel ?? 'Processor'} icon={Cpu} hue="cpu">
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 items-center gap-4 md:grid-cols-2">
-          <div>
-            <div className="mb-1.5 text-[12px] text-muted">Total usage</div>
-            {usage === undefined ? <NotReported hint={cpu ? 'Measuring…' : undefined} /> : <UsageBar percent={usage} hue="cpu" />}
-          </div>
-          <Sparkline points={usageHistory} color={usageColor(usage, 'cpu')} height={64} />
+    <MetricGrid>
+      <Metric label="Utilization" value={view.usage == null ? null : `${formatNumber(view.usage, 0)}%`} detail={view.load ?? undefined} />
+      <Metric label="Package temperature" value={degrees(view.packageTemperature)} color={hotness(view.packageTemperature)} />
+      <Metric label="Hottest core" value={degrees(view.hottestCore)} color={hotness(view.hottestCore)} />
+      <Metric label="Package power" value={view.power == null ? null : `${formatNumber(view.power, 1)} W`} />
+    </MetricGrid>
+  );
+}
+
+function CpuTopology({ view }: { view: CpuView }) {
+  return (
+    <MetricGrid>
+      <Metric label="Physical cores" value={view.physical} />
+      <Metric label="Logical processors" value={view.logical} />
+      <Metric label="Active processors" value={view.active} detail={view.active == null ? undefined : `of ${view.measured} measured · above 10%`} />
+      {view.hybrid ? (
+        <>
+          <Metric label="P-cores" value={view.performanceCores} detail={view.performanceThreads != null ? `${view.performanceThreads} threads` : undefined} />
+          <Metric label="E-cores" value={view.efficiencyCores} detail={view.efficiencyThreads != null ? `${view.efficiencyThreads} threads` : undefined} />
+        </>
+      ) : (
+        <Metric label="Core types" value="Uniform" detail="No P/E split reported" />
+      )}
+    </MetricGrid>
+  );
+}
+
+interface CpuPanelProps {
+  cpu: CpuDetail | null;
+  view: CpuView;
+  model: string | null;
+  architecture: string | null;
+}
+
+function CpuPanel({ cpu, view, model, architecture }: CpuPanelProps) {
+  const status = STATUS[view.status];
+  return (
+    <Section title="CPU" icon={Cpu} hue="cpu" meta={topologyLabel(view)}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-medium">{model ?? 'Processor'}</div>
+          <div className="text-[11px] text-faint">{architecture ?? 'Architecture not reported'}</div>
         </div>
-
-        {temperatureHistory.length > 1 && (
-          <div>
-            <div className="mb-1 text-[12px] text-muted">Temperature, last minute</div>
-            <Sparkline points={temperatureHistory} color="var(--hue-cpu)" max="auto" height={48} />
-          </div>
-        )}
-
-        {cpu && cpu.cores.length > 0 && <CoreGrid cores={cpu.cores} />}
-
-        <div className="grid grid-cols-1 gap-x-8 md:grid-cols-2">
-          <div>
-            <InfoRow label="Cores / threads" value={info ? `${info.physicalCores ?? '—'} / ${info.logicalProcessors}` : <NotReported />} />
-            <InfoRow label="Average clock" value={val(cpu?.averageClockMhz, mhz)} />
-            <InfoRow label="Highest core clock" value={val(cpu?.highestClockMhz, mhz)} />
-            <InfoRow label="Base clock" value={val(cpu?.baseClockMhz, mhz)} />
-            <InfoRow label="Maximum clock" value={val(cpu?.maxClockMhz, mhz)} />
-          </div>
-          <div>
-            <InfoRow label="Package temperature" value={val(cpu?.packageTemperatureC, (n) => `${formatNumber(n, 0)} °C`)} hint={cpu?.temperatureSource ?? undefined} />
-            <InfoRow label="Package power" value={val(cpu?.powerWatts, (n) => `${formatNumber(n, 1)} W`)} />
-            <InfoRow label="Load average" value={load ? load.map((n) => formatNumber(n, 2)).join(' · ') : <NotReported />} hint={load ? '1 · 5 · 15 min' : undefined} />
-          </div>
+        <div className="flex items-center gap-2">
+          {view.load && <Badge tone={view.load === 'Saturated' ? 'critical' : view.load === 'Heavy' ? 'warn' : 'muted'}>{view.load} load</Badge>}
+          <Badge tone={status.tone}>{status.text}</Badge>
         </div>
-
-        {cpu?.note && <p className="text-[12px] text-faint">{cpu.note}</p>}
       </div>
-    </Panel>
+
+      <Meter percent={view.usage} hue="cpu" label="CPU utilization" />
+      <CpuSummary view={view} />
+
+      <div className="space-y-2"><SubHeading>Topology</SubHeading><CpuTopology view={view} /></div>
+
+      {cpu && cpu.cores.length > 0 && (
+        <div className="space-y-2"><SubHeading>Per-processor utilization</SubHeading><CoreGrid cores={cpu.cores} /></div>
+      )}
+
+      {view.systemTemperature != null && (
+        <p className="text-[12px] text-faint">
+          System thermal zone {formatNumber(view.systemTemperature, 0)} °C — a firmware sensor, not the CPU.
+        </p>
+      )}
+      {view.packageTemperature == null && cpu?.note && <p className="text-[12px] text-faint">{cpu.note}</p>}
+    </Section>
   );
 }
 

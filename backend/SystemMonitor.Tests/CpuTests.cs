@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using SystemMonitor.Api.Native;
 using SystemMonitor.Api.Services;
 
 // A fake /proc and /sys tree stands in for the kernel, so counter deltas and sensor layouts are testable anywhere.
@@ -111,6 +112,30 @@ static void Write(string path, string text)
             var broken = new CpuService(new FakeCollector { Throw = true }, NullLogger<CpuService>.Instance);
             var failed = await broken.GetAsync();
             Check(failed.TotalUsagePercent is null && failed.Cores.Count == 0 && failed.Note is not null, "a failing collector yields an empty reading with a note");
+
+            // Hybrid layout: 6 P-cores with SMT (12 threads, class 1 of 2) and 8 E-cores (8 threads, class 0), as on an i7-12700H.
+            var hybrid = new List<LogicalCpuInfo>();
+            for (var i = 0; i < 12; i++) hybrid.Add(new LogicalCpuInfo(i / 2, 1, 2));
+            for (var i = 0; i < 8; i++) hybrid.Add(new LogicalCpuInfo(6 + i, 0, 2));
+            var layout = CpuLayoutBuilder.Build(hybrid);
+            Check(layout is { Hybrid: true, LogicalProcessors: 20, PhysicalCores: 14, PerformanceCores: 6, EfficiencyCores: 8, PerformanceThreads: 12, EfficiencyThreads: 8 }, "hybrid topology: 6 P + 8 E cores, 20 threads");
+            var readings = Enumerable.Range(0, 20).Select(i => new CpuCoreReading(i, 10, null, null)).ToList();
+            var typedCores = CpuLayoutBuilder.Annotate(readings, hybrid);
+            Check(typedCores[0].CoreType == "performance" && typedCores[11].CoreType == "performance" && typedCores[12].CoreType == "efficiency" && typedCores[1].CoreId == typedCores[0].CoreId, "core types and SMT siblings are attached by position");
+            Check(CpuLayoutBuilder.Annotate(readings.Take(19).ToList(), hybrid).All(c => c.CoreType is null), "a count mismatch attaches nothing rather than misaligning cores");
+
+            var plain = Enumerable.Range(0, 8).Select(i => new LogicalCpuInfo(i / 2, null, null)).ToList();
+            var plainLayout = CpuLayoutBuilder.Build(plain);
+            Check(plainLayout is { Hybrid: false, PhysicalCores: 4, LogicalProcessors: 8, PerformanceCores: null, EfficiencyCores: null }, "a non-hybrid CPU reports no P/E split");
+            Check(CpuLayoutBuilder.Build([]) is null, "no native data means no layout");
+            Check(CpuLayoutBuilder.CoreType(new LogicalCpuInfo(0, 0, 3)) == "efficiency" && CpuLayoutBuilder.CoreType(new LogicalCpuInfo(0, 2, 3)) == "performance", "three classes: only the fastest is performance");
+
+            // The Linux collector exposes the layout it was given.
+            var typedProc = Path.Combine(root, "proc2");
+            Stat(typedProc, "cpu  100 0 100 800 0 0 0 0 0 0", "cpu0 50 0 50 400 0 0 0 0 0 0", "cpu1 50 0 50 400 0 0 0 0 0 0");
+            var hybridCollector = new LinuxCpuCollector(typedProc, Path.Combine(root, "sys2"), () => 1, () => [new LogicalCpuInfo(0, 1, 2), new LogicalCpuInfo(1, 0, 2)]);
+            var typedRead = hybridCollector.Read();
+            Check(typedRead.Layout is { Hybrid: true, PerformanceCores: 1, EfficiencyCores: 1 } && typedRead.Cores[1].CoreType == "efficiency", "the collector returns layout and core types");
         }
         finally
         {

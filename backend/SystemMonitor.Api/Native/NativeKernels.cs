@@ -78,6 +78,9 @@ public sealed record NativeMemorySummary(long InstalledBytes, int ModuleCount, i
     long MaxCapacityBytes, long MaxModuleCapacityBytes);
 public sealed record CpuTopology(int? PhysicalCores, int LogicalCores, int? Packages);
 
+/// <summary>One logical processor as the OS describes it. Null means not reported: a non-hybrid CPU has no class.</summary>
+public sealed record LogicalCpuInfo(int? CoreId, int? EfficiencyClass, int? ClassCount);
+
 /// <summary>Managed views over the native topology/storage/fan enumerators.</summary>
 public static class NativeHardware
 {
@@ -85,6 +88,25 @@ public static class NativeHardware
     {
         if (NativeInterop.GetCpuTopology(out var phys, out var logical, out var pkgs) != 1 || logical <= 0) return null;
         return new CpuTopology(phys > 0 ? phys : null, logical, pkgs > 0 ? pkgs : null);
+    }
+
+    /// <summary>Logical processors in the OS's own order; empty when the native library cannot say (older library, no access).</summary>
+    public static List<LogicalCpuInfo> GetLogicalCpus()
+    {
+        var list = new List<LogicalCpuInfo>();
+        try
+        {
+            for (int i = 0; i < 1024; i++)       // bounded: a misbehaving native call can never loop us forever
+            {
+                if (NativeInterop.GetCpuLogicalInfo(i, out var core, out var cls, out var count) != 1) break;
+                list.Add(new LogicalCpuInfo(core >= 0 ? core : null, cls >= 0 ? cls : null, count > 0 ? count : null));
+            }
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            list.Clear();
+        }
+        return list;
     }
 
     public static List<StorageVolume> GetStorageVolumes()

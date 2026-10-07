@@ -1,4 +1,5 @@
 using System.Globalization;
+using SystemMonitor.Api.Native;
 
 namespace SystemMonitor.Api.Services;
 
@@ -11,13 +12,16 @@ public sealed class LinuxCpuCollector : ICpuCollector
     private readonly string _proc;
     private readonly string _sys;
     private readonly Func<long> _nowMs;
+    private readonly Func<IReadOnlyList<LogicalCpuInfo>> _logicalCpus;
+    private IReadOnlyList<LogicalCpuInfo>? _logical;
 
     private Dictionary<string, (ulong Total, ulong Idle)> _previousStat = [];
     private ulong? _previousEnergyUj;
     private long _previousEnergyMs;
 
-    public LinuxCpuCollector(string procRoot = "/proc", string sysRoot = "/sys", Func<long>? nowMs = null)
+    public LinuxCpuCollector(string procRoot = "/proc", string sysRoot = "/sys", Func<long>? nowMs = null, Func<IReadOnlyList<LogicalCpuInfo>>? logicalCpus = null)
     {
+        _logicalCpus = logicalCpus ?? (() => NativeHardware.GetLogicalCpus());
         _proc = procRoot;
         _sys = sysRoot;
         _nowMs = nowMs ?? (() => Environment.TickCount64);
@@ -41,6 +45,10 @@ public sealed class LinuxCpuCollector : ICpuCollector
             cores.Add(new CpuCoreReading(index, Usage(label, stat), clock, coreId is { } id && temps.TryGetValue((int)id, out var t) ? t : null));
         }
 
+        // Core types come from the OS once; the hybrid split cannot change while the app runs.
+        _logical ??= _logicalCpus();
+        var typed = CpuLayoutBuilder.Annotate(cores, _logical);
+
         var clocks = cores.Where(c => c.ClockMhz is not null).Select(c => c.ClockMhz!.Value).ToList();
         var cpu0 = Path.Combine(_sys, "devices", "system", "cpu", "cpu0", "cpufreq");
         var total = stat.ContainsKey("cpu") ? Usage("cpu", stat) : null;
@@ -49,7 +57,7 @@ public sealed class LinuxCpuCollector : ICpuCollector
 
         return new CpuDetail(
             TotalUsagePercent: total,
-            Cores: cores,
+            Cores: typed,
             AverageClockMhz: clocks.Count > 0 ? (int)Math.Round(clocks.Average()) : null,
             HighestClockMhz: clocks.Count > 0 ? clocks.Max() : null,
             BaseClockMhz: ReadKhz(Path.Combine(cpu0, "base_frequency")) is { } b ? (int)(b / 1000) : null,
@@ -59,7 +67,8 @@ public sealed class LinuxCpuCollector : ICpuCollector
             LoadAverage: ReadLoadAverage(),
             TemperatureSource: source,
             Note: packageTemp is null ? "No CPU temperature sensor is exposed by this system." : null,
-            SampledAtUnixMs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            SampledAtUnixMs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            Layout: CpuLayoutBuilder.Build(_logical));
     }
 
     private Dictionary<string, (ulong Total, ulong Idle)> ReadStat()

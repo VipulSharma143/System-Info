@@ -253,6 +253,21 @@ export interface CpuCoreReading {
   usagePercent: number | null;
   clockMhz: number | null;
   temperatureC: number | null;
+  /** Shared by the SMT siblings of one physical core; null when the OS does not say. */
+  coreId?: number | null;
+  /** Hybrid CPUs only; null when the CPU is not hybrid or the OS does not expose the split. */
+  coreType?: 'performance' | 'efficiency' | null;
+}
+
+/** Static processor shape. The P/E fields are null unless the OS proved the hybrid split. */
+export interface CpuLayout {
+  logicalProcessors: number;
+  physicalCores: number | null;
+  hybrid: boolean;
+  performanceCores: number | null;
+  efficiencyCores: number | null;
+  performanceThreads: number | null;
+  efficiencyThreads: number | null;
 }
 
 /** Live CPU detail. Null means the platform did not report it. */
@@ -269,4 +284,8 @@ export interface CpuDetail {
   temperatureSource: string | null;
   note: string | null;
   sampledAtUnixMs: number;
+  layout?: CpuLayout | null;
+  /** A firmware/system thermal zone. Never the CPU temperature; shown separately and labelled as such. */
+  systemTemperatureC?: number | null;
+  systemTemperatureSource?: string | null;
 }

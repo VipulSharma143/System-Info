@@ -174,7 +174,7 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
       {show('processes', stale ? <LoadingState /> : <ProcessesView processes={data.processes} />)}
       {show('ram', <RamView active={activeSection === 'ram'} />)}
       {show('gpu', <GpuView active={activeSection === 'gpu'} />)}
-      {show('overlay', <OverlayView active={activeSection === 'overlay'} ram={liveData?.ram ?? null} />)}
+      {show('overlay', <OverlayView active={activeSection === 'overlay'} />)}
       {show('storage', <StorageView disks={data.disks} />)}
       {show('network', <NetworkView network={data.network} history={history} />)}
       {show('battery', <BatteryView battery={data.battery} chargeHistory={history.charge} />)}

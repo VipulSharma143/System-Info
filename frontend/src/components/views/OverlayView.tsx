@@ -1,72 +1,48 @@
-import { memo } from 'react';
-import { Cpu, Gpu, MemoryStick } from 'lucide-react';
+import { memo, useMemo } from 'react';
 
 import { useCpuDetail } from '../../hooks/useCpuDetail';
 import { useGpu } from '../../hooks/useGpu';
+import { useJsonResource } from '../../hooks/useJsonResource';
 import { useSystemInfo } from '../../hooks/useSystemInfo';
-import { formatMB, formatMemory, formatNumber } from '../../lib/format';
-import type { CpuDetail, GpuAdapter, GpuLiveReading, RamInfo } from '../../types/system';
+import type { MemoryHardwareInfo, RamDetails } from '../../types/system';
 
 import { ViewContainer } from '../common/Primitives';
 
-import MetricTile, { type TileStat } from './overlay/MetricTile';
+import CpuPanel from './overlay/CpuPanel';
+import GpuPanel from './overlay/GpuPanel';
+import HardwareSummary from './overlay/HardwareSummary';
+import MemoryPanel from './overlay/MemoryPanel';
+import SummaryTiles from './overlay/SummaryTiles';
+import { cpuView, gpuView, memoryView } from './overlay/model';
 
-const POLL_MS = 2000;
+const CPU_POLL_MS = 2000;
+const RAM_POLL_MS = 3000;
 
-const warmth = (celsius: number | null | undefined) => (celsius == null ? undefined : celsius >= 85 ? 'var(--critical)' : celsius >= 75 ? 'var(--warn)' : undefined);
-const degrees = (celsius: number | null | undefined) => (celsius == null ? null : `${formatNumber(celsius, 0)} °C`);
-
-interface OverlayViewProps {
-  active: boolean;
-  /** Live system memory from the dashboard poll, so this page makes no extra request for it. */
-  ram: RamInfo | null;
-}
-
-function CpuTile({ cpu, model }: { cpu: CpuDetail | null; model: string | null | undefined }) {
-  const stats: TileStat[] = [
-    { label: 'Temperature', value: degrees(cpu?.packageTemperatureC), color: warmth(cpu?.packageTemperatureC), hint: cpu?.note },
-  ];
-  return <MetricTile icon={Cpu} hue="cpu" title="CPU" subtitle={model} percent={cpu?.totalUsagePercent} pending={cpu !== null} stats={stats} />;
-}
-
-function RamTile({ ram }: { ram: RamInfo | null }) {
-  const stats: TileStat[] = [
-    { label: 'Used', value: ram ? formatMB(ram.usedMB, 1) : null },
-    { label: 'Total', value: ram ? formatMB(ram.totalMB, 1) : null },
-  ];
-  return <MetricTile icon={MemoryStick} hue="ram" title="Memory" percent={ram?.usedPercent} stats={stats} />;
-}
-
-function GpuTile({ adapter, reading }: { adapter: GpuAdapter; reading: GpuLiveReading | undefined }) {
-  const total = reading?.memoryTotalBytes ?? adapter.dedicatedMemoryBytes;
-  const used = reading?.memoryUsedBytes;
-  const memory = used != null ? `${formatMemory(used)}${total ? ` / ${formatMemory(total)}` : ''}` : null;
-  const stats: TileStat[] = [
-    { label: 'Video memory', value: memory, hint: reading?.note },
-    { label: 'Temperature', value: degrees(reading?.temperatureC), color: warmth(reading?.temperatureC), hint: reading?.note },
-  ];
-  const kind = adapter.integrated === null ? null : adapter.integrated ? 'Integrated' : 'Discrete';
-  return <MetricTile icon={Gpu} hue="gpu" title={adapter.name} subtitle={kind} percent={reading?.utilizationPercent} pending={reading !== undefined} stats={stats} />;
-}
-
-/** CPU, memory and every GPU as compact live tiles: utilisation, temperature and memory, nothing else. */
-function OverlayView({ active, ram }: OverlayViewProps) {
-  const cpu = useCpuDetail(active, POLL_MS);
-  const { hardware, live } = useGpu(active, POLL_MS);
+/**
+ * Hardware monitor. Every request is gated on `active`, so the page costs nothing while hidden; static data
+ * (identity, adapters, DIMMs) is fetched once and live data is polled by the same shared hooks the other pages use.
+ */
+function OverlayView({ active }: { active: boolean }) {
+  const cpu = useCpuDetail(active, CPU_POLL_MS);
+  const { hardware: gpuHardware, live: gpuLive } = useGpu(active, CPU_POLL_MS);
   const { info } = useSystemInfo(active);
+  const ram = useJsonResource<RamDetails>('/api/system/ram', { active, intervalMs: RAM_POLL_MS });
+  const memoryHardware = useJsonResource<MemoryHardwareInfo>('/api/system/memory/hardware', { active });
 
-  const adapters = hardware.data?.adapters ?? [];
-  const readings = new Map(live.data?.readings.map((r) => [r.id, r]));
+  const cpuModel = useMemo(() => cpuView(cpu.data, info?.physicalCores ?? null, info?.logicalProcessors ?? null), [cpu.data, info?.physicalCores, info?.logicalProcessors]);
+  const gpus = useMemo(() => {
+    const readings = new Map(gpuLive.data?.readings.map((r) => [r.id, r]));
+    return (gpuHardware.data?.adapters ?? []).map((adapter) => gpuView(adapter, readings.get(adapter.id)));
+  }, [gpuHardware.data, gpuLive.data]);
+  const memory = useMemo(() => memoryView(ram.data), [ram.data]);
 
   return (
     <ViewContainer>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">
-        <CpuTile cpu={cpu.data} model={info?.cpuModel} />
-        <RamTile ram={ram} />
-        {adapters.map((adapter) => (
-          <GpuTile key={adapter.id} adapter={adapter} reading={readings.get(adapter.id)} />
-        ))}
-      </div>
+      <SummaryTiles cpu={cpuModel} gpus={gpus} memory={memory} />
+      <CpuPanel cpu={cpu.data} view={cpuModel} model={info?.cpuModel ?? null} architecture={info?.processArchitecture ?? null} />
+      <GpuPanel gpus={gpus} available={gpuHardware.data?.available ?? null} />
+      <MemoryPanel memory={memory} hardware={memoryHardware.data} />
+      <HardwareSummary info={info} cpu={cpuModel} gpus={gpus} memory={memory} hardware={memoryHardware.data} />
     </ViewContainer>
   );
 }

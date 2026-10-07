@@ -113,6 +113,10 @@ public static class NativeInterop
     [DllImport("systemmonitor_native", EntryPoint = "si_get_cpu_topology")]
     public static extern int GetCpuTopology(out int physicalCores, out int logicalCores, out int packages);
 
+    // One logical processor: SMT-sibling id and hybrid core class (-1 = not reported). 1 while `index` is valid.
+    [DllImport("systemmonitor_native", EntryPoint = "si_get_cpu_logical_info")]
+    public static extern int GetCpuLogicalInfo(int index, out int coreId, out int efficiencyClass, out int classCount);
+
     [DllImport("systemmonitor_native", EntryPoint = "si_get_storage_volume")]
     public static extern int GetStorageVolume(int index, StringBuilder mountOut, int mountSize,
         StringBuilder fsOut, int fsSize, out long totalBytes, out long freeBytes);

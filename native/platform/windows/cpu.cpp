@@ -4,6 +4,9 @@
 #include <windows.h>
 #include <psapi.h>
 
+#include <algorithm>
+#include <iterator>
+#include <set>
 #include <vector>
 
 // ---------------------------------------------------------------------
@@ -123,6 +126,106 @@ int si_get_cpu_topology(
                     ? pkgs
                     : -1;
 
+        return 1;
+    }
+    catch (...) {
+        return 0;
+    }
+}
+
+// ---------------------------------------------------------------------
+// Per-logical-processor identity and hybrid core class
+// ---------------------------------------------------------------------
+
+namespace {
+
+struct LogicalCpu {
+    WORD group;
+    int bit;
+    int coreOrdinal;
+    int efficiency;
+};
+
+bool enumerate_logical_cpus(std::vector<LogicalCpu>& out) {
+    DWORD length = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &length);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || length == 0)
+        return false;
+
+    std::vector<char> buffer(length);
+    if (!GetLogicalProcessorInformationEx(
+            RelationProcessorCore,
+            reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data()),
+            &length)) {
+        return false;
+    }
+
+    int ordinal = 0;
+    for (DWORD offset = 0; offset < length;) {
+        auto* info = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data() + offset);
+        if (info->Size == 0)
+            break;
+
+        if (info->Relationship == RelationProcessorCore) {
+            for (WORD g = 0; g < info->Processor.GroupCount; ++g) {
+                const KAFFINITY mask = info->Processor.GroupMask[g].Mask;
+                for (int bit = 0; bit < static_cast<int>(sizeof(KAFFINITY) * 8); ++bit) {
+                    if (mask & (static_cast<KAFFINITY>(1) << bit)) {
+                        out.push_back({info->Processor.GroupMask[g].Group, bit, ordinal,
+                                       static_cast<int>(info->Processor.EfficiencyClass)});
+                    }
+                }
+            }
+            ++ordinal;
+        }
+        offset += info->Size;
+    }
+
+    std::sort(out.begin(), out.end(), [](const LogicalCpu& a, const LogicalCpu& b) {
+        return a.group != b.group ? a.group < b.group : a.bit < b.bit;
+    });
+    return !out.empty();
+}
+
+}  // namespace
+
+int si_get_cpu_logical_info(
+    int index,
+    int* coreId,
+    int* efficiencyClass,
+    int* classCount) {
+
+    if (coreId)
+        *coreId = -1;
+    if (efficiencyClass)
+        *efficiencyClass = -1;
+    if (classCount)
+        *classCount = -1;
+
+    if (index < 0)
+        return 0;
+
+    try {
+        std::vector<LogicalCpu> cpus;
+        if (!enumerate_logical_cpus(cpus) || static_cast<size_t>(index) >= cpus.size())
+            return 0;
+
+        const LogicalCpu& cpu = cpus[static_cast<size_t>(index)];
+        if (coreId)
+            *coreId = cpu.coreOrdinal;
+
+        // EfficiencyClass is 0 on every core of a non-hybrid CPU; only more than one value means a real split.
+        std::set<int> distinct;
+        for (const auto& c : cpus)
+            distinct.insert(c.efficiency);
+
+        if (distinct.size() < 2)
+            return 1;
+
+        if (classCount)
+            *classCount = static_cast<int>(distinct.size());
+        if (efficiencyClass)
+            *efficiencyClass = static_cast<int>(std::distance(distinct.begin(), distinct.find(cpu.efficiency)));
         return 1;
     }
     catch (...) {

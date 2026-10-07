@@ -4,22 +4,37 @@ All notable changes to SystemInfo are documented here.
 
 ## [Unreleased]
 
+
+## [2.4.9] - 2026-10-07
+
 ### Added
+- **Overlay is now a hardware monitor.** CPU | GPU | RAM summary tiles on top, then expandable CPU, GPU, Memory and Hardware panels.
+  - **CPU:** utilization, load state, physical cores, logical processors, P-cores / E-cores on hybrid CPUs, active processors, package temperature, hottest core, package power, and a per-processor grid grouped by core type.
+  - **GPU:** every adapter with utilization, temperature, power, and used / available / total video memory.
+  - **Memory:** the operating system's view (used, available, free, cached, buffers, swap / page file) kept apart from the firmware's view of the physical modules (slot, capacity, type, manufacturer, part number).
+  - **Hardware:** CPU, topology, GPU, RAM, OS, architecture, device, and which telemetry is available.
+  - No clock speeds or fan readings are shown.
+- Native `si_get_cpu_logical_info`: per-logical-processor core id and hybrid core class (Linux `/sys/devices/cpu_core|cpu_atom|cpu_lowpower`, Windows `EfficiencyClass`). A CPU that is not hybrid reports no split; the split is never guessed from the model name.
+- Windows CPU package power from the "Energy Meter" counters where the platform provides them.
+- Tests: native `cpu_logical_test` (CPU-list parser, fake hybrid `/sys` tree, live self-consistency check), C# layout checks, and frontend overlay model tests.
 
 ### Changed
+- `/api/system/cpu/detail` now also returns `layout`, per-core `coreId` / `coreType`, and `systemTemperatureC` / `systemTemperatureSource`. Existing fields are unchanged.
+- The overlay only requests data while its tab is open; static data (identity, adapters, memory modules) is fetched once.
 
 ### Fixed
+- **Windows no longer labels a firmware thermal zone as the CPU temperature.** The ACPI zone (the source of the constant ~28 °C) is now reported separately as a system temperature and never as the CPU package temperature. On Windows the CPU temperature shows "Not reported" with an explanation instead of a made-up number.
 
 ### Known Issues
+- Windows CPU package and core temperature need a kernel driver (model-specific registers); the built-in Windows APIs expose only the firmware zone, so the CPU temperature stays unavailable on Windows.
+- The Windows parts of this release (hybrid core detection, Energy Meter power) have not been run on a real Windows PC; CI builds them.
 
 
 ## [2.4.8] - 2026-10-06
 
-### Fixed
-- **Updates now work the first time.** The installer used to start the moment the background service had been told to stop, but the operating system keeps a just-stopped program's files locked for a short while. The first attempt could therefore fail while an immediate Retry (by then the files were free) succeeded. The app now waits until the service's port, process and files are confirmed released before it installs, and never starts the installer on a locked file. Brief network problems while checking or downloading are retried automatically (a few times, with growing pauses); problems that cannot fix themselves (a bad signature, a missing file, a cancelled password prompt, a full disk) are reported immediately and not retried. A finished download is kept, so Retry no longer downloads it again, and a download that arrives short is detected before install. Every failure's full cause is now written to `update.log` in the app's data folder at the moment it happens.
-- **CPU temperature stuck near 28 °C.** The app read the first thermal zone the system lists, which on most PCs is a generic firmware zone that sits at a fixed temperature whatever the CPU is doing. It now reads the CPU's own sensor (Intel coretemp, AMD k10temp/zenpower, or a real package thermal zone), reads it fresh every time, and ignores broken readings. If the PC exposes no real CPU sensor, the temperature shows "Not reported" with a reason instead of a made-up number. On Windows, where only the generic zone exists, a zone that never moves while the CPU load swings is recognised and withheld.
-- **No more 0% while the first CPU sample is pending.** The CPU endpoint now says "not ready" instead of answering 0%, and every CPU reading carries the time it was measured.
-- **Startup-cache write race.** Two writes to the same cache file at the same moment could delete each other's temporary file, losing that write. Each write now uses its own temporary file.
+### Added
+- Tests that no longer depend on the machine they run on: CPU temperature selection, the host snapshot parsers, the update-release wait, the update retry rules and the polling pause all run against fixture folders, fakes and temporary directories. The suite now has 9 native tests (including a no-assembly run), 638 C# checks, 11 Rust tests and 23 frontend tests, and CI now runs the frontend checks and a no-assembly pass as well.
+- `scripts/measure-startup.mjs`: measures cold vs. warm start (with and without the cache), memory and thread count, and can run a long soak that reports memory growth per hour.
 
 ### Changed
 - **Overlay tab redesigned.** One compact row of live tiles: CPU, memory and every graphics adapter, each with a big usage number, a short trend, and just the readings that matter (CPU temperature; GPU video memory and temperature). The clock, fan and power sections, the per-core grid and the stacked detail cards are gone.
@@ -28,9 +43,11 @@ All notable changes to SystemInfo are documented here.
 - **Assembly kept only where it measurably helps.** The vector sum kernel is about 1.2-1.3x faster than the compiler's code; the hand-written memory copy was never faster than the system's own and has been removed, and the vector add shows no measurable gain on the test machine (it is memory-bound) but is kept, as it is verified and costs nothing. If a kernel ever fails its start-up self-check on a given CPU, it is switched off automatically and the app uses plain, safe code instead. Setting `SYSTEMINFO_NO_ASM=1` forces the plain path.
 - **Native functions say when they have nothing.** The new temperature and snapshot calls report "available / not available" explicitly rather than returning zero or -1 values that look like readings.
 
-### Added
-- Tests that no longer depend on the machine they run on: CPU temperature selection, the host snapshot parsers, the update-release wait, the update retry rules and the polling pause all run against fixture folders, fakes and temporary directories. The suite now has 9 native tests (including a no-assembly run), 638 C# checks, 11 Rust tests and 23 frontend tests, and CI now runs the frontend checks and a no-assembly pass as well.
-- `scripts/measure-startup.mjs`: measures cold vs. warm start (with and without the cache), memory and thread count, and can run a long soak that reports memory growth per hour.
+### Fixed
+- **Updates now work the first time.** The installer used to start the moment the background service had been told to stop, but the operating system keeps a just-stopped program's files locked for a short while. The first attempt could therefore fail while an immediate Retry (by then the files were free) succeeded. The app now waits until the service's port, process and files are confirmed released before it installs, and never starts the installer on a locked file. Brief network problems while checking or downloading are retried automatically (a few times, with growing pauses); problems that cannot fix themselves (a bad signature, a missing file, a cancelled password prompt, a full disk) are reported immediately and not retried. A finished download is kept, so Retry no longer downloads it again, and a download that arrives short is detected before install. Every failure's full cause is now written to `update.log` in the app's data folder at the moment it happens.
+- **CPU temperature stuck near 28 °C.** The app read the first thermal zone the system lists, which on most PCs is a generic firmware zone that sits at a fixed temperature whatever the CPU is doing. It now reads the CPU's own sensor (Intel coretemp, AMD k10temp/zenpower, or a real package thermal zone), reads it fresh every time, and ignores broken readings. If the PC exposes no real CPU sensor, the temperature shows "Not reported" with a reason instead of a made-up number. On Windows, where only the generic zone exists, a zone that never moves while the CPU load swings is recognised and withheld.
+- **No more 0% while the first CPU sample is pending.** The CPU endpoint now says "not ready" instead of answering 0%, and every CPU reading carries the time it was measured.
+- **Startup-cache write race.** Two writes to the same cache file at the same moment could delete each other's temporary file, losing that write. Each write now uses its own temporary file.
 
 ### Known Issues
 - The Windows parts of this release (updater wait, ACPI zone guard, snapshot reader) have been checked as far as possible without a real Windows PC, but have not been run on one yet. The Tauri shell code itself was syntax-checked but not compiled in the environment used for this release; CI builds it.

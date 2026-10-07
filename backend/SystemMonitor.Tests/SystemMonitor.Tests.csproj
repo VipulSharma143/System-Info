@@ -33,6 +33,7 @@
     <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlGpuSource.cs" Link="linked/NvmlGpuSource.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlMatching.cs" Link="linked/NvmlMatching.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/PciIds.cs" Link="linked/PciIds.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Cpu/CpuLayoutBuilder.cs" Link="linked/CpuLayoutBuilder.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuModels.cs" Link="linked/CpuModels.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuTemperatureSelection.cs" Link="linked/CpuTemperatureSelection.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuService.cs" Link="linked/CpuService.cs" />
