@@ -154,6 +154,9 @@ static class GpuTests
             var nvEngines = GpuCounters.EnginesFor(0xf1b4, false, hybrid);
             Check(intelEngines.Count == 2 && GpuMath.AggregateEngines(intelEngines)[0].UsagePercent == 23, "the iGPU only counts its own processes, not the NVIDIA GPU's game");
             Check(nvEngines.Count == 2 && GpuMath.AggregateEngines(nvEngines)[0].UsagePercent == 90, "the NVIDIA GPU gets its own engine load");
+            var idle = new List<GpuEngineUsage> { new($"pid_1_{intelLuid}_phys_0_eng_0_engtype_3D", 0), new($"pid_9_{intelLuid}_phys_0_eng_0_engtype_3D", 0) };
+            Check(GpuMath.AggregateEngines(GpuCounters.EnginesFor(0xf1a2, false, idle)) is [{ UsagePercent: 0 }], "an idle adapter's engines aggregate to a real 0, not to nothing");
+            Check(GpuCounters.EnginesFor(0xf1c0, false, idle).Count == 0, "an adapter with no counters of its own has no engines at all (unknown, not 0)");
             Check(GpuCounters.EnginesFor(null, false, hybrid).Count == 0 && GpuCounters.EnginesFor(null, true, hybrid).Count == 4, "without a LUID counters are only used for a single adapter");
             var mem = new Dictionary<long, (long? Dedicated, long? Shared)> { [0xf1a2] = (50, 60), [0xf1b4] = (900, 10) };
             Check(GpuCounters.MemoryFor(0xf1a2, false, mem) is (50, 60) && GpuCounters.MemoryFor(0xf1b4, false, mem) is (900, 10), "memory counters are not mixed between GPUs");

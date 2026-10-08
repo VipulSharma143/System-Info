@@ -2,13 +2,12 @@ import { memo, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ChevronDown } from 'lucide-react';
 
-import { NOT_REPORTED } from '../../../lib/format';
 import { hueStyle, usageColor, type Hue } from '../../../lib/hues';
 
 /** Shared building blocks of the overlay panels. Everything here is presentational and takes primitives, so memo() holds. */
 
 export function Missing({ hint }: { hint?: string | null }) {
-  return <span className="font-normal text-faint" title={hint ?? undefined}>{NOT_REPORTED}</span>;
+  return <span className="font-normal text-faint" title={hint ?? undefined}>Unavailable</span>;
 }
 
 interface MetricProps {

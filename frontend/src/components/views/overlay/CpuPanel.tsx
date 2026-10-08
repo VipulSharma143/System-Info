@@ -7,8 +7,8 @@ import type { CpuDetail } from '../../../types/system';
 import { Badge } from '../../common/Primitives';
 
 import CoreGrid from './CoreGrid';
-import { hotness, topologyLabel, type CpuView } from './model';
-import { Meter, Metric, MetricGrid, Section, SubHeading } from './parts';
+import { hotness, type CpuView } from './model';
+import { Metric, MetricGrid, Section, SubHeading } from './parts';
 
 const degrees = (n: number | null) => (n == null ? null : `${formatNumber(n, 0)} °C`);
 
@@ -29,20 +29,12 @@ function CpuSummary({ view }: { view: CpuView }) {
   );
 }
 
-function CpuTopology({ view }: { view: CpuView }) {
+function CpuActivity({ view }: { view: CpuView }) {
   return (
     <MetricGrid>
-      <Metric label="Physical cores" value={view.physical} />
-      <Metric label="Logical processors" value={view.logical} />
-      <Metric label="Active processors" value={view.active} detail={view.active == null ? undefined : `of ${view.measured} measured · above 10%`} />
-      {view.hybrid ? (
-        <>
-          <Metric label="P-cores" value={view.performanceCores} detail={view.performanceThreads != null ? `${view.performanceThreads} threads` : undefined} />
-          <Metric label="E-cores" value={view.efficiencyCores} detail={view.efficiencyThreads != null ? `${view.efficiencyThreads} threads` : undefined} />
-        </>
-      ) : (
-        <Metric label="Core types" value="Uniform" detail="No P/E split reported" />
-      )}
+      <Metric label="Active processors" value={view.active} detail={view.active == null ? undefined : `of ${view.measured} · above 10% busy`} />
+      {view.hybrid && <Metric label="Busy P-core threads" value={view.performanceActive} detail={view.performanceThreads != null ? `of ${view.performanceThreads}` : undefined} />}
+      {view.hybrid && <Metric label="Busy E-core threads" value={view.efficiencyActive} detail={view.efficiencyThreads != null ? `of ${view.efficiencyThreads}` : undefined} />}
     </MetricGrid>
   );
 }
@@ -50,38 +42,23 @@ function CpuTopology({ view }: { view: CpuView }) {
 interface CpuPanelProps {
   cpu: CpuDetail | null;
   view: CpuView;
-  model: string | null;
-  architecture: string | null;
 }
 
-function CpuPanel({ cpu, view, model, architecture }: CpuPanelProps) {
+function CpuPanel({ cpu, view }: CpuPanelProps) {
   const status = STATUS[view.status];
   return (
-    <Section title="CPU" icon={Cpu} hue="cpu" meta={topologyLabel(view)}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="truncate text-[13px] font-medium">{model ?? 'Processor'}</div>
-          <div className="text-[11px] text-faint">{architecture ?? 'Architecture not reported'}</div>
-        </div>
-        <div className="flex items-center gap-2">
-          {view.load && <Badge tone={view.load === 'Saturated' ? 'critical' : view.load === 'Heavy' ? 'warn' : 'muted'}>{view.load} load</Badge>}
-          <Badge tone={status.tone}>{status.text}</Badge>
-        </div>
+    <Section title="CPU activity" icon={Cpu} hue="cpu" meta={view.usage == null ? undefined : `${formatNumber(view.usage, 0)}%`}>
+      <div className="flex items-center justify-end gap-2">
+        {view.load && <Badge tone={view.load === 'Saturated' ? 'critical' : view.load === 'Heavy' ? 'warn' : 'muted'}>{view.load} load</Badge>}
+        <Badge tone={status.tone}>{status.text}</Badge>
       </div>
-
-      <Meter percent={view.usage} hue="cpu" label="CPU utilization" />
       <CpuSummary view={view} />
-
-      <div className="space-y-2"><SubHeading>Topology</SubHeading><CpuTopology view={view} /></div>
-
+      <CpuActivity view={view} />
       {cpu && cpu.cores.length > 0 && (
         <div className="space-y-2"><SubHeading>Per-processor utilization</SubHeading><CoreGrid cores={cpu.cores} /></div>
       )}
-
       {view.systemTemperature != null && (
-        <p className="text-[12px] text-faint">
-          System thermal zone {formatNumber(view.systemTemperature, 0)} °C — a firmware sensor, not the CPU.
-        </p>
+        <p className="text-[12px] text-faint">System thermal zone {formatNumber(view.systemTemperature, 0)} °C — a firmware sensor, not the CPU.</p>
       )}
       {view.packageTemperature == null && cpu?.note && <p className="text-[12px] text-faint">{cpu.note}</p>}
     </Section>

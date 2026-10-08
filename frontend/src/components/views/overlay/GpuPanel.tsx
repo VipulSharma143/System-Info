@@ -26,7 +26,6 @@ function GpuCard({ gpu }: { gpu: GpuView }) {
         </div>
       </div>
 
-      <Meter percent={gpu.usage} hue="gpu" label={`${gpu.name} utilization`} />
       <MetricGrid>
         <Metric label="Utilization" value={gpu.usage == null ? null : `${formatNumber(gpu.usage, 0)}%`} hint={gpu.note} />
         <Metric label="Temperature" value={degrees(gpu.temperature)} color={hotness(gpu.temperature)} hint={gpu.note} />
@@ -44,6 +43,14 @@ function GpuCard({ gpu }: { gpu: GpuView }) {
           {gpu.kind === 'Integrated' && <Metric label="Shared memory used" value={memory(gpu.sharedUsedBytes)} />}
         </MetricGrid>
       </div>
+      {gpu.engines.length > 0 && (
+        <div className="space-y-2">
+          <SubHeading>Busiest engines</SubHeading>
+          <MetricGrid>
+            {gpu.engines.map((e) => <Metric key={e.name} label={e.name} value={`${formatNumber(e.usage, 0)}%`} />)}
+          </MetricGrid>
+        </div>
+      )}
     </div>
   );
 }

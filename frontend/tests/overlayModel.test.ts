@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { cpuView, gpuView, groupCores, loadState, memoryView, topologyLabel } from '../src/components/views/overlay/model.ts';
+import { cpuView, gpuLabel, gpuView, groupCores, loadState, memoryView, orderGpus, topologyLabel } from '../src/components/views/overlay/model.ts';
 import type { CpuCoreReading, CpuDetail, GpuAdapter, RamDetails } from '../src/types/system.ts';
 
 const core = (index: number, usage: number | null, type: 'performance' | 'efficiency' | null): CpuCoreReading =>
@@ -82,5 +82,27 @@ describe('memoryView', () => {
     const view = memoryView({ ...ram, swapTotalBytes: 0, swapUsedBytes: 0 })!;
     assert.equal(view.swapFree, null);
     assert.equal(view.swapPercent, null);
+  });
+});
+
+describe('hybrid GPU rows', () => {
+  const adapter = (id: string, integrated: boolean) => ({ id, index: 0, name: id, vendor: null, integrated, dedicatedMemoryBytes: null }) as GpuAdapter;
+  it('keeps each GPU independent, integrated first, and never copies one reading to the other', () => {
+    const igpu = gpuView(adapter('igpu', true), { id: 'igpu', utilizationPercent: 8 } as never);
+    const dgpu = gpuView(adapter('dgpu', false), { id: 'dgpu', utilizationPercent: 94 } as never);
+    const rows = orderGpus([dgpu, igpu]);
+    assert.deepEqual(rows.map((g) => [gpuLabel(g, 2), g.usage]), [['Integrated GPU', 8], ['Discrete GPU', 94]]);
+  });
+  it('shows unknown, not 0, for a GPU with no reading', () => {
+    const view = gpuView(adapter('dgpu', false), { id: 'dgpu', utilizationPercent: null, temperatureC: null } as never);
+    assert.equal(view.usage, null);
+    assert.equal(view.temperature, null);
+    assert.equal(gpuLabel(view, 1), 'GPU');
+  });
+  it('counts busy threads per core type', () => {
+    const cores = [core(0, 50, 'performance'), core(1, 2, 'performance'), core(2, 30, 'efficiency')];
+    const view = cpuView(detail(cores), null, null);
+    assert.equal(view.performanceActive, 1);
+    assert.equal(view.efficiencyActive, 1);
   });
 });

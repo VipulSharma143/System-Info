@@ -48,12 +48,17 @@ export interface CpuView {
   /** Logical processors measured so far, and how many of them are above the activity threshold. */
   measured: number;
   active: number | null;
+  performanceActive: number | null;
+  efficiencyActive: number | null;
   packageTemperature: number | null;
   hottestCore: number | null;
   systemTemperature: number | null;
   power: number | null;
   status: 'live' | 'measuring' | 'unavailable';
 }
+
+const busyOfType = (cores: CpuCoreReading[], type: 'performance' | 'efficiency') =>
+  cores.some((c) => c.coreType === type) ? cores.filter((c) => c.coreType === type && (c.usagePercent ?? 0) >= ACTIVE_CORE_THRESHOLD).length : null;
 
 export function cpuView(cpu: CpuDetail | null, fallbackPhysical: number | null, fallbackLogical: number | null): CpuView {
   const layout = cpu?.layout ?? null;
@@ -72,6 +77,8 @@ export function cpuView(cpu: CpuDetail | null, fallbackPhysical: number | null, 
     efficiencyThreads: layout?.efficiencyThreads ?? null,
     measured: measuredCores.length,
     active: measuredCores.length ? measuredCores.filter((c) => (c.usagePercent ?? 0) >= ACTIVE_CORE_THRESHOLD).length : null,
+    performanceActive: busyOfType(measuredCores, 'performance'),
+    efficiencyActive: busyOfType(measuredCores, 'efficiency'),
     packageTemperature: cpu?.packageTemperatureC ?? null,
     hottestCore: coreTemps.length ? Math.max(...coreTemps) : null,
     systemTemperature: cpu?.systemTemperatureC ?? null,
@@ -95,7 +102,11 @@ export interface GpuView {
   power: number | null;
   powerLimit: number | null;
   status: 'live' | 'no-live-data';
+  /** Where the live numbers came from ("nvml", "performance-counter", ...), so a wrong-looking GPU can be traced. */
+  source: string | null;
   note: string | null;
+  /** Busiest engines (3D, Compute, Copy, ...), when the platform reports them. */
+  engines: { name: string; usage: number }[];
 }
 
 export function gpuView(adapter: GpuAdapter, reading: GpuLiveReading | undefined): GpuView {
@@ -116,7 +127,9 @@ export function gpuView(adapter: GpuAdapter, reading: GpuLiveReading | undefined
     power: reading?.powerWatts ?? null,
     powerLimit: reading?.powerLimitWatts ?? null,
     status: reading ? 'live' : 'no-live-data',
+    source: reading?.source ?? null,
     note: reading?.note ?? null,
+    engines: (reading?.engines ?? []).slice(0, 4).map((e) => ({ name: e.instanceName, usage: e.usagePercent })),
   };
 }
 
@@ -161,4 +174,15 @@ export function topologyLabel(cpu: CpuView): string | null {
   if (cpu.physical != null) parts.push(`${cpu.physical} cores`);
   parts.push(`${cpu.logical} threads`);
   return parts.join(' · ');
+}
+
+/** Integrated first, then discrete, then anything the OS did not classify; stable within each group. */
+export function orderGpus(gpus: GpuView[]): GpuView[] {
+  const rank = (g: GpuView) => (g.kind === 'Integrated' ? 0 : g.kind === 'Discrete' ? 1 : 2);
+  return [...gpus].sort((a, b) => rank(a) - rank(b));
+}
+
+/** "Integrated GPU" / "Discrete GPU" when there are several, plain "GPU" for a single adapter. */
+export function gpuLabel(gpu: GpuView, total: number): string {
+  return total > 1 && gpu.kind ? `${gpu.kind} GPU` : 'GPU';
 }
