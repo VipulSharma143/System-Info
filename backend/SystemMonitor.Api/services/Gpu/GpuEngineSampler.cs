@@ -5,13 +5,15 @@ using SystemMonitor.Api.Interface;
 namespace SystemMonitor.Api.Services;
 
 /// <summary>
-/// Samples the Windows "GPU Engine" counters with counters that live between polls. The old approach built a
-/// counter for every engine instance on every call and compared two reads 200 ms apart, which is far shorter than the
-/// window the counter is computed over, so busy engines could read as idle. Here each counter's baseline is the
-/// previous poll, so every reading covers a full polling interval, and counters are only created for new instances.
+/// Samples the Windows "GPU Engine" counters with ONE read of the whole category per poll.
+/// The previous approach opened a PerformanceCounter per engine instance (hundreds to thousands on a busy PC, one per
+/// process per engine) and every NextValue() re-read the entire category, so a single sample took many seconds and the
+/// live GPU numbers (temperature included, which was read in the same call) froze or lagged badly.
+/// Here the category is read once, and each instance's value is computed against its own previous sample, so every
+/// reading still covers a full polling interval.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class GpuEngineSampler : IDisposable
+public sealed class GpuEngineSampler
 {
     public static GpuEngineSampler Shared { get; } = new();
 
@@ -22,9 +24,15 @@ public sealed class GpuEngineSampler : IDisposable
     private static readonly TimeSpan MinInterval = TimeSpan.FromMilliseconds(700);
 
     private readonly object _gate = new();
-    private readonly Dictionary<string, PerformanceCounter> _counters = [];
+    private Dictionary<string, CounterSample> _previous = [];
     private IReadOnlyList<GpuEngineUsage>? _last;
     private long _lastAt;
+
+    /// <summary>How long the last category read and calculation took, for diagnostics.</summary>
+    public long LastDurationMs { get; private set; }
+
+    /// <summary>Instances seen on the last read (including ones still waiting for a baseline).</summary>
+    public int LastInstanceCount { get; private set; }
 
     /// <summary>
     /// Every engine instance with its load, idle ones included (an idle engine is 0%, which is a real answer).
@@ -37,70 +45,52 @@ public sealed class GpuEngineSampler : IDisposable
             var now = Environment.TickCount64;
             if (_last is not null && now - _lastAt < MinInterval.TotalMilliseconds) return _last;
 
-            string[] names;
-            try
-            {
-                if (!PerformanceCounterCategory.Exists(Category)) return null;
-                names = new PerformanceCounterCategory(Category).GetInstanceNames();
-            }
-            catch (Exception ex) when (IsCounterFailure(ex))
-            {
-                return null;
-            }
+            var watch = Stopwatch.StartNew();
+            var current = ReadCategorySamples();
+            if (current is null) return null;
 
-            var live = new HashSet<string>(names, StringComparer.Ordinal);
-            foreach (var gone in _counters.Keys.Where(k => !live.Contains(k)).ToList())
+            var fresh = new List<GpuEngineUsage>(current.Count);
+            foreach (var (name, sample) in current)
             {
-                _counters[gone].Dispose();
-                _counters.Remove(gone);
-            }
-
-            var fresh = new List<GpuEngineUsage>(_counters.Count);
-            var hadBaseline = _counters.Count > 0;
-            foreach (var name in names)
-            {
-                if (_counters.TryGetValue(name, out var existing))
-                {
-                    try
-                    {
-                        fresh.Add(new GpuEngineUsage(name, Math.Round(Math.Clamp(existing.NextValue(), 0f, 100f), 2)));
-                    }
-                    catch (Exception ex) when (IsCounterFailure(ex))
-                    {
-                        existing.Dispose();
-                        _counters.Remove(name);
-                    }
-                    continue;
-                }
-
+                if (!_previous.TryGetValue(name, out var before)) continue;     // new instance: baseline only
+                if (sample.TimeStamp100nSec == before.TimeStamp100nSec && sample.TimeStamp == before.TimeStamp) continue;
                 try
                 {
-                    var counter = new PerformanceCounter(Category, CounterName, name, readOnly: true);
-                    counter.NextValue();     // baseline; the first real value is read on the next poll
-                    _counters[name] = counter;
+                    var value = CounterSample.Calculate(before, sample);
+                    if (float.IsNaN(value) || float.IsInfinity(value)) continue;
+                    fresh.Add(new GpuEngineUsage(name, Math.Round(Math.Clamp(value, 0f, 100f), 2)));
                 }
-                catch (Exception ex) when (IsCounterFailure(ex))
-                {
-                    // The instance vanished between listing and opening.
-                }
+                catch (Exception ex) when (ex is InvalidOperationException or DivideByZeroException or OverflowException) { }
             }
 
+            var hadBaseline = _previous.Count > 0;
+            _previous = current;
             _lastAt = now;
+            LastInstanceCount = current.Count;
+            LastDurationMs = watch.ElapsedMilliseconds;
             _last = hadBaseline ? fresh : null;
             return _last;
         }
     }
 
-    private static bool IsCounterFailure(Exception ex) =>
-        ex is InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or ArgumentException;
-
-    public void Dispose()
+    private static Dictionary<string, CounterSample>? ReadCategorySamples()
     {
-        lock (_gate)
+        try
         {
-            foreach (var c in _counters.Values) c.Dispose();
-            _counters.Clear();
-            _last = null;
+            if (!PerformanceCounterCategory.Exists(Category)) return null;
+            var data = new PerformanceCounterCategory(Category).ReadCategory();
+            if (!data.Contains(CounterName)) return null;
+
+            var result = new Dictionary<string, CounterSample>(StringComparer.Ordinal);
+            foreach (InstanceData instance in data[CounterName].Values)
+            {
+                result[instance.InstanceName] = instance.Sample;
+            }
+            return result;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or ArgumentException or IOException)
+        {
+            return null;
         }
     }
 }

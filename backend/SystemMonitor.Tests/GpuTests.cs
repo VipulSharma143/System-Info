@@ -198,6 +198,7 @@ static class GpuTests
             var svc3 = new GpuService(third, cache, NullLogger<GpuService>.Instance);
             await svc3.WarmUpAsync();
             Check((await svc3.GetHardwareAsync()).Available && third.HardwareReads == 1, "a corrupt GPU cache is rebuilt from a fresh read");
+            Check(third.LiveReads == 1, "start-up takes the first live baseline so the first poll has real load numbers");
         }
         finally
         {

@@ -85,4 +85,7 @@ public interface INvmlSource
     IReadOnlyList<NvmlDevice> Devices { get; }
 
     NvmlSample? Sample(int deviceIndex);
+
+    /// <summary>Why NVIDIA telemetry is missing right now, or null when it works. Shown instead of a silent blank.</summary>
+    string? Problem => null;
 }

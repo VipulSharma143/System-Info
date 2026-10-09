@@ -45,6 +45,10 @@ public sealed class GpuService
             }
         }
         await RefreshHardwareAsync();
+
+        // Take the first load baseline now, so the first poll from the UI already has real numbers.
+        var hardware = await GetHardwareAsync();
+        await Task.Run(() => SampleSafely(hardware.Adapters));
     }
 
     public async ValueTask<GpuHardwareInfo> GetHardwareAsync()

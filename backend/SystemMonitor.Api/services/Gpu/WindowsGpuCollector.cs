@@ -138,6 +138,12 @@ public sealed class WindowsGpuCollector : IGpuCollector
                 source = "nvml";
                 note = null;
             }
+            else if (adapter.Vendor == "NVIDIA")
+            {
+                // Say why the driver's numbers are missing instead of leaving a blank (or a stale value) unexplained.
+                var why = _nvml.Problem ?? "the NVIDIA driver returned no sample";
+                note = utilization is null ? $"NVIDIA telemetry unavailable: {why}" : $"Load comes from Windows counters; temperature unavailable: {why}";
+            }
 
             readings.Add(new GpuLiveReading(adapter.Id, utilization, used, memoryTotal, sharedUsed, GpuMath.Percent(used, memoryTotal),
                 temperature, null, core, memClock, power, limit, null, fan, null, pstate, engineLoad, source, note));

@@ -274,69 +274,13 @@ public partial class WindowsSystemInfoProvider
         return results;
     }
 
-    // Samples every "GPU Engine" performance-counter instance twice, 200ms
-    // apart (rate counters read 0 on their first sample — same reasoning as
-    // the CPU counter's warm-up above). Only engines with non-trivial
-    // utilization are returned; an idle engine isn't reported as "0% GPU",
-    // it's simply absent (spec §12).
+    // Engines with non-trivial load, from the shared one-read sampler (see GpuEngineSampler). Idle engines are
+    // not listed here (spec §12); the first call only takes a baseline and returns nothing.
     internal static List<GpuEngineUsage> ReadGpuEngineUsage()
     {
-        var result = new List<GpuEngineUsage>();
-
-        if (!PerformanceCounterCategory.Exists("GPU Engine"))
-            return result;
-
-        string[] instanceNames;
-        try
-        {
-            instanceNames = new PerformanceCounterCategory("GPU Engine").GetInstanceNames();
-        }
-        catch
-        {
-            return result;
-        }
-
-        var counters = new List<PerformanceCounter>();
-        try
-        {
-            foreach (var name in instanceNames)
-            {
-                try
-                {
-                    var counter = new PerformanceCounter("GPU Engine", "Utilization Percentage", name, readOnly: true);
-                    counter.NextValue(); // baseline read, always 0
-                    counters.Add(counter);
-                }
-                catch
-                {
-                    // Instance vanished between enumeration and open — skip it.
-                }
-            }
-
-            Thread.Sleep(200);
-
-            foreach (var counter in counters)
-            {
-                try
-                {
-                    float value = counter.NextValue();
-                    if (value > 0.1f)
-                    {
-                        result.Add(new GpuEngineUsage(counter.InstanceName, Math.Round(value, 2)));
-                    }
-                }
-                catch
-                {
-                    // skip
-                }
-            }
-        }
-        finally
-        {
-            foreach (var c in counters) c.Dispose();
-        }
-
-        return result.OrderByDescending(e => e.UsagePercent).Take(20).ToList();
+        var all = GpuEngineSampler.Shared.Sample();
+        if (all is null) return new List<GpuEngineUsage>();
+        return all.Where(e => e.UsagePercent > 0.1).OrderByDescending(e => e.UsagePercent).Take(20).ToList();
     }
 
     // An older native library without this export just means adapters cannot be told apart by LUID.
@@ -358,13 +302,17 @@ public partial class WindowsSystemInfoProvider
         var result = new Dictionary<long, (long? Dedicated, long? Shared)>();
         if (!PerformanceCounterCategory.Exists("GPU Adapter Memory")) return result;
 
-        foreach (var instance in new PerformanceCounterCategory("GPU Adapter Memory").GetInstanceNames())
-        {
-            if (!GpuMath.TryParseLuid(instance, out var luid)) continue;
+        // One read of the category covers every adapter and both gauges.
+        var data = new PerformanceCounterCategory("GPU Adapter Memory").ReadCategory();
+        if (!data.Contains("Dedicated Usage")) return result;
 
-            using var dedicated = new PerformanceCounter("GPU Adapter Memory", "Dedicated Usage", instance, readOnly: true);
-            using var shared = new PerformanceCounter("GPU Adapter Memory", "Shared Usage", instance, readOnly: true);
-            result[luid] = ((long)dedicated.NextValue(), (long)shared.NextValue());
+        foreach (InstanceData instance in data["Dedicated Usage"].Values)
+        {
+            if (!GpuMath.TryParseLuid(instance.InstanceName, out var luid)) continue;
+            long? shared = data.Contains("Shared Usage") && data["Shared Usage"].Contains(instance.InstanceName)
+                ? data["Shared Usage"][instance.InstanceName].RawValue
+                : null;
+            result[luid] = (instance.RawValue, shared);
         }
         return result;
     }

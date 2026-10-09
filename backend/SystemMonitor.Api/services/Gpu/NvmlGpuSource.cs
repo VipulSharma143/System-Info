@@ -11,45 +11,95 @@ public sealed class NvmlGpuSource : INvmlSource
 {
     public static NvmlGpuSource Shared { get; } = new();
 
+    // NVML error codes that mean the handles/session are no longer usable (driver reset, GPU powered off and back on,
+    // G-Helper mode switch) rather than "this metric is not supported".
+    private const int ErrUninitialized = 1, ErrDriverNotLoaded = 9, ErrGpuIsLost = 15, ErrResetRequired = 16, ErrUnknown = 999;
+
+    private static readonly TimeSpan RetryAfterMissing = TimeSpan.FromSeconds(20);
+
     private readonly object _gate = new();
-    private bool _initialised;
     private Api? _api;
-    private List<NvmlDevice> _devices = [];
+    private IReadOnlyList<NvmlDevice> _devices = [];
     private List<IntPtr> _handles = [];
     private string? _driverVersion;
+    private long _nextAttemptAt;
+    private string? _problem;
 
     public bool IsAvailable => Ensure() is not null;
 
     public string? DriverVersion
     {
-        get { Ensure(); return _driverVersion; }
+        get { Ensure(); lock (_gate) return _driverVersion; }
     }
 
     public IReadOnlyList<NvmlDevice> Devices
     {
-        get { Ensure(); return _devices; }
+        get { Ensure(); lock (_gate) return _devices; }
+    }
+
+    /// <summary>Why NVIDIA telemetry is missing right now, or null when it is working.</summary>
+    public string? Problem
+    {
+        get { Ensure(); lock (_gate) return _problem; }
     }
 
     public NvmlSample? Sample(int deviceIndex)
     {
-        var api = Ensure();
-        if (api is null || deviceIndex < 0 || deviceIndex >= _handles.Count) return null;
-        var h = _handles[deviceIndex];
+        // A lost session is rebuilt once and the read repeated, so one driver hiccup costs one sample, not the run.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            Api? api;
+            IntPtr h;
+            lock (_gate)
+            {
+                api = Ensure();
+                if (api is null || deviceIndex < 0 || deviceIndex >= _handles.Count) return null;
+                h = _handles[deviceIndex];
+            }
 
-        double? utilization = null;
-        long? used = null, total = null;
-        if (Ok(api.Utilization(h, out var util))) utilization = util.Gpu;
-        if (Ok(api.Memory(h, out var mem))) { used = (long)mem.Used; total = (long)mem.Total; }
+            var lost = false;
+            int Call(int code)
+            {
+                if (code is ErrUninitialized or ErrDriverNotLoaded or ErrGpuIsLost or ErrResetRequired or ErrUnknown) lost = true;
+                return code;
+            }
 
-        double? temperature = Ok(api.Temperature(h, 0, out var t)) ? t : null;
-        int? core = Ok(api.Clock(h, 0, out var c)) ? (int)c : null;
-        int? memClock = Ok(api.Clock(h, 2, out var m)) ? (int)m : null;
-        double? power = Ok(api.PowerMilliwatts(h, out var p)) ? p / 1000.0 : null;
-        double? limit = Ok(api.PowerLimitMilliwatts(h, out var l)) ? l / 1000.0 : null;
-        int? fan = Ok(api.FanPercent(h, out var f)) ? (int)f : null;
-        string? pstate = Ok(api.PerformanceState(h, out var s)) && s is >= 0 and <= 15 ? $"P{s}" : null;
+            double? utilization = null;
+            long? used = null, total = null;
+            if (Ok(Call(api.Utilization(h, out var util)))) utilization = util.Gpu;
+            if (Ok(Call(api.Memory(h, out var mem)))) { used = (long)mem.Used; total = (long)mem.Total; }
 
-        return new NvmlSample(utilization, used, total, temperature, core, memClock, power, limit, fan, pstate);
+            var tempCode = Call(api.Temperature(h, 0, out var t));
+            double? temperature = Ok(tempCode) && t is > 0 and < 150 ? t : null;
+            int? core = Ok(Call(api.Clock(h, 0, out var c))) ? (int)c : null;
+            int? memClock = Ok(Call(api.Clock(h, 2, out var m))) ? (int)m : null;
+            double? power = Ok(api.PowerMilliwatts(h, out var p)) ? p / 1000.0 : null;
+            double? limit = Ok(api.PowerLimitMilliwatts(h, out var l)) ? l / 1000.0 : null;
+            int? fan = Ok(api.FanPercent(h, out var f)) ? (int)f : null;
+            string? pstate = Ok(api.PerformanceState(h, out var s)) && s is >= 0 and <= 15 ? $"P{s}" : null;
+
+            if (lost && utilization is null && temperature is null && attempt == 0)
+            {
+                Invalidate("NVIDIA driver session was lost; reconnecting.");
+                continue;
+            }
+
+            lock (_gate) _problem = temperature is null ? $"NVML could not read the GPU temperature (code {tempCode})." : null;
+            return new NvmlSample(utilization, used, total, temperature, core, memClock, power, limit, fan, pstate);
+        }
+        return null;
+    }
+
+    private void Invalidate(string reason)
+    {
+        lock (_gate)
+        {
+            _api = null;
+            _handles = [];
+            _devices = [];
+            _problem = reason;
+            _nextAttemptAt = 0;
+        }
     }
 
     private static bool Ok(int code) => code == 0;
@@ -58,15 +108,19 @@ public sealed class NvmlGpuSource : INvmlSource
     {
         lock (_gate)
         {
-            if (_initialised) return _api;
-            _initialised = true;
+            if (_api is not null) return _api;
+            var now = Environment.TickCount64;
+            if (now < _nextAttemptAt) return null;
             try
             {
                 _api = Load();
+                if (_api is null) _nextAttemptAt = now + (long)RetryAfterMissing.TotalMilliseconds;
             }
             catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or MarshalDirectiveException or ArgumentException)
             {
                 _api = null;
+                _problem = $"NVIDIA management library could not be used ({ex.GetType().Name}).";
+                _nextAttemptAt = now + (long)RetryAfterMissing.TotalMilliseconds;
             }
             return _api;
         }
@@ -75,10 +129,11 @@ public sealed class NvmlGpuSource : INvmlSource
     private Api? Load()
     {
         var library = OpenLibrary();
-        if (library == IntPtr.Zero) return null;
+        if (library == IntPtr.Zero) { _problem = "NVIDIA management library (nvml) was not found."; return null; }
 
         var api = Api.Bind(library);
-        if (api.Init() != 0) return null;
+        var init = api.Init();
+        if (init != 0) { _problem = $"NVML failed to initialise (code {init})."; return null; }
 
         _driverVersion = ReadString(buffer => api.DriverVersion(buffer, (uint)buffer.Length));
 
@@ -99,6 +154,8 @@ public sealed class NvmlGpuSource : INvmlSource
 
         _devices = devices;
         _handles = handles;
+        _problem = devices.Count == 0 ? "NVML found no NVIDIA device." : null;
+        if (devices.Count == 0) return null;
         return api;
     }
 
