@@ -23,6 +23,7 @@ if(WIN32)
         ${PLATFORM_DIR}/memory.cpp
         ${PLATFORM_DIR}/smbios_source.cpp
         ${PLATFORM_DIR}/snapshot_writer.cpp
+        ${PLATFORM_DIR}/overlay_sources.cpp
         ${PLATFORM_DIR}/provider.cpp)
 else()
     set(CMAKE_ASM_NASM_OBJECT_FORMAT elf64)
@@ -34,6 +35,7 @@ else()
         ${PLATFORM_DIR}/memory.cpp
         ${PLATFORM_DIR}/smbios_source.cpp
         ${PLATFORM_DIR}/snapshot_writer.cpp
+        ${PLATFORM_DIR}/overlay_sources.cpp
         ${PLATFORM_DIR}/provider.cpp)
 endif()
 
@@ -48,11 +50,14 @@ add_library(systemmonitor_objects OBJECT
     src/smbios/decode.cpp
     src/smbios/parser.cpp
     src/smbios/memory_dimm.cpp
+    src/overlay/nvml.cpp
+    src/overlay/overlay_engine.cpp
     ${PLATFORM_SOURCES}
     ${ASM_DIR}/cpu/get_constant.asm
     ${ASM_DIR}/cpu/benchmark_loop.asm
     ${ASM_DIR}/cpu/simd_loop.asm
     ${ASM_DIR}/math/vector_math.asm
+    ${ASM_DIR}/math/stats_kernels.asm
     ${ASM_DIR}/memory/memory_kernels.asm
 )
 
@@ -61,12 +66,12 @@ target_include_directories(systemmonitor_objects PRIVATE ${ASM_DIR})
 add_library(systemmonitor_native SHARED $<TARGET_OBJECTS:systemmonitor_objects>)
 
 if(NOT WIN32)
-    target_link_libraries(systemmonitor_native stdc++fs)
+    target_link_libraries(systemmonitor_native stdc++fs ${CMAKE_DL_LIBS})
 else()
     # platform/windows/provider.cpp relies on #pragma comment(lib, "dxgi.lib") for
     # DXGI (CreateDXGIFactory), which only MSVC honors. Declaring it here too
     # means the link doesn't silently depend on a compiler-specific pragma.
-    target_link_libraries(systemmonitor_native dxgi psapi)
+    target_link_libraries(systemmonitor_native dxgi psapi pdh)
 endif()
 
 # Linux only: root helper that saves the memory records of the firmware table
@@ -127,6 +132,14 @@ if(BUILD_NATIVE_TESTS)
     add_test(NAME host_snapshot_test COMMAND host_snapshot_test)
     set_tests_properties(host_snapshot_test PROPERTIES TIMEOUT 30)
 
+    # Overlay engine: statistics kernel vs reference (all tiers), then the engine against a fake /proc + /sys tree.
+    add_executable(overlay_engine_test ../tests/native/overlay_engine_test.cpp)
+    target_link_libraries(overlay_engine_test systemmonitor_native)
+    add_test(NAME overlay_engine_test COMMAND overlay_engine_test)
+    add_test(NAME overlay_engine_test_no_asm COMMAND overlay_engine_test)
+    set_tests_properties(overlay_engine_test_no_asm PROPERTIES ENVIRONMENT "SYSTEMINFO_NO_ASM=1")
+    set_tests_properties(overlay_engine_test overlay_engine_test_no_asm PROPERTIES TIMEOUT 60)
+
     # SMBIOS Type 16/17 parser against hand-built tables: no hardware, no root,
     # identical on Linux and Windows.
     add_executable(smbios_parse_test ../tests/native/smbios_parse_test.cpp)
@@ -138,9 +151,9 @@ if(BUILD_NATIVE_TESTS)
     # functions, so it links the shared objects directly rather than the library.
     add_executable(smbios_loader_test ../tests/native/smbios_loader_test.cpp $<TARGET_OBJECTS:systemmonitor_objects>)
     if(WIN32)
-        target_link_libraries(smbios_loader_test dxgi psapi)
+        target_link_libraries(smbios_loader_test dxgi psapi pdh)
     else()
-        target_link_libraries(smbios_loader_test stdc++fs)
+        target_link_libraries(smbios_loader_test stdc++fs ${CMAKE_DL_LIBS})
     endif()
     add_test(NAME smbios_loader_test COMMAND smbios_loader_test)
     set_tests_properties(smbios_loader_test PROPERTIES TIMEOUT 30)

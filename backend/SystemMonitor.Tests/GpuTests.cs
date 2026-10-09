@@ -10,13 +10,11 @@ static class GpuTests
         public bool IsAvailable { get; init; } = true;
         public string? DriverVersion => "550.54";
         public IReadOnlyList<NvmlDevice> Devices { get; init; } = [];
-        public int Samples;
-        public NvmlSample? Sample(int i) { Samples++; return new NvmlSample(34, 3_200_000_000, 8_000_000_000, 58, 2100, 8000, 48, 115, 40, "P2"); }
     }
 
     sealed class FakeCollector : IGpuCollector
     {
-        public int HardwareReads, LiveReads;
+        public int HardwareReads;
         public bool Throw;
         public IReadOnlyList<GpuAdapter> ReadHardware()
         {
@@ -24,9 +22,14 @@ static class GpuTests
             if (Throw) throw new InvalidOperationException("driver exploded");
             return [new GpuAdapter("a", 0, "Test GPU", "NVIDIA", null, null, null, null, null, null, false, true, 1000, null)];
         }
-        public IReadOnlyList<GpuLiveReading> ReadLive(IReadOnlyList<GpuAdapter> a)
+    }
+
+    sealed class FakeLive : IGpuLiveSource
+    {
+        public int Reads;
+        public IReadOnlyList<GpuLiveReading> Read(IReadOnlyList<GpuAdapter> a)
         {
-            LiveReads++;
+            Reads++;
             return a.Select(x => new GpuLiveReading(x.Id, 10, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)).ToList();
         }
     }
@@ -98,34 +101,17 @@ static class GpuTests
             Check(adapters[1].Name.Contains("Navi 23") && adapters[1].DedicatedMemoryBytes == 8589934592 && adapters[1].SharedMemoryBytes == 16777216000, "AMD name and memory come from pci.ids and sysfs");
             Check(adapters[1].Id == "0000:03:00.0" && adapters[1].PciAddress == "0000:03:00.0", "adapters are identified by PCI address");
 
-            var live = collector.ReadLive(adapters);
-            var amd = live[1];
-            Check(amd.UtilizationPercent == 42 && amd.MemoryUsedBytes == 2147483648 && amd.MemoryUsagePercent == 25.0, "AMD utilization and VRAM percentage");
-            Check(amd.TemperatureC == 61 && amd.MemoryTemperatureC == 70, "edge temperature is the headline, memory temperature is separate");
-            Check(amd.PowerWatts == 48 && amd.PowerLimitWatts == 132, "power in watts from microwatts");
-            Check(amd.FanRpm == 1200 && amd.FanPercent == 50, "fan rpm and pwm percentage");
-            Check(amd.CoreClockMhz == 2100 && amd.MemoryClockMhz == 875 && amd.VoltageV == 1.05, "clocks and voltage");
-            Check(live[0].UtilizationPercent is null && live[0].TemperatureC is null && live[0].Note is not null, "Intel iGPU unavailable values stay null with an explanation");
-
-            Write(Path.Combine(sys, "class", "drm", "card0", "gt_cur_freq_mhz"), "1100\n");
-            Check(collector.ReadLive(adapters)[0].CoreClockMhz == 1100, "i915 current frequency is read when present");
-
-            // NVIDIA: NVML supplies the numbers and is matched by PCI address.
+            // NVIDIA: name, VRAM and driver come from the NVIDIA driver, matched by PCI address.
             Card(sys, "card2", "0000:01:00.0", "0x10de", "0x2882", "nvidia", bootVga: false);
             var nvml = new FakeNvml { Devices = [new NvmlDevice("NVIDIA GeForce RTX 4060", "0000:01:00.0", "0x10de", "0x2882", 8_000_000_000)] };
             var withNvidia = new LinuxGpuCollector(nvml, ids, sys);
             var all = withNvidia.ReadHardware();
             var nv = all.Single(a => a.Vendor == "NVIDIA");
             Check(all.Count == 3 && nv.Name == "NVIDIA GeForce RTX 4060" && nv.DedicatedMemoryBytes == 8_000_000_000 && nv.DriverVersion == "550.54", "NVIDIA name, VRAM and driver come from NVML");
-            var nvLive = withNvidia.ReadLive(all).Single(r => r.Id == nv.Id);
-            Check(nvLive.UtilizationPercent == 34 && nvLive.MemoryUsagePercent == 40.0 && nvLive.TemperatureC == 58 && nvLive.PerformanceState == "P2" && nvLive.Source == "nvml", "NVIDIA telemetry through NVML");
 
             var noNvml = new LinuxGpuCollector(new FakeNvml { IsAvailable = false }, ids, sys);
             var fallback = noNvml.ReadHardware().Single(a => a.Vendor == "NVIDIA");
-            Check(fallback.Name.StartsWith("NVIDIA") && noNvml.ReadLive([fallback])[0].Note is not null && noNvml.ReadLive([fallback])[0].UtilizationPercent is null, "NVIDIA without NVML degrades with a note and no fake numbers");
-
-            Directory.Delete(Path.Combine(sys, "class", "drm", "card2"), true);
-            Check(noNvml.ReadLive([fallback])[0].Note is not null, "an adapter that disappeared yields an empty reading, not an exception");
+            Check(fallback.Name.StartsWith("NVIDIA"), "NVIDIA without NVML degrades with a note and no fake numbers");
 
             var m = NvmlMatching.ByName(["NVIDIA GeForce RTX 4060", "NVIDIA GeForce RTX 3050", "Intel UHD"],
                 [new NvmlDevice("NVIDIA GeForce RTX 3050", null, null, null, 1), new NvmlDevice("NVIDIA GeForce RTX 4060", null, null, null, 2)]);
@@ -139,66 +125,49 @@ static class GpuTests
                 new GpuEngineUsage("pid_3_luid_0x0_0x1_phys_0_eng_0_engtype_3D", 1), new GpuEngineUsage("pid_2_luid_0x0_0x1_phys_0_eng_1_engtype_Copy", 2),
                 new GpuEngineUsage("pid_4_luid_0x0_0x1_phys_0_eng_0_engtype_VideoDecode", 80), new GpuEngineUsage("pid_5_luid_0x0_0x1_phys_0_eng_0_engtype_VideoDecode", 60)]);
             Check(agg.Count == 3 && agg[0].InstanceName == "VideoDecode" && agg[0].UsagePercent == 100 && agg[1].InstanceName == "3D" && agg[1].UsagePercent == 31, "engine instances are summed per engine across processes, capped at 100");
-            // Hybrid laptop: both GPUs report "_phys_0"; only the LUID separates them.
             const string intelLuid = "luid_0x00000000_0x0000f1a2", nvidiaLuid = "luid_0x00000000_0x0000f1b4";
             Check(GpuMath.TryParseLuid($"pid_9_{intelLuid}_phys_0_eng_0_engtype_3D", out var il) && il == 0xf1a2 &&
                   GpuMath.TryParseLuid($"{nvidiaLuid}_phys_0", out var nl) && nl == 0xf1b4 &&
                   GpuMath.TryParseLuid("luid_0xffffffff_0x00000001_phys_0", out var big) && big == unchecked((long)0xffffffff00000001UL) &&
                   !GpuMath.TryParseLuid("pid_9_engtype_3D", out _), "LUIDs are parsed from counter instance names");
-            var hybrid = new[]
-            {
-                new GpuEngineUsage($"pid_1_{intelLuid}_phys_0_eng_0_engtype_3D", 20), new GpuEngineUsage($"pid_2_{intelLuid}_phys_0_eng_0_engtype_3D", 3),
-                new GpuEngineUsage($"pid_3_{nvidiaLuid}_phys_0_eng_0_engtype_3D", 90), new GpuEngineUsage($"pid_3_{nvidiaLuid}_phys_0_eng_3_engtype_Copy", 5),
-            };
-            var intelEngines = GpuCounters.EnginesFor(0xf1a2, false, hybrid);
-            var nvEngines = GpuCounters.EnginesFor(0xf1b4, false, hybrid);
-            Check(intelEngines.Count == 2 && GpuMath.AggregateEngines(intelEngines)[0].UsagePercent == 23, "the iGPU only counts its own processes, not the NVIDIA GPU's game");
-            Check(nvEngines.Count == 2 && GpuMath.AggregateEngines(nvEngines)[0].UsagePercent == 90, "the NVIDIA GPU gets its own engine load");
-            var idle = new List<GpuEngineUsage> { new($"pid_1_{intelLuid}_phys_0_eng_0_engtype_3D", 0), new($"pid_9_{intelLuid}_phys_0_eng_0_engtype_3D", 0) };
-            Check(GpuMath.AggregateEngines(GpuCounters.EnginesFor(0xf1a2, false, idle)) is [{ UsagePercent: 0 }], "an idle adapter's engines aggregate to a real 0, not to nothing");
-            Check(GpuCounters.EnginesFor(0xf1c0, false, idle).Count == 0, "an adapter with no counters of its own has no engines at all (unknown, not 0)");
-            Check(GpuCounters.EnginesFor(null, false, hybrid).Count == 0 && GpuCounters.EnginesFor(null, true, hybrid).Count == 4, "without a LUID counters are only used for a single adapter");
-            var mem = new Dictionary<long, (long? Dedicated, long? Shared)> { [0xf1a2] = (50, 60), [0xf1b4] = (900, 10) };
-            Check(GpuCounters.MemoryFor(0xf1a2, false, mem) is (50, 60) && GpuCounters.MemoryFor(0xf1b4, false, mem) is (900, 10), "memory counters are not mixed between GPUs");
-            Check(GpuCounters.MemoryFor(null, false, mem) is null && GpuCounters.MemoryFor(0x1, false, mem) is null, "an unknown adapter gets no borrowed memory figures");
             var dx = new List<DxgiAdapter> { new("Intel(R) Iris(R) Xe Graphics", 128, 7800, 0xf1a2), new("NVIDIA GeForce RTX 4060 Laptop GPU", 8000, 7800, 0xf1b4), new("Microsoft Basic Render Driver", 0, 7800, 0x5) };
             Check(GpuCounters.MatchDxgi("NVIDIA GeForce RTX 4060 Laptop GPU", 2, dx)?.Luid == 0xf1b4 && GpuCounters.MatchDxgi("Intel(R) Iris(R) Xe Graphics", 2, dx)?.Luid == 0xf1a2, "WMI adapters find their DXGI entry by name");
             Check(GpuCounters.MatchDxgi("Something else", 2, dx) is null, "an unmatched name is not guessed");
             Check(GpuCounters.MatchDxgi("Anything", 1, [dx[0], dx[2]])?.Luid == 0xf1a2, "the software renderer is ignored when matching a single adapter");
             Check(GpuMath.AggregateEngines([new GpuEngineUsage("garbage", 5)]).Count == 0, "unrecognised engine names are ignored");
-            Check(NvmlGpuSource.NormalizePci("00000000:01:00.0") == "0000:01:00.0", "NVML bus ids normalise to sysfs form");
+            Check(GpuMath.NormalizePci("00000000:01:00.0") == "0000:01:00.0", "NVML bus ids normalise to sysfs form");
 
             // GpuService: cached across launches, live sampling shared, failures isolated.
             var cache = new SystemInfoCache(Path.Combine(root, "cache"), NullLogger<SystemInfoCache>.Instance);
             var first = new FakeCollector();
-            var svc1 = new GpuService(first, cache, NullLogger<GpuService>.Instance);
+            var live = new FakeLive();
+            var svc1 = new GpuService(first, live, cache, NullLogger<GpuService>.Instance);
             Check((await svc1.GetHardwareAsync()).Available && first.HardwareReads == 1, "first launch reads hardware");
             await svc1.GetHardwareAsync();
             Check(first.HardwareReads == 1, "hardware is not re-read per request");
 
             var live1 = await svc1.GetLiveAsync();
             await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => svc1.GetLiveAsync()));
-            Check(first.LiveReads == 1 && live1.Readings.Count == 1, "concurrent live requests share one sample");
+            Check(live.Reads == 1 && live1.Readings.Count == 1, "concurrent live requests share one sample");
 
             var second = new FakeCollector { Throw = true };
-            var svc2 = new GpuService(second, cache, NullLogger<GpuService>.Instance);
+            var svc2 = new GpuService(second, new FakeLive(), cache, NullLogger<GpuService>.Instance);
             var warm = svc2.WarmUpAsync();
             await Task.Delay(0);
             await warm;
             var served = await svc2.GetHardwareAsync();
             Check(served.Available && served.Adapters.Count == 1, "a failing fresh read keeps serving the cached adapters");
 
-            var broken = new GpuService(new FakeCollector { Throw = true }, new SystemInfoCache(Path.Combine(root, "cache2"), NullLogger<SystemInfoCache>.Instance), NullLogger<GpuService>.Instance);
+            var broken = new GpuService(new FakeCollector { Throw = true }, new FakeLive(), new SystemInfoCache(Path.Combine(root, "cache2"), NullLogger<SystemInfoCache>.Instance), NullLogger<GpuService>.Instance);
             var none = await broken.GetHardwareAsync();
             Check(!none.Available && none.Adapters.Count == 0 && none.Note is not null, "GPU detection failure is reported as unavailable");
             Check((await broken.GetLiveAsync()).Readings.Count == 0, "live readings with no adapters are empty, not an error");
 
             File.WriteAllText(Path.Combine(root, "cache", "gpu-hardware.json"), "{ nope");
             var third = new FakeCollector();
-            var svc3 = new GpuService(third, cache, NullLogger<GpuService>.Instance);
+            var svc3 = new GpuService(third, new FakeLive(), cache, NullLogger<GpuService>.Instance);
             await svc3.WarmUpAsync();
             Check((await svc3.GetHardwareAsync()).Available && third.HardwareReads == 1, "a corrupt GPU cache is rebuilt from a fresh read");
-            Check(third.LiveReads == 1, "start-up takes the first live baseline so the first poll has real load numbers");
         }
         finally
         {

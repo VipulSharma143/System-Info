@@ -30,13 +30,11 @@
     <Compile Include="../SystemMonitor.Api/services/Gpu/GpuModels.cs" Link="linked/GpuModels.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/GpuService.cs" Link="linked/GpuService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/LinuxGpuCollector.cs" Link="linked/LinuxGpuCollector.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlGpuSource.cs" Link="linked/NvmlGpuSource.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Overlay/OverlayModels.cs" Link="linked/OverlayModels.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Overlay/OverlayEngine.cs" Link="linked/OverlayEngine.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Overlay/OverlayService.cs" Link="linked/OverlayService.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Overlay/GpuEngineMapper.cs" Link="linked/GpuEngineMapper.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlMatching.cs" Link="linked/NvmlMatching.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/PciIds.cs" Link="linked/PciIds.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Cpu/CpuLayoutBuilder.cs" Link="linked/CpuLayoutBuilder.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Cpu/CpuModels.cs" Link="linked/CpuModels.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Cpu/CpuTemperatureSelection.cs" Link="linked/CpuTemperatureSelection.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Cpu/CpuService.cs" Link="linked/CpuService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Cpu/LinuxCpuCollector.cs" Link="linked/LinuxCpuCollector.cs" />
   </ItemGroup>
 </Project>

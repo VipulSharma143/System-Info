@@ -77,6 +77,25 @@ NATIVE_API int si_kernel_benchmark(long long elements, int repeats,
 
 NATIVE_API long long si_minmax_i32(const int* a, long long n, int* minOut, int* maxOut);  // 1 = ok, 0 = invalid args
 NATIVE_API int si_memcpy(void* dst, const void* src, long long n);                        // 1 = ok; overlap-safe
+// Layout shared with assembly/math/stats_kernels.asm.
+struct SiStatsF32 { float sum; float max; float threshold; int count; };
+
+// Sum, maximum and count of values >= threshold over n floats (non-finite values are treated as 0).
+// Assembly (AVX2 / SSE2) with the same demotion rules as the other kernels. Returns 1 on success.
+NATIVE_API int si_stats_f32(const float* a, long long n, float threshold, double* sumOut, double* maxOut, long long* countOut);
+// ---------------------------------------------------------------------
+// Overlay engine (src/overlay/): one background thread samples CPU, every GPU and RAM and publishes a single JSON
+// snapshot with a short history per series. See overlay_engine.cpp for the schema.
+// ---------------------------------------------------------------------
+// intervalMs > 0: sample on a background thread (idle heartbeat of 2 s when nobody reads snapshots).
+// intervalMs == 0: manual mode, a sample happens only in si_overlay_sample_now() (tests).
+// root: "" in production; tests pass a directory holding a fake proc/ and sys/ tree. Returns 1.
+NATIVE_API int si_overlay_start(int intervalMs, const char* root);
+NATIVE_API void si_overlay_stop();
+NATIVE_API int si_overlay_sample_now();                                  // 1 = sampled, 0 = engine not running
+// Latest snapshot as UTF-8 JSON. Returns its length; 0 when no sample exists yet; -(needed bytes) when the buffer is too small.
+NATIVE_API int si_overlay_snapshot_json(char* buffer, int capacity);
+
 NATIVE_API unsigned long long si_xor_u64(const unsigned long long* a, long long nwords);
 NATIVE_API int si_memory_bandwidth(long long bytes, int repeats, double* copyGBps, double* readGBps);
 

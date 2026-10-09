@@ -6,6 +6,14 @@ namespace SystemMonitor.Api.Services;
 public static partial class GpuMath
 {
     /// <summary>Used as a percentage of total, never above 100 (counters from different sources can disagree slightly).</summary>
+    /// <summary>"00000000:01:00.0" (NVML) and "0000:01:00.0" (sysfs) name the same device.</summary>
+    public static string? NormalizePci(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address)) return null;
+        var text = address.Trim().ToLowerInvariant();
+        return text.Length > 12 ? text[^12..] : text;
+    }
+
     public static double? Percent(long? used, long? total) =>
         used is { } u && total is > 0 and var t ? Math.Round(Math.Min(100.0, u * 100.0 / t), 1) : null;
 

@@ -4,6 +4,20 @@ All notable changes to SystemInfo are documented here.
 
 ## [Unreleased]
 
+
+## [2.6.0] - 2026-10-09
+
+### Changed
+- **The Overlay tab has been rebuilt from scratch.** It now shows one live dial for your processor, each graphics card and your memory, with a one-minute trend, the readings that matter, and a short note on where each number comes from. Open "Each processor" or "Busiest engines" under a dial for the details, or switch to Compact for a small always-readable view.
+- The Overlay and the Graphics page now use the same live readings, so they always agree with each other.
+- Readings are taken by a dedicated background monitor instead of being gathered each time you look, so the numbers are fresher and the app stays light. When nobody is looking, it slows down on its own.
+
+### Fixed
+- **Graphics card temperature and usage frozen, slow or wrong.** Both are now read quickly and independently, so they move with what the card is really doing.
+- **Graphics readings come back on their own** after the card sleeps, the driver restarts, or you switch graphics mode.
+- When a reading is not available, the app now says why instead of showing a blank or a made-up zero.
+- The monitor shows "Live", "Slow" or "Stopped" so you can tell at a glance whether the numbers are current.
+
 ## [2.5.1] - 2026-10-09
 
 ### Fixed
@@ -11,7 +25,6 @@ All notable changes to SystemInfo are documented here.
 - **Graphics readings come back on their own.** If the graphics card went to sleep, its driver restarted, or you switched graphics mode, the readings could stay empty until you restarted the app. They now recover automatically.
 - **Clearer messages.** When a graphics reading is not available, the app now tells you why instead of leaving it blank.
 - **Graphics usage shows up sooner after the app opens.**
-
 
 ## [2.5.0] - 2026-10-08
 

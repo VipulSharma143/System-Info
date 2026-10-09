@@ -110,7 +110,7 @@ System Info/
 │   │   │   └── *.tsx               # SpeedTestCard (used by NetworkView) and older copies of the
 │   │   │                           # analytics components that nothing imports any more
 │   │   ├── hooks/                  # usePolling (the one fetch/poll/retry loop), useSystemMetrics, useSystemInfo,
-│   │   │                           # useSystemGpu, useGpu, useCpuDetail, useAnalytics, useSpeedTest, useServiceControl, useUpdater,
+│   │   │                           # useSystemGpu, useGpu, useOverlay, useAnalytics, useSpeedTest, useServiceControl, useUpdater,
 │   │   │                           # useDashboardHistory, useProcessHistory, useFailureAlerts, useTheme, ...
 │   │   ├── lib/                    # apiConfig.ts (env-aware API base), api.ts, persisted.ts (startup cache),
 │   │   │                           # share.ts, format.ts, hues.ts, sections.ts, errors.ts, alerts.ts, tauri.ts
@@ -129,8 +129,9 @@ System Info/
 │   │   │                            #   .Gpu, .Identity partials), WindowsBatteryInterop
 │   │   │                            # Snapshots & startup cache: SystemSnapshotService, SystemInfoService, SystemInfoCache
 │   │   │                            # GPU (services/Gpu/): GpuService, LinuxGpuCollector, WindowsGpuCollector,
-│   │   │                            #   GpuCounters (LUID matching), GpuMath, NvmlGpuSource, NvmlMatching, PciIds, GpuModels
-│   │   │                            # CPU detail (services/Cpu/): CpuService, LinuxCpuCollector, WindowsCpuCollector, CpuModels
+│   │   │                            #   GpuCounters (DXGI matching), GpuMath, NvmlMatching, PciIds, GpuModels
+│   │   │                            # Overlay (services/Overlay/): OverlayService (hosts the native engine), OverlayModels, GpuEngineMapper
+│   │   │                            #   (live GPU numbers for the GPU page come from the same engine snapshot)
 │   │   │                            # Memory: MemoryHardwareService, MemoryHealthReader, MemoryMapping, RamDetailsReader
 │   │   │                            # History: SystemMonitorBackgroundService, SnapshotLogger, LocalJsonSnapshotStore,
 │   │   │                            #   AnalyticsService; paths: AppDataPath

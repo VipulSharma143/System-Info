@@ -5,8 +5,8 @@ namespace SystemMonitor.Api.Services;
 
 /// <summary>
 /// One source of truth for GPUs. Hardware is stable, so it is persisted and served from the previous launch
-/// immediately while a fresh read runs in the background; live telemetry is sampled at most once a second
-/// no matter how many callers ask.
+/// immediately while a fresh read runs in the background; live telemetry comes from the native overlay engine's
+/// latest snapshot (the same numbers the Overlay page shows) and is mapped onto these adapters.
 /// </summary>
 public sealed class GpuService
 {
@@ -14,6 +14,7 @@ public sealed class GpuService
     private static readonly TimeSpan LiveTtl = TimeSpan.FromSeconds(1);
 
     private readonly IGpuCollector _collector;
+    private readonly IGpuLiveSource _live;
     private readonly SystemInfoCache _cache;
     private readonly ILogger<GpuService> _log;
     private readonly object _gate = new();
@@ -24,12 +25,13 @@ public sealed class GpuService
 
     private GpuHardwareInfo? _hardware;
     private long _hardwareAt;
-    private GpuLiveInfo? _live;
+    private GpuLiveInfo? _liveInfo;
     private long _liveAt;
 
-    public GpuService(IGpuCollector collector, SystemInfoCache cache, ILogger<GpuService> log)
+    public GpuService(IGpuCollector collector, IGpuLiveSource live, SystemInfoCache cache, ILogger<GpuService> log)
     {
         _collector = collector;
+        _live = live;
         _cache = cache;
         _log = log;
     }
@@ -45,10 +47,6 @@ public sealed class GpuService
             }
         }
         await RefreshHardwareAsync();
-
-        // Take the first load baseline now, so the first poll from the UI already has real numbers.
-        var hardware = await GetHardwareAsync();
-        await Task.Run(() => SampleSafely(hardware.Adapters));
     }
 
     public async ValueTask<GpuHardwareInfo> GetHardwareAsync()
@@ -65,7 +63,7 @@ public sealed class GpuService
     {
         lock (_gate)
         {
-            if (_live is { } fresh && Environment.TickCount64 - _liveAt < LiveTtl.TotalMilliseconds) return fresh;
+            if (_liveInfo is { } fresh && Environment.TickCount64 - _liveAt < LiveTtl.TotalMilliseconds) return fresh;
         }
 
         await _liveRead.WaitAsync();
@@ -73,7 +71,7 @@ public sealed class GpuService
         {
             lock (_gate)
             {
-                if (_live is { } fresh && Environment.TickCount64 - _liveAt < LiveTtl.TotalMilliseconds) return fresh;
+                if (_liveInfo is { } fresh && Environment.TickCount64 - _liveAt < LiveTtl.TotalMilliseconds) return fresh;
             }
 
             var hardware = await GetHardwareAsync();
@@ -81,7 +79,7 @@ public sealed class GpuService
             var live = new GpuLiveInfo(readings, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             lock (_gate)
             {
-                _live = live;
+                _liveInfo = live;
                 _liveAt = Environment.TickCount64;
             }
             return live;
@@ -97,7 +95,7 @@ public sealed class GpuService
         if (adapters.Count == 0) return [];
         try
         {
-            return _collector.ReadLive(adapters);
+            return _live.Read(adapters);
         }
         catch (Exception ex)
         {

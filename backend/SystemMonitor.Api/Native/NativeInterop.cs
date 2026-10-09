@@ -5,6 +5,17 @@ namespace SystemMonitor.Api.Native;
 
 public static class NativeInterop
 {
+    // Overlay engine: a native background sampler publishing one JSON snapshot (see native/src/overlay).
+    [DllImport("systemmonitor_native", EntryPoint = "si_overlay_start")]
+    public static extern int OverlayStart(int intervalMs, IntPtr root);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_overlay_stop")]
+    public static extern void OverlayStop();
+
+    // Length written, 0 = no sample yet, negative = buffer too small (the magnitude is the size needed).
+    [DllImport("systemmonitor_native", EntryPoint = "si_overlay_snapshot_json")]
+    public static extern int OverlaySnapshotJson([Out] byte[] buffer, int capacity);
+
     [DllImport("systemmonitor_native", EntryPoint = "add_numbers")]
     public static extern int AddNumbers(int a, int b);
 

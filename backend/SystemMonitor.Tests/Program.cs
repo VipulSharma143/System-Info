@@ -173,11 +173,7 @@ finally { try { Directory.Delete(dir, true); } catch { } }
     failures += nf; checks += nc;
 }
 {
-    var (nf, nc) = await CpuTests.RunAsync();
-    failures += nf; checks += nc;
-}
-{
-    var (nf, nc) = CpuTemperatureTests.Run();
+    var (nf, nc) = await OverlayTests.RunAsync();
     failures += nf; checks += nc;
 }
 {

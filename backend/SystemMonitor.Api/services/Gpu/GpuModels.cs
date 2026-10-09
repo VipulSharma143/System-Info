@@ -53,39 +53,24 @@ public sealed record GpuHardwareInfo(bool Available, IReadOnlyList<GpuAdapter> A
 
 public sealed record GpuLiveInfo(IReadOnlyList<GpuLiveReading> Readings, long SampledAtUnixMs);
 
-/// <summary>Reads GPUs for one platform. Implementations must not throw for missing hardware or drivers.</summary>
+/// <summary>Reads the stable facts about GPUs for one platform. Implementations must not throw for missing hardware.</summary>
 public interface IGpuCollector
 {
     IReadOnlyList<GpuAdapter> ReadHardware();
+}
 
-    IReadOnlyList<GpuLiveReading> ReadLive(IReadOnlyList<GpuAdapter> adapters);
+/// <summary>Live readings for the given adapters, one per adapter in the same order.</summary>
+public interface IGpuLiveSource
+{
+    IReadOnlyList<GpuLiveReading> Read(IReadOnlyList<GpuAdapter> adapters);
 }
 
 public sealed record NvmlDevice(string Name, string? PciAddress, string? VendorId, string? DeviceId, long? MemoryTotalBytes);
 
-public sealed record NvmlSample(
-    double? UtilizationPercent,
-    long? MemoryUsedBytes,
-    long? MemoryTotalBytes,
-    double? TemperatureC,
-    int? CoreClockMhz,
-    int? MemoryClockMhz,
-    double? PowerWatts,
-    double? PowerLimitWatts,
-    int? FanPercent,
-    string? PerformanceState);
-
-/// <summary>NVIDIA's management library, which is the only supported source of NVIDIA telemetry on both platforms.</summary>
+/// <summary>What the NVIDIA driver says about the installed NVIDIA GPUs (identity only; live numbers come from the engine).</summary>
 public interface INvmlSource
 {
     bool IsAvailable { get; }
-
     string? DriverVersion { get; }
-
     IReadOnlyList<NvmlDevice> Devices { get; }
-
-    NvmlSample? Sample(int deviceIndex);
-
-    /// <summary>Why NVIDIA telemetry is missing right now, or null when it works. Shown instead of a silent blank.</summary>
-    string? Problem => null;
 }

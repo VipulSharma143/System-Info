@@ -65,7 +65,7 @@ static class HostSnapshotTests
                 Check(live.SampledUnixMs > 1_700_000_000_000, "the snapshot carries a real timestamp");
                 if (live.HasMemory) Check(live.MemTotalKb > 0 && live.MemAvailableKb <= live.MemTotalKb, "native memory figures are consistent");
                 if (live.HasCpuTicks) Check(live.CpuBusyTicks <= live.CpuTotalTicks, "native busy ticks never exceed total");
-                if (live.HasCpuTemperature) Check(CpuTemperatureSelection.Plausible(live.CpuTemperatureC), "a native temperature is plausible");
+                if (live.HasCpuTemperature) Check(live.CpuTemperatureC is > 0 and < 150, "a native temperature is plausible");
             }
         }
         if (NativeTests.LoadedLibrary is not null && OperatingSystem.IsLinux())

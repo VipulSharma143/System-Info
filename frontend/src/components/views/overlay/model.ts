@@ -1,188 +1,184 @@
-import type { CpuCoreReading, CpuDetail, GpuAdapter, GpuLiveReading, RamDetails } from '../../../types/system';
+import type { Hue } from '../../../lib/hues';
+import type { OverlayCpu, OverlayGpu, OverlayHistory, OverlayRam, OverlaySnapshot } from '../../../types/overlay';
 
 /*
-  Pure derivations for the overlay: every number shown comes from a backend field or simple arithmetic on two of
-  them. A missing input yields null (rendered as "Not reported"), never a default.
+  Pure view-model for the live monitor: turns the engine's snapshot into tiles of display-ready strings.
+  Rules that hold everywhere here:
+    - null stays null until the very last step; a value that was not measured is never shown as 0;
+    - every number that comes from a backend says which one (sourceLabel), so a wrong-looking value can be traced.
 */
 
-export type LoadState = 'Idle' | 'Light' | 'Moderate' | 'Heavy' | 'Saturated';
-
-/** A logical processor counts as active above this share of busy time. */
-export const ACTIVE_CORE_THRESHOLD = 10;
-
-export function loadState(percent: number | null | undefined): LoadState | null {
-  if (percent == null) return null;
-  return percent < 10 ? 'Idle' : percent < 40 ? 'Light' : percent < 70 ? 'Moderate' : percent < 90 ? 'Heavy' : 'Saturated';
-}
-
-export const hotness = (celsius: number | null | undefined) => (celsius == null ? undefined : celsius >= 85 ? 'var(--critical)' : celsius >= 75 ? 'var(--warn)' : undefined);
-
-export interface CoreGroup {
-  key: 'performance' | 'efficiency' | 'all';
+export interface Stat {
   label: string;
-  cores: CpuCoreReading[];
+  /** Display string, or null when the platform did not report it. */
+  value: string | null;
+  /** Why the value is missing, or extra context. */
+  hint?: string | null;
 }
 
-/** One group per core type on a hybrid CPU, a single group otherwise. Built from the readings, never from a CPU model. */
-export function groupCores(cores: CpuCoreReading[]): CoreGroup[] {
-  const typed = cores.length > 0 && cores.every((c) => c.coreType != null);
-  if (!typed) return cores.length ? [{ key: 'all', label: 'Logical processors', cores }] : [];
-  const performance = cores.filter((c) => c.coreType === 'performance');
-  const efficiency = cores.filter((c) => c.coreType === 'efficiency');
-  return [
-    { key: 'performance' as const, label: 'Performance cores', cores: performance },
-    { key: 'efficiency' as const, label: 'Efficiency cores', cores: efficiency },
-  ].filter((g) => g.cores.length > 0);
-}
-
-export interface CpuView {
-  usage: number | null;
-  load: LoadState | null;
-  logical: number | null;
-  physical: number | null;
-  hybrid: boolean;
-  performanceCores: number | null;
-  efficiencyCores: number | null;
-  performanceThreads: number | null;
-  efficiencyThreads: number | null;
-  /** Logical processors measured so far, and how many of them are above the activity threshold. */
-  measured: number;
-  active: number | null;
-  performanceActive: number | null;
-  efficiencyActive: number | null;
-  packageTemperature: number | null;
-  hottestCore: number | null;
-  systemTemperature: number | null;
-  power: number | null;
-  status: 'live' | 'measuring' | 'unavailable';
-}
-
-const busyOfType = (cores: CpuCoreReading[], type: 'performance' | 'efficiency') =>
-  cores.some((c) => c.coreType === type) ? cores.filter((c) => c.coreType === type && (c.usagePercent ?? 0) >= ACTIVE_CORE_THRESHOLD).length : null;
-
-export function cpuView(cpu: CpuDetail | null, fallbackPhysical: number | null, fallbackLogical: number | null): CpuView {
-  const layout = cpu?.layout ?? null;
-  const cores = cpu?.cores ?? [];
-  const measuredCores = cores.filter((c) => c.usagePercent != null);
-  const coreTemps = cores.map((c) => c.temperatureC).filter((t): t is number => t != null);
-  return {
-    usage: cpu?.totalUsagePercent ?? null,
-    load: loadState(cpu?.totalUsagePercent),
-    logical: layout?.logicalProcessors ?? (cores.length || fallbackLogical),
-    physical: layout?.physicalCores ?? fallbackPhysical,
-    hybrid: layout?.hybrid === true,
-    performanceCores: layout?.performanceCores ?? null,
-    efficiencyCores: layout?.efficiencyCores ?? null,
-    performanceThreads: layout?.performanceThreads ?? null,
-    efficiencyThreads: layout?.efficiencyThreads ?? null,
-    measured: measuredCores.length,
-    active: measuredCores.length ? measuredCores.filter((c) => (c.usagePercent ?? 0) >= ACTIVE_CORE_THRESHOLD).length : null,
-    performanceActive: busyOfType(measuredCores, 'performance'),
-    efficiencyActive: busyOfType(measuredCores, 'efficiency'),
-    packageTemperature: cpu?.packageTemperatureC ?? null,
-    hottestCore: coreTemps.length ? Math.max(...coreTemps) : null,
-    systemTemperature: cpu?.systemTemperatureC ?? null,
-    power: cpu?.powerWatts ?? null,
-    status: cpu === null ? 'unavailable' : cpu.totalUsagePercent == null ? 'measuring' : 'live',
-  };
-}
-
-export interface GpuView {
+export interface TileView {
   id: string;
-  name: string;
-  vendor: string | null;
-  kind: 'Integrated' | 'Discrete' | null;
-  usage: number | null;
-  vramUsedBytes: number | null;
-  vramTotalBytes: number | null;
-  vramFreeBytes: number | null;
-  vramPercent: number | null;
-  sharedUsedBytes: number | null;
-  temperature: number | null;
-  power: number | null;
-  powerLimit: number | null;
-  status: 'live' | 'no-live-data';
-  /** Where the live numbers came from ("nvml", "performance-counter", ...), so a wrong-looking GPU can be traced. */
-  source: string | null;
-  note: string | null;
-  /** Busiest engines (3D, Compute, Copy, ...), when the platform reports them. */
-  engines: { name: string; usage: number }[];
+  kind: 'cpu' | 'gpu' | 'ram';
+  hue: Hue;
+  title: string;
+  subtitle: string;
+  /** Headline load 0-100; null while unknown (first sample) or unmeasurable. */
+  percent: number | null;
+  stats: Stat[];
+  history: number[];
+  /** Backends behind this tile's numbers, in display form. */
+  sources: string[];
+  /** Explanations for anything missing. */
+  notes: string[];
+  /** CPU only: one cell per logical processor. */
+  cores?: { index: number; percent: number | null; clock: string | null }[];
+  /** GPU only: busiest engines, most loaded first. */
+  engines?: { name: string; percent: number }[];
 }
 
-export function gpuView(adapter: GpuAdapter, reading: GpuLiveReading | undefined): GpuView {
-  const total = reading?.memoryTotalBytes ?? adapter.dedicatedMemoryBytes;
-  const used = reading?.memoryUsedBytes ?? null;
+export type LiveState = 'live' | 'lagging' | 'stalled';
+
+const GIB = 1024 ** 3;
+
+export const num = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v);
+
+export function formatTemp(c: number | null): string | null {
+  return num(c) ? `${Math.round(c)} °C` : null;
+}
+export function formatGiB(bytes: number | null, digits = 1): string | null {
+  return num(bytes) ? `${(bytes / GIB).toFixed(digits)} GB` : null;
+}
+export function formatPair(used: number | null, total: number | null): string | null {
+  if (!num(used)) return null;
+  const u = (used / GIB).toFixed(1);
+  return num(total) ? `${u} / ${(total / GIB).toFixed(1)} GB` : `${u} GB`;
+}
+export function formatClock(mhz: number | null): string | null {
+  if (!num(mhz) || mhz <= 0) return null;
+  return mhz >= 1000 ? `${(mhz / 1000).toFixed(2)} GHz` : `${Math.round(mhz)} MHz`;
+}
+export function formatPower(w: number | null, limit: number | null): string | null {
+  if (!num(w)) return null;
+  return num(limit) ? `${Math.round(w)} / ${Math.round(limit)} W` : `${Math.round(w)} W`;
+}
+
+const SOURCES: Record<string, string> = {
+  nvml: 'NVIDIA driver',
+  'windows-counters': 'Windows counters',
+  sysfs: 'Linux driver files',
+  hwmon: 'Linux sensors',
+};
+export function sourceLabel(code: string | null | undefined): string | null {
+  return code ? (SOURCES[code] ?? code) : null;
+}
+
+/** The series without gaps; the sparkline draws what was measured. */
+export function measured(series: (number | null)[] | undefined): number[] {
+  return (series ?? []).filter(num);
+}
+
+/** How fresh the snapshot is: the engine samples twice a second, so a few seconds of silence means it stopped. */
+export function liveState(snapshot: Pick<OverlaySnapshot, 'sampledAtMs' | 'intervalMs'> | null, now: number): LiveState {
+  if (!snapshot) return 'stalled';
+  const age = now - snapshot.sampledAtMs;
+  // Idle heartbeat of the engine is 2 s, so allow for it before calling anything late.
+  const slack = Math.max(snapshot.intervalMs, 2000);
+  return age <= slack * 2 + 500 ? 'live' : age <= 10_000 ? 'lagging' : 'stalled';
+}
+
+function unique<T>(items: (T | null)[]): T[] {
+  return [...new Set(items.filter((i): i is T => i !== null))];
+}
+
+export function cpuTile(cpu: OverlayCpu, history: OverlayHistory): TileView {
+  const notes: string[] = [];
+  if (!num(cpu.temperatureC) && cpu.temperatureNote) notes.push(cpu.temperatureNote);
+  if (cpu.note) notes.push(cpu.note);
+  const cores = cpu.logicalProcessors;
   return {
-    id: adapter.id,
-    name: adapter.name,
-    vendor: adapter.vendor,
-    kind: adapter.integrated === null ? null : adapter.integrated ? 'Integrated' : 'Discrete',
-    usage: reading?.utilizationPercent ?? null,
-    vramUsedBytes: used,
-    vramTotalBytes: total ?? null,
-    vramFreeBytes: used != null && total != null && total >= used ? total - used : null,
-    vramPercent: reading?.memoryUsagePercent ?? (used != null && total ? Math.min(100, (used / total) * 100) : null),
-    sharedUsedBytes: reading?.sharedMemoryUsedBytes ?? null,
-    temperature: reading?.temperatureC ?? null,
-    power: reading?.powerWatts ?? null,
-    powerLimit: reading?.powerLimitWatts ?? null,
-    status: reading ? 'live' : 'no-live-data',
-    source: reading?.source ?? null,
-    note: reading?.note ?? null,
-    engines: (reading?.engines ?? []).slice(0, 4).map((e) => ({ name: e.instanceName, usage: e.usagePercent })),
+    id: 'cpu',
+    kind: 'cpu',
+    hue: 'cpu',
+    title: 'CPU',
+    subtitle: cores > 0 ? `${cores} logical processors` : 'Measuring…',
+    percent: cpu.usagePercent,
+    stats: [
+      { label: 'Temperature', value: formatTemp(cpu.temperatureC), hint: cpu.temperatureNote },
+      { label: 'Clock', value: formatClock(cpu.clockMhz) },
+      { label: 'Busy cores', value: num(cpu.activeCores) && cores > 0 ? `${cpu.activeCores} of ${cores}` : null },
+      { label: 'Busiest core', value: num(cpu.busiestCorePercent) ? `${Math.round(cpu.busiestCorePercent)}%` : null },
+    ],
+    history: measured(history.cpu),
+    sources: unique([cpu.temperatureSource]),
+    notes,
+    cores: coreCells(cpu),
   };
 }
 
-export interface MemoryView {
-  total: number;
-  used: number;
-  available: number;
-  free: number | null;
-  cached: number | null;
-  buffers: number | null;
-  percent: number;
-  swapTotal: number | null;
-  swapUsed: number | null;
-  swapFree: number | null;
-  swapPercent: number | null;
+export function gpuTile(gpu: OverlayGpu, history: OverlayHistory): TileView {
+  const h = history.gpus[gpu.id];
+  const notes = gpu.note ? [gpu.note] : [];
+  const kind = gpu.kind === 'discrete' ? 'Discrete' : gpu.kind === 'integrated' ? 'Integrated' : null;
+  return {
+    id: gpu.id,
+    kind: 'gpu',
+    hue: 'gpu',
+    title: gpu.name,
+    subtitle: [kind, gpu.driverVersion ? `driver ${gpu.driverVersion}` : null].filter(Boolean).join(' · ') || 'Graphics adapter',
+    percent: gpu.utilizationPercent,
+    stats: [
+      { label: 'Temperature', value: formatTemp(gpu.temperatureC), hint: gpu.source.temperature ? null : 'This adapter does not report a temperature here.' },
+      { label: 'Video memory', value: formatPair(gpu.memoryUsedBytes, gpu.memoryTotalBytes) },
+      { label: 'Core clock', value: formatClock(gpu.coreClockMhz) },
+      { label: 'Power', value: formatPower(gpu.powerWatts, gpu.powerLimitWatts) },
+    ],
+    history: measured(h?.usage),
+    sources: unique([sourceLabel(gpu.source.utilization), sourceLabel(gpu.source.temperature), sourceLabel(gpu.source.memory)]),
+    notes,
+    engines: gpu.engines,
+  };
 }
 
-export function memoryView(ram: RamDetails | null): MemoryView | null {
-  if (!ram) return null;
-  const { swapTotalBytes: swapTotal, swapUsedBytes: swapUsed } = ram;
-  const hasSwap = swapTotal != null && swapTotal > 0;
+export function ramTile(ram: OverlayRam, history: OverlayHistory): TileView {
+  const swap = num(ram.swapTotalBytes) && ram.swapTotalBytes > 0 ? formatPair(ram.swapUsedBytes, ram.swapTotalBytes) : null;
   return {
-    total: ram.totalBytes,
-    used: ram.usedBytes,
-    available: ram.availableBytes,
-    free: ram.freeBytes,
-    cached: ram.cachedBytes,
-    buffers: ram.buffersBytes,
+    id: 'ram',
+    kind: 'ram',
+    hue: 'ram',
+    title: 'Memory',
+    subtitle: formatPair(ram.usedBytes, ram.totalBytes) ?? 'Measuring…',
     percent: ram.usedPercent,
-    swapTotal,
-    swapUsed,
-    swapFree: hasSwap && swapUsed != null && swapTotal >= swapUsed ? swapTotal - swapUsed : null,
-    swapPercent: hasSwap && swapUsed != null ? Math.min(100, (swapUsed / swapTotal) * 100) : null,
+    stats: [
+      { label: 'Available', value: formatGiB(ram.availableBytes) },
+      { label: 'Cached', value: formatGiB(ram.cachedBytes) },
+      { label: 'Swap / page file', value: swap },
+    ],
+    history: measured(history.ram),
+    sources: [],
+    notes: [],
   };
 }
 
-/** "6P + 8E · 14 cores · 20 threads", or "8 cores · 16 threads" when the split is not reported. */
-export function topologyLabel(cpu: CpuView): string | null {
-  if (cpu.logical == null) return null;
-  const parts: string[] = [];
-  if (cpu.hybrid && cpu.performanceCores != null && cpu.efficiencyCores != null) parts.push(`${cpu.performanceCores}P + ${cpu.efficiencyCores}E`);
-  if (cpu.physical != null) parts.push(`${cpu.physical} cores`);
-  parts.push(`${cpu.logical} threads`);
-  return parts.join(' · ');
+/** CPU first, then graphics (discrete before integrated), then memory — the order a game session reads in. */
+export function buildTiles(s: OverlaySnapshot): TileView[] {
+  const rank = (g: OverlayGpu) => (g.kind === 'discrete' ? 0 : g.kind === 'integrated' ? 2 : 1);
+  const gpus = [...s.gpus].sort((a, b) => rank(a) - rank(b));
+  return [cpuTile(s.cpu, s.history), ...gpus.map((g) => gpuTile(g, s.history)), ramTile(s.ram, s.history)];
 }
 
-/** Integrated first, then discrete, then anything the OS did not classify; stable within each group. */
-export function orderGpus(gpus: GpuView[]): GpuView[] {
-  const rank = (g: GpuView) => (g.kind === 'Integrated' ? 0 : g.kind === 'Discrete' ? 1 : 2);
-  return [...gpus].sort((a, b) => rank(a) - rank(b));
+/** Per-core strip data: load and clock per logical processor, unknown cores kept as null. */
+export function coreCells(cpu: OverlayCpu): { index: number; percent: number | null; clock: string | null }[] {
+  return cpu.cores.map((c, index) => ({ index, percent: num(c.u) ? c.u : null, clock: formatClock(c.mhz) }));
 }
 
-/** "Integrated GPU" / "Discrete GPU" when there are several, plain "GPU" for a single adapter. */
-export function gpuLabel(gpu: GpuView, total: number): string {
-  return total > 1 && gpu.kind ? `${gpu.kind} GPU` : 'GPU';
+export function engineLabel(isa: number): string {
+  return isa === 2 ? 'AVX2' : isa === 1 ? 'SSE2' : 'portable';
+}
+
+/** Problems the engine knows about, in plain words (a missing driver, counters that will not open). */
+export function sourceProblems(s: OverlaySnapshot): string[] {
+  const out: string[] = [];
+  if (s.gpus.some((g) => g.vendor === 'NVIDIA') && s.engine.nvml !== 'ok') out.push(s.engine.nvml);
+  if (s.platform === 'windows' && s.engine.gpuCounters !== 'ok') out.push(s.engine.gpuCounters);
+  return out;
 }

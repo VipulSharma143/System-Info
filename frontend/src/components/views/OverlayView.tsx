@@ -1,51 +1,45 @@
 import { memo, useMemo } from 'react';
+import { MonitorX } from 'lucide-react';
 
-import { useCpuDetail } from '../../hooks/useCpuDetail';
-import { useGpu } from '../../hooks/useGpu';
-import { useJsonResource } from '../../hooks/useJsonResource';
-import { useSystemInfo } from '../../hooks/useSystemInfo';
-import type { RamDetails } from '../../types/system';
-
+import { useCompactPreference, useNow, useOverlay } from '../../hooks/useOverlay';
+import Button from '../common/Button';
+import { EmptyState, LoadingState } from '../common/States';
 import { ViewContainer } from '../common/Primitives';
 
-import CpuPanel from './overlay/CpuPanel';
-import GpuPanel from './overlay/GpuPanel';
-import LiveMonitor from './overlay/LiveMonitor';
-import MemoryPanel from './overlay/MemoryPanel';
-import { cpuView, gpuView, memoryView, orderGpus } from './overlay/model';
-
-const CPU_POLL_MS = 1500;
-const GPU_POLL_MS = 2000;
-const RAM_POLL_MS = 2000;
+import StatusBar from './overlay/StatusBar';
+import Tile from './overlay/Tile';
+import { buildTiles } from './overlay/model';
 
 /**
- * Live performance monitor. Each source is polled by the same shared hook the other pages use and only while this
- * tab is open; nothing here fetches static hardware data except the GPU adapter list (once, cached) the table
- * needs to label rows.
+ * Live monitor. One snapshot from the native engine (CPU, every GPU, memory, plus a minute of history) is the only
+ * data this page reads, so its numbers always belong to the same moment and always match the GPU page.
  */
 function OverlayView({ active }: { active: boolean }) {
-  const cpu = useCpuDetail(active, CPU_POLL_MS);
-  const { hardware: gpuHardware, live: gpuLive } = useGpu(active, GPU_POLL_MS);
-  const { info } = useSystemInfo(active);
-  const ram = useJsonResource<RamDetails>('/api/system/ram', { active, intervalMs: RAM_POLL_MS });
+  const overlay = useOverlay(active);
+  const now = useNow(active);
+  const [compact, setCompact] = useCompactPreference();
+  const snapshot = overlay.data;
+  const tiles = useMemo(() => (snapshot ? buildTiles(snapshot) : []), [snapshot]);
 
-  const cpuModel = useMemo(() => cpuView(cpu.data, info?.physicalCores ?? null, info?.logicalProcessors ?? null), [cpu.data, info?.physicalCores, info?.logicalProcessors]);
-  const gpus = useMemo(() => {
-    const readings = new Map(gpuLive.data?.readings.map((r) => [r.id, r]));
-    return orderGpus((gpuHardware.data?.adapters ?? []).map((adapter) => gpuView(adapter, readings.get(adapter.id))));
-  }, [gpuHardware.data, gpuLive.data]);
-  const memory = useMemo(() => memoryView(ram.data), [ram.data]);
+  if (!snapshot) {
+    return (
+      <ViewContainer>
+        {overlay.startupError ? (
+          <EmptyState icon={MonitorX} hue="overlay" title="The live monitor did not start" description="The background service is not answering. It may still be starting; try again in a moment."
+            action={<Button onClick={overlay.retry}>Try again</Button>} />
+        ) : (
+          <LoadingState label="Starting the live monitor" />
+        )}
+      </ViewContainer>
+    );
+  }
 
   return (
     <ViewContainer>
-      <LiveMonitor
-        cpu={cpuModel} cpuSampledAt={cpu.data?.sampledAtUnixMs}
-        gpus={gpus} gpuSampledAt={gpuLive.data?.sampledAtUnixMs} gpusLoaded={gpuLive.data !== null || gpuHardware.data?.available === false}
-        memory={memory} active={active}
-      />
-      <CpuPanel cpu={cpu.data} view={cpuModel} />
-      <GpuPanel gpus={gpus} available={gpuHardware.data?.available ?? null} />
-      <MemoryPanel memory={memory} />
+      <StatusBar snapshot={snapshot} now={now} compact={compact} onCompact={setCompact} />
+      <div className={`grid gap-4 ${compact ? 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-4' : 'grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3'}`}>
+        {tiles.map((t) => <Tile key={t.id} tile={t} compact={compact} />)}
+      </div>
     </ViewContainer>
   );
 }

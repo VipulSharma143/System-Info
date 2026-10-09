@@ -40,6 +40,8 @@ void si_minmax_i32_sse2(const int*, size_t, int*, int*);
 void si_minmax_i32_avx2(const int*, size_t, int*, int*);
 unsigned long long si_xor_u64_sse2(const unsigned long long*, size_t);
 unsigned long long si_xor_u64_avx2(const unsigned long long*, size_t);
+void si_stats_f32_sse2(const float*, size_t, SiStatsF32*);
+void si_stats_f32_avx2(const float*, size_t, SiStatsF32*);
 }
 
 extern "C" int si_kernel_selftest_impl(int onlyTier);
@@ -121,6 +123,11 @@ static float port_dot(const float* a, const float* b, size_t n) { double s = 0; 
 static long long port_sum(const int* a, size_t n) { long long s = 0; for (size_t i = 0; i < n; i++) s += a[i]; return s; }
 static void port_minmax(const int* a, size_t n, int* mn, int* mx) { int lo = a[0], hi = a[0]; for (size_t i = 1; i < n; i++) { lo = std::min(lo, a[i]); hi = std::max(hi, a[i]); } *mn = lo; *mx = hi; }
 static unsigned long long port_xor(const unsigned long long* a, size_t n) { return ref_xor(a, n); }
+static void port_stats(const float* a, size_t n, SiStatsF32* s) {
+    float sum = 0, mx = n ? a[0] : 0; int cnt = 0;
+    for (size_t i = 0; i < n; i++) { sum += a[i]; if (a[i] > mx) mx = a[i]; if (a[i] >= s->threshold) cnt++; }
+    s->sum = sum; s->max = mx; s->count = cnt;
+}
 
 extern "C" {
 
@@ -163,6 +170,20 @@ long long si_minmax_i32(const int* a, long long n, int* minOut, int* maxOut) {
     return 1;
 }
 
+// Sum / maximum / count at or above `threshold` of n finite floats in one pass (see assembly/math/stats_kernels.asm).
+// Non-finite inputs are not allowed by the kernels, so they are replaced with 0 first. Returns 1 on success.
+int si_stats_f32(const float* a, long long n, float threshold, double* sumOut, double* maxOut, long long* countOut) {
+    if (n < 0 || (n > 0 && !a) || !sumOut || !maxOut || !countOut) return 0;
+    std::vector<float> clean;
+    const float* p = a;
+    for (long long i = 0; i < n && p == a; i++) if (!std::isfinite(a[i])) { clean.assign(a, a + n); p = clean.data(); }
+    if (p != a) for (auto& v : clean) if (!std::isfinite(v)) v = 0.0f;
+    SiStatsF32 st{0, 0, threshold, 0};
+    switch (tier()) { case 2: si_stats_f32_avx2(p, (size_t)n, &st); break; case 1: si_stats_f32_sse2(p, (size_t)n, &st); break; default: port_stats(p, (size_t)n, &st); }
+    *sumOut = st.sum; *maxOut = st.max; *countOut = st.count;
+    return 1;
+}
+
 // memcpy with defined behaviour for every input: overlapping regions (which the
 // assembly kernels do not support) fall back to memmove; bad arguments return 0.
 int si_memcpy(void* dst, const void* src, long long n) {
@@ -183,7 +204,7 @@ unsigned long long si_xor_u64(const unsigned long long* a, long long nwords) {
 // Verifies every kernel that this CPU can run against the C++ reference,
 // across boundary lengths and deliberately misaligned pointers.
 // Returns 0 on success; otherwise a bitmask: 1=add, 2=dot, 4=sum, 16=minmax,
-// 32=memcpy, 64=xor checksum (bit 8 set additionally if the AVX2 path failed).
+// 32=memcpy, 64=xor checksum, 128=stats (bit 8 set additionally if the AVX2 path failed).
 int si_kernel_selftest_impl(int onlyTier);
 int si_kernel_selftest() { return si_kernel_selftest_impl(0); }
 
@@ -230,6 +251,17 @@ int si_kernel_selftest_impl(int onlyTier) {
                     int gmin = 111, gmax = 222;
                     if (isa == 2) si_minmax_i32_avx2(ip, 0, &gmin, &gmax); else si_minmax_i32_sse2(ip, 0, &gmin, &gmax);
                     if (gmin != 111 || gmax != 222) fail |= 16 | (isa == 2 ? 8 : 0);
+                }
+
+                // statistics kernel: sum (tolerance: summation order differs), exact max and exact count
+                {
+                    const float thr = 10.0f;
+                    SiStatsF32 want{0, 0, thr, 0}, got{-1, -1, thr, -1};
+                    float scratch[4099 + 8];
+                    for (size_t i = 0; i < n; i++) scratch[i] = std::fabs(a[i]) / 4.0f;      // 0..250, spans the threshold
+                    port_stats(scratch, n, &want);
+                    if (isa == 2) si_stats_f32_avx2(scratch, n, &got); else si_stats_f32_sse2(scratch, n, &got);
+                    if (std::fabs((double)got.sum - want.sum) > 1e-3 * (1.0 + std::fabs(want.sum)) || got.max != want.max || got.count != want.count) fail |= 128 | (isa == 2 ? 8 : 0);
                 }
 
                 // memcpy: guard bytes before and after the destination must survive.

@@ -31,7 +31,11 @@ builder.Services.AddSingleton<SystemMonitorBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemMonitorBackgroundService>());
 builder.Services.AddSingleton<SystemSnapshotService>();
 builder.Services.AddSingleton<MemoryHardwareService>();
-builder.Services.AddSingleton<INvmlSource>(NvmlGpuSource.Shared);
+builder.Services.AddSingleton<IOverlayEngine, NativeOverlayEngine>();
+builder.Services.AddSingleton<OverlayService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<OverlayService>());
+builder.Services.AddSingleton<INvmlSource, OverlayNvmlInfo>();
+builder.Services.AddSingleton<IGpuLiveSource, EngineGpuLiveSource>();
 builder.Services.AddSingleton(new PciIds());
 if (OperatingSystem.IsWindows())
 {
@@ -44,8 +48,6 @@ else
         sp.GetRequiredService<INvmlSource>(), sp.GetRequiredService<PciIds>()));
 }
 builder.Services.AddSingleton<GpuService>();
-builder.Services.AddSingleton<ICpuCollector>(_ => OperatingSystem.IsWindows() ? CreateWindowsCpuCollector() : new LinuxCpuCollector());
-builder.Services.AddSingleton<CpuService>();
 builder.Services.AddSingleton<AnalyticsService>();
 
 builder.Services.AddOpenApi();
@@ -77,6 +79,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
    .WithName("HealthCheck");
 
 app.MapSystemEndpoints();
+app.MapOverlayEndpoints();
 app.MapNativeEndpoints();
 app.MapAnalyticsEndpoints();
 app.MapSpeedTestEndpoints();
@@ -116,5 +119,3 @@ app.Lifetime.ApplicationStarted.Register(() =>
 
 app.Run();
 
-[System.Runtime.Versioning.SupportedOSPlatform("windows")]
-static ICpuCollector CreateWindowsCpuCollector() => new WindowsCpuCollector();

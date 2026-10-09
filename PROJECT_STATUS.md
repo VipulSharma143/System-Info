@@ -448,3 +448,16 @@ Open: none of the above has run in a real installer yet (still true).
 - **Cache (Phase 8):** per-write unique temp file (fixes a same-thread temp-file collision), startup-timing log line, cold/warm measurement script (tested against a fake backend).
 - **CI (Phase 9):** hardware-independent test policy documented in `tests.yml`; new frontend job, no-assembly pass, Windows Rust job (informational).
 - **Verified here (Linux sandbox):** 9 native tests, 638 C# checks, 11 Rust tests, 23 frontend tests, `tsc -b`, `oxlint`, `vite build`. **Not verified here:** the Tauri crate compile (syntax-checked only), Windows anywhere, the packaged installer, real update installs, multi-hour soak, real sensors on varied hardware.
+
+
+## Live monitor engine (2.6.0) — Overlay rebuilt from scratch
+
+- **Why:** the old Overlay read CPU/GPU through per-request OS calls in C#; on Windows one GPU sample took seconds (one performance counter per engine instance), so temperature/load froze or lagged and different screens disagreed.
+- **Engine (native/src/overlay/, platform/{linux,windows}/overlay_sources.cpp):** one background thread samples CPU, every GPU and RAM and publishes a single JSON snapshot plus 120 points of history per series (`si_overlay_start/stop/sample_now/snapshot_json`). Idle heartbeat 2 s when nobody reads. Unmeasurable = null, never 0; every GPU number carries its source.
+  - Windows CPU: `NtQuerySystemInformation` per processor + PDH clocks. Windows GPU: DXGI adapters (stable id from vendor/device/ordinal, LUID refreshed every 4 s or when an unknown LUID appears), NVML for NVIDIA (retry + session recovery), one PDH wildcard query for GPU Engine / GPU Adapter Memory matched by LUID.
+  - Linux: /proc/stat, cpufreq, the CPU's own sensor; AMD via amdgpu sysfs + hwmon, Intel via i915/xe, NVIDIA via NVML.
+  - NVML is loaded at run time in C++ (`nvml.cpp`); the C# NVML source was removed.
+- **Assembly:** `assembly/math/stats_kernels.asm` (AVX2 + SSE2): sum / max / count-at-or-above over per-core load and GPU engine groups, dispatched through `si_stats_f32` with the same CPUID/self-test/demotion rules and a portable tier.
+- **Backend:** `OverlayService` (hosted) owns the engine; `GET /api/overlay` returns the snapshot (503 until the first sample); `GpuService` maps the same snapshot onto the GPU page's adapters (`GpuEngineMapper`: LUID → PCI → vendor+device → name → lone adapter). Old `/api/system/cpu/detail`, `services/Cpu/`, the C# NVML source and the per-OS live GPU readers are gone.
+- **Frontend:** `OverlayView` + `overlay/{model,Gauge,Tile,Details,StatusBar}`: dial per component, last-minute trend from engine history, readings, "read from" chips, notes for anything missing, per-processor and per-engine drawers, compact mode, Live/Slow/Stopped indicator.
+- **Verified here:** native 12/12 ctest (AVX2 and portable), fake /proc+/sys engine test, C# 611 checks (incl. real-engine round trip), frontend 39 tests, the API serves `/api/overlay` on Linux. Windows sources cross-compile (MinGW) but were not run on Windows or real GPUs.
