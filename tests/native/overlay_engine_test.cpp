@@ -68,6 +68,8 @@ static void proc_stat(const fs::path& root, long u0, long i0, long u1, long i1) 
     f << "intr 1\n";
 }
 
+// The fake /proc + /sys tree only drives the Linux sources; the Windows engine reads the real OS (see live_machine).
+#ifndef _WIN32
 static void engine_with_fake_tree() {
     fs::path root = fs::temp_directory_path() / ("si-overlay-" + std::to_string(std::rand()));
     fs::remove_all(root);
@@ -140,6 +142,8 @@ static void engine_with_fake_tree() {
     fs::remove_all(root);
 }
 
+#endif
+
 static void live_machine() {
     CHECK(si_overlay_start(0, nullptr) == 1, "engine starts on the real machine");
     si_overlay_sample_now();
@@ -167,7 +171,9 @@ static void live_machine() {
 
 int main() {
     stats_kernel();
+#ifndef _WIN32
     engine_with_fake_tree();
+#endif
     live_machine();
     std::printf("%d checks, %d failures (asm tier %d)\n", g_checks, g_failures, si_active_isa());
     return g_failures ? 1 : 0;
