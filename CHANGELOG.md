@@ -4,17 +4,14 @@ All notable changes to SystemInfo are documented here.
 
 ## [Unreleased]
 
-
 ## [2.5.1] - 2026-10-09
 
 ### Fixed
-- **Discrete GPU temperature and load frozen or wrong on Windows (RTX 4060 laptops).** The GPU load sampler opened one performance counter per engine instance (hundreds to thousands on a busy PC) and each read re-scanned the whole counter category, so one live sample took many seconds. The GPU temperature is read in the same call, so it only refreshed once per slow sample and looked stuck (e.g. 43 °C) while G-Helper kept changing, and the load was averaged over irregular windows. The "GPU Engine" and "GPU Adapter Memory" categories are now read once per poll and each instance is computed against its own previous sample; the older System-tab path uses the same sampler.
-- **NVIDIA driver session was never recovered.** After one failed start (GPU asleep, driver still loading) NVML was marked unavailable for the whole run, and its device handles were cached forever. It now retries, and rebuilds the session when the driver reports it lost (GPU power-cycle, G-Helper mode switch, driver reset).
-- A missing NVIDIA reading now says why (library not found, no device, temperature call failed) instead of a silent blank.
-- The first GPU poll after launch already has load numbers: the baseline is taken during start-up warm-up.
+- **Graphics card temperature and usage no longer freeze or show wrong values.** On computers with a separate graphics card, the temperature could stay stuck on one number and the usage could look wrong. Both now update live and follow what the card is really doing.
+- **Graphics readings come back on their own.** If the graphics card went to sleep, its driver restarted, or you switched graphics mode, the readings could stay empty until you restarted the app. They now recover automatically.
+- **Clearer messages.** When a graphics reading is not available, the app now tells you why instead of leaving it blank.
+- **Graphics usage shows up sooner after the app opens.**
 
-### Known Issues
-- Not run on a real Windows/RTX machine here; the sampler was compile-checked against API stubs and the service logic by the Linux test suite (219 checks). Verify with a game running: temperature should move with load and match G-Helper within a degree or two.
 
 ## [2.5.0] - 2026-10-08
 
