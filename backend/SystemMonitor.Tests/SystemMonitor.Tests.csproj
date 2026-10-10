@@ -34,6 +34,7 @@
     <Compile Include="../SystemMonitor.Api/services/Overlay/OverlayEngine.cs" Link="linked/OverlayEngine.cs" />
     <Compile Include="../SystemMonitor.Api/services/Overlay/OverlayService.cs" Link="linked/OverlayService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Overlay/GpuEngineMapper.cs" Link="linked/GpuEngineMapper.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Cpu/CpuSensorSelection.cs" Link="linked/CpuSensorSelection.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuDetailModels.cs" Link="linked/CpuDetailModels.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuDetailService.cs" Link="linked/CpuDetailService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlMatching.cs" Link="linked/NvmlMatching.cs" />

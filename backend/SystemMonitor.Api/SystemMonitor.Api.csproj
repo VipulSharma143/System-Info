@@ -33,6 +33,8 @@
 <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
 <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="10.0.11" />
 <PackageReference Include="System.Management" Version="10.0.11" />
+<!-- Windows CPU temperature (MPL-2.0). Managed only; used on Windows, inert elsewhere. -->
+<PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
 </ItemGroup>
 
 <ItemGroup Condition="'$(OS)' != 'Windows_NT'">

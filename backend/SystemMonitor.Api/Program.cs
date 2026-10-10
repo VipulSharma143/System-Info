@@ -31,6 +31,11 @@ builder.Services.AddSingleton<SystemMonitorBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemMonitorBackgroundService>());
 builder.Services.AddSingleton<SystemSnapshotService>();
 builder.Services.AddSingleton<MemoryHardwareService>();
+if (OperatingSystem.IsWindows())
+{
+    // Windows has no public CPU temperature API; this fills in what the native engine cannot (see CpuSensorSelection).
+    builder.Services.AddSingleton<ICpuSensorSource, LibreHardwareCpuSensorSource>();
+}
 builder.Services.AddSingleton<IOverlayEngine, NativeOverlayEngine>();
 builder.Services.AddSingleton<OverlayService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<OverlayService>());

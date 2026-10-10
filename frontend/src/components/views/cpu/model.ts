@@ -73,6 +73,7 @@ const SOURCES: Record<string, string> = {
   registry: 'the Windows registry',
   rapl: 'the processor energy counter',
   'windows-energy-meter': 'Windows energy meter',
+  librehardwaremonitor: 'the hardware sensor library',
 };
 export function cpuSourceLabel(code: string | null): string | null {
   return code ? (SOURCES[code] ?? sourceLabel(code)) : null;

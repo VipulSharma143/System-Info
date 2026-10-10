@@ -5,6 +5,19 @@ All notable changes to SystemInfo are documented here.
 ## [Unreleased]
 
 
+## [2.6.2] - 2026-10-10
+
+### Added
+- **CPU temperature on Windows.** The CPU and Overlay tabs can now show your processor's temperature on Windows, read with the open-source LibreHardwareMonitor library. The tab lists each sensor the processor reports by its own name (package, individual cores, and chiplets on AMD) and never mixes them into one average. The headline number is the package sensor, or the hottest core when a processor has no package sensor, and the tab says which.
+- A one-minute temperature trend on Windows, matching the one Linux already had.
+
+### Changed
+- The CPU and Overlay tabs read the same temperature on Windows, so they always agree. A value from the native engine is never replaced, so Linux is unchanged.
+
+### Known Issues
+- **Windows usually allows this reading only when System Info runs as administrator**, and some computers do not expose a processor temperature at all. When no real sensor value is available the tabs say "Unavailable" and give the reason; nothing is estimated, and the Windows thermal zone is never shown as the processor temperature.
+- The Windows sensor code could not be run on a Windows PC in the build environment. Check it on a real Intel and a real AMD machine, with and without administrator rights.
+
 ## [2.6.1] - 2026-10-10
 
 ### Added

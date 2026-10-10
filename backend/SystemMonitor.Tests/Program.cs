@@ -181,6 +181,10 @@ finally { try { Directory.Delete(dir, true); } catch { } }
     failures += nf; checks += nc;
 }
 {
+    var (nf, nc) = CpuSensorTests.Run();
+    failures += nf; checks += nc;
+}
+{
     var (nf, nc) = HostSnapshotTests.Run();
     failures += nf; checks += nc;
 }

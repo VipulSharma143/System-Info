@@ -12,7 +12,7 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.4.8 · **License:** none — no `LICENSE` file exists in the repo.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.7.0 · **License:** none — no `LICENSE` file exists in the repo.
 
 ## 📖 What it is
 
@@ -120,7 +120,7 @@ History: background service appends every sample to `.jsonl` → frontend Analyt
 | Battery | Battery-class-driver IOCTL | sysfs `BAT*`, dynamic discovery |
 | GPU | `Win32_VideoController` + `GPU Engine` perf counters (every adapter, live per-engine) | native engine `get_gpu_vendor()`/`get_amd_gpu_usage_percent()` (sysfs) — narrower than Windows |
 | System identity | `Win32_ComputerSystem`/`Win32_BIOS`/`Win32_OperatingSystem` | DMI sysfs, `/etc/os-release`, `/proc/uptime` |
-| CPU temp / fan RPM | Native engine, `Unavailable` if no trustworthy sensor | Native engine + sysfs thermal zones, same rule |
+| CPU temp / fan RPM | CPU temp: LibreHardwareMonitorLib via `services/Cpu/LibreHardwareCpuSensorSource.cs` (2.7.0; usually needs administrator; selection rules in `CpuSensorSelection.cs`, native value never replaced). Fan RPM: native, `Unavailable` if no trustworthy sensor | Native engine + sysfs thermal zones, same rule |
 
 ## 🪟 Desktop shell (Tauri 2) details
 

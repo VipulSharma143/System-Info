@@ -62,12 +62,14 @@ public sealed class CpuDetailService
     private readonly object _gate = new();
     private string? _lastJson;
     private NativeCpuDetail? _last;
+    private readonly ICpuSensorSource? _cpuSensors;
 
-    public CpuDetailService(ICpuDetailEngine engine, OverlayService overlay, ILogger<CpuDetailService> log)
+    public CpuDetailService(ICpuDetailEngine engine, OverlayService overlay, ILogger<CpuDetailService> log, ICpuSensorSource? cpuSensors = null)
     {
         _engine = engine;
         _overlay = overlay;
         _log = log;
+        _cpuSensors = cpuSensors;
     }
 
     public string? Problem => _engine.Problem;
@@ -76,7 +78,7 @@ public sealed class CpuDetailService
     public CpuDetail? Read()
     {
         var native = ReadNative();
-        return native is null ? null : Merge(native, _overlay.Read());
+        return native is null ? null : Merge(native, _overlay.Read(), _cpuSensors?.Read());
     }
 
     private NativeCpuDetail? ReadNative()
@@ -102,14 +104,19 @@ public sealed class CpuDetailService
     }
 
     /// <summary>Pure merge of the two engines' documents (public so tests can drive it with fixtures).</summary>
-    public static CpuDetail Merge(NativeCpuDetail detail, OverlaySnapshot? overlay)
+    public static CpuDetail Merge(NativeCpuDetail detail, OverlaySnapshot? overlay, CpuSensorReading? sensors = null)
     {
+        // The native engine's own sensors win; the managed source only supplies them when native has none (Windows).
+        var useManaged = detail.Sensors.Count == 0 && sensors is not null;
+        var sensorList = useManaged ? sensors!.Sensors : detail.Sensors;
+        var sensorNote = useManaged ? sensors!.Note : detail.SensorsNote;
+
         if (overlay is null)
         {
             return new CpuDetail(
                 detail.Platform, detail.SampledAtMs, 0, detail.SampledAtMs,
                 detail.Identity, detail.Topology, null, [],
-                detail.Frequency, detail.Caches, detail.Features, detail.Sensors, detail.SensorsNote,
+                detail.Frequency, detail.Caches, detail.Features, sensorList, sensorNote,
                 detail.Power, detail.Throttle, detail.Time, detail.Activity,
                 new CpuDetailTrend(0, [], []));
         }
@@ -140,7 +147,7 @@ public sealed class CpuDetailService
         return new CpuDetail(
             detail.Platform, overlay.SampledAtMs, overlay.IntervalMs, detail.SampledAtMs,
             detail.Identity, detail.Topology, live, cores,
-            detail.Frequency, detail.Caches, detail.Features, detail.Sensors, detail.SensorsNote,
+            detail.Frequency, detail.Caches, detail.Features, sensorList, sensorNote,
             detail.Power, detail.Throttle, detail.Time, detail.Activity,
             new CpuDetailTrend(overlay.History.IntervalMs, overlay.History.Cpu, overlay.History.CpuTemp));
     }

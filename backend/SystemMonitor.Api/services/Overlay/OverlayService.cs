@@ -21,11 +21,13 @@ public sealed class OverlayService : IHostedService
     private readonly object _gate = new();
     private string? _lastJson;
     private OverlaySnapshot? _last;
+    private readonly ICpuSensorSource? _cpuSensors;
 
-    public OverlayService(IOverlayEngine engine, ILogger<OverlayService> log)
+    public OverlayService(IOverlayEngine engine, ILogger<OverlayService> log, ICpuSensorSource? cpuSensors = null)
     {
         _engine = engine;
         _log = log;
+        _cpuSensors = cpuSensors;
     }
 
     public string? Problem => _engine.Problem;
@@ -44,6 +46,37 @@ public sealed class OverlayService : IHostedService
 
     /// <summary>The latest snapshot, or null while the engine has not produced one (or is unavailable).</summary>
     public OverlaySnapshot? Read()
+    {
+        var native = ReadNative();
+        return native is null || _cpuSensors is null ? native : WithCpuSensors(native, _cpuSensors.Read());
+    }
+
+    /// <summary>
+    /// Fills the CPU temperature from a managed sensor source only where the native engine has none (Windows). A native value
+    /// is never replaced, and no source means the engine's own "unavailable" note stands. Public so tests can drive it.
+    /// </summary>
+    public static OverlaySnapshot WithCpuSensors(OverlaySnapshot s, CpuSensorReading? sensors)
+    {
+        if (sensors is null || s.Cpu.TemperatureC is not null) return s;
+        if (sensors.PackageC is not { } temp)
+            return s with { Cpu = s.Cpu with { TemperatureNote = sensors.Note ?? s.Cpu.TemperatureNote } };
+
+        // The overlay's trend line has one point per engine sample; align ours to its length, newest last, gaps stay null.
+        var length = s.History.Cpu.Count;
+        var padded = new List<double?>(length);
+        var tail = sensors.History.Skip(Math.Max(0, sensors.History.Count - length)).ToList();
+        for (var i = tail.Count; i < length; i++) padded.Add(null);
+        padded.AddRange(tail);
+        var history = s.History.CpuTemp.Any(v => v is not null) ? s.History : s.History with { CpuTemp = padded };
+
+        return s with
+        {
+            Cpu = s.Cpu with { TemperatureC = temp, TemperatureSource = CpuSensorSelection.Source, TemperatureNote = sensors.Note },
+            History = history,
+        };
+    }
+
+    private OverlaySnapshot? ReadNative()
     {
         var json = _engine.ReadSnapshotJson();
         if (json is null) return null;
