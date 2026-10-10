@@ -38,6 +38,7 @@ const ICONS: Record<string, LucideIcon> = {
   overview: LayoutDashboard,
   analytics: Activity,
   processes: ListTree,
+  cpu: Cpu,
   ram: MemoryStick,
   gpu: Gpu,
   overlay: Gauge,

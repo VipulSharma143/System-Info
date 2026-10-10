@@ -5,6 +5,16 @@ All notable changes to SystemInfo are documented here.
 ## [Unreleased]
 
 
+## [2.6.1] - 2026-10-10
+
+### Added
+- **A new CPU tab.** See your processor in detail: its name and model, how busy it is, its temperature, and the number of cores and threads. Every core is shown with its own load and clock speed, grouped by physical core, with Performance and Efficiency cores labelled on computers that have both.
+- Per-core temperatures where your hardware reports them, with each sensor's warning and critical limits. When a computer only reports one temperature for the whole processor, the tab says so.
+- Clock speed (current, fastest core, base, maximum boost and minimum where the system reports them), power draw and power limits, thermal throttling counts, cache sizes, and the instruction sets your processor supports.
+- A live breakdown of where processor time goes, plus load average and system activity counters.
+- Anything your computer does not report is shown as unavailable with the reason, never as a made-up zero. The tab uses the same live readings as the Overlay, so the two always agree.
+
+
 ## [2.6.0] - 2026-10-09
 
 ### Changed

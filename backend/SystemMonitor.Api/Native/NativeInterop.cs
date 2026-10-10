@@ -16,6 +16,11 @@ public static class NativeInterop
     [DllImport("systemmonitor_native", EntryPoint = "si_overlay_snapshot_json")]
     public static extern int OverlaySnapshotJson([Out] byte[] buffer, int capacity);
 
+    // CPU tab: identity, topology, caches, sensors, power, policy and activity as one JSON document (native/src/cpu_detail.cpp).
+    // Length written, 0 = nothing readable, negative = buffer too small (the magnitude is the size needed).
+    [DllImport("systemmonitor_native", EntryPoint = "si_cpu_detail_json")]
+    public static extern int CpuDetailJson([Out] byte[] buffer, int capacity);
+
     [DllImport("systemmonitor_native", EntryPoint = "add_numbers")]
     public static extern int AddNumbers(int a, int b);
 

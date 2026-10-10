@@ -177,6 +177,10 @@ finally { try { Directory.Delete(dir, true); } catch { } }
     failures += nf; checks += nc;
 }
 {
+    var (nf, nc) = await CpuDetailTests.RunAsync();
+    failures += nf; checks += nc;
+}
+{
     var (nf, nc) = HostSnapshotTests.Run();
     failures += nf; checks += nc;
 }

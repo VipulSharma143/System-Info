@@ -34,6 +34,8 @@ builder.Services.AddSingleton<MemoryHardwareService>();
 builder.Services.AddSingleton<IOverlayEngine, NativeOverlayEngine>();
 builder.Services.AddSingleton<OverlayService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<OverlayService>());
+builder.Services.AddSingleton<ICpuDetailEngine, NativeCpuDetailEngine>();
+builder.Services.AddSingleton<CpuDetailService>();
 builder.Services.AddSingleton<INvmlSource, OverlayNvmlInfo>();
 builder.Services.AddSingleton<IGpuLiveSource, EngineGpuLiveSource>();
 builder.Services.AddSingleton(new PciIds());
@@ -80,6 +82,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
 
 app.MapSystemEndpoints();
 app.MapOverlayEndpoints();
+app.MapCpuEndpoints();
 app.MapNativeEndpoints();
 app.MapAnalyticsEndpoints();
 app.MapSpeedTestEndpoints();

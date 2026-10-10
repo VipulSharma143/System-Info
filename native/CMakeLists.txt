@@ -24,6 +24,7 @@ if(WIN32)
         ${PLATFORM_DIR}/smbios_source.cpp
         ${PLATFORM_DIR}/snapshot_writer.cpp
         ${PLATFORM_DIR}/overlay_sources.cpp
+        ${PLATFORM_DIR}/cpu_detail.cpp
         ${PLATFORM_DIR}/provider.cpp)
 else()
     set(CMAKE_ASM_NASM_OBJECT_FORMAT elf64)
@@ -36,6 +37,7 @@ else()
         ${PLATFORM_DIR}/smbios_source.cpp
         ${PLATFORM_DIR}/snapshot_writer.cpp
         ${PLATFORM_DIR}/overlay_sources.cpp
+        ${PLATFORM_DIR}/cpu_detail.cpp
         ${PLATFORM_DIR}/provider.cpp)
 endif()
 
@@ -45,6 +47,7 @@ add_library(systemmonitor_objects OBJECT
     src/simd_dispatch.cpp
     src/cpu_temperature.cpp
     src/host_snapshot.cpp
+    src/cpu_detail.cpp
     src/smbios/reader.cpp
     src/smbios/table_source.cpp
     src/smbios/decode.cpp
@@ -117,6 +120,12 @@ if(BUILD_NATIVE_TESTS)
     target_link_libraries(cpu_logical_test systemmonitor_native)
     add_test(NAME cpu_logical_test COMMAND cpu_logical_test)
     set_tests_properties(cpu_logical_test PROPERTIES TIMEOUT 30)
+
+    # CPU detail document (identity, topology, caches, sensors, power, policy, activity) against a fake /proc + /sys tree.
+    add_executable(cpu_detail_test ../tests/native/cpu_detail_test.cpp)
+    target_link_libraries(cpu_detail_test systemmonitor_native)
+    add_test(NAME cpu_detail_test COMMAND cpu_detail_test)
+    set_tests_properties(cpu_detail_test PROPERTIES TIMEOUT 30)
 
     # Assembly tiers: normal run, then the SYSTEMINFO_NO_ASM kill switch (must pick the portable tier, same answers).
     add_executable(asm_tiers_test ../tests/native/asm_tiers_test.cpp)

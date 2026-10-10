@@ -25,6 +25,7 @@ import OverviewView from './components/views/OverviewView';
 // Everything but the first screen is loaded the first time it is opened.
 const AnalyticsView = lazy(() => import('./components/views/AnalyticsView'));
 const ProcessesView = lazy(() => import('./components/views/ProcessesView'));
+const CpuView = lazy(() => import('./components/views/CpuView'));
 const RamView = lazy(() => import('./components/views/RamView'));
 const OverlayView = lazy(() => import('./components/views/OverlayView'));
 const GpuView = lazy(() => import('./components/views/GpuView'));
@@ -172,6 +173,7 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
       </Activity>
       {show('analytics', <AnalyticsView findNearest={findNearest} />)}
       {show('processes', stale ? <LoadingState /> : <ProcessesView processes={data.processes} />)}
+      {show('cpu', <CpuView active={activeSection === 'cpu'} />)}
       {show('ram', <RamView active={activeSection === 'ram'} />)}
       {show('gpu', <GpuView active={activeSection === 'gpu'} />)}
       {show('overlay', <OverlayView active={activeSection === 'overlay'} />)}

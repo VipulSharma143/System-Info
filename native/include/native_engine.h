@@ -96,6 +96,19 @@ NATIVE_API int si_overlay_sample_now();                                  // 1 = 
 // Latest snapshot as UTF-8 JSON. Returns its length; 0 when no sample exists yet; -(needed bytes) when the buffer is too small.
 NATIVE_API int si_overlay_snapshot_json(char* buffer, int capacity);
 
+// ---------------------------------------------------------------------
+// CPU detail (src/cpu_detail.cpp): everything the CPU tab shows that the overlay engine does not sample — identity,
+// topology (physical cores, hybrid P/E split), clock range, caches, instruction sets, per-core sensors, power, frequency
+// policy, thermal-throttle counters, time breakdown and scheduler counters — as one UTF-8 JSON document. A value the
+// platform cannot report is null, never 0. Live per-processor load/clock and the headline CPU temperature are NOT in it:
+// they come from the overlay engine so both screens agree.
+// Returns the length written; 0 when nothing could be read; -(needed bytes) when `capacity` is too small. Calls less
+// than 300 ms apart return the same document (rates need a real interval).
+// ---------------------------------------------------------------------
+NATIVE_API int si_cpu_detail_json(char* buffer, int capacity);
+// Tests only: read a fake tree (a directory holding proc/ and sys/) instead of the machine; "" restores the real one.
+NATIVE_API void si_cpu_detail_set_root(const char* root);
+
 NATIVE_API unsigned long long si_xor_u64(const unsigned long long* a, long long nwords);
 NATIVE_API int si_memory_bandwidth(long long bytes, int repeats, double* copyGBps, double* readGBps);
 

@@ -71,22 +71,25 @@ frontend/src-tauri/     Rust shell: supervisor.rs (Tauri-free lifecycle core), p
                         (start_services/stop_services/get_service_status/exit_app — ONLY 4 IPC commands, deliberately no
                         tauri-plugin-shell / no generic command execution); supervisor-tests/ = std-only test crate for supervisor.rs
 backend/SystemMonitor.Api/
-  Endpoints/            SystemEndpoints, AnalyticsEndpoints, NativeEndpoints, SpeedTestEndpoints
+  Endpoints/            SystemEndpoints, CpuEndpoints, AnalyticsEndpoints, NativeEndpoints, SpeedTestEndpoints
   services/             WindowsSystemInfoProvider / LinuxSystemInfoProvider, SystemMonitorBackgroundService, SystemSnapshotService
                          (/api/system/all isolation), AnalyticsService, LocalJsonSnapshotStore, SnapshotLogger,
                          WindowsBatteryInterop, AppDataPath, SystemInfoService + SystemInfoCache (startup cache),
                          MemoryHardwareService/MemoryHealthReader/MemoryMapping/RamDetailsReader,
                          services/Gpu/: GpuService (cached hardware + 1 s shared live sample), LinuxGpuCollector (DRM/sysfs), WindowsGpuCollector,
                          GpuCounters/GpuMath (Windows counters are matched to adapters by LUID via native get_gpu_luid; per-engine sums), NvmlGpuSource (NVML via NativeLibrary, optional), PciIds (pci.ids names). API: /api/system/gpus/hardware and /gpus/live.
-                         services/Cpu/: CpuService (1 s shared sample), LinuxCpuCollector (/proc/stat deltas, cpufreq, hwmon, RAPL), WindowsCpuCollector
-                         (Processor Information counters, ACPI thermal zone + TemperatureFlatlineGuard), CpuTemperatureSelection (hwmon/thermal sensor choice — same rules as native cpu_temperature.cpp, contract-tested; acpitz is NEVER a CPU temperature).
+                         services/Cpu/: CpuDetailService (merges the native CPU document with the overlay engine's live per-processor load, clocks and
+                         CPU temperature — one source, so the CPU and Overlay tabs always agree) + CpuDetailModels. The headline CPU temperature is NEVER read
+                         a second time: it is the overlay engine's value (native cpu_temperature.cpp; acpitz is NEVER a CPU temperature).
                          HostSnapshotService + Native/HostSnapshot.cs: ONE native call (si_read_host_snapshot) for CPU ticks + memory + CPU temperature, shared by the Linux provider.
-                         API: /api/system/cpu/detail. Frontend: OverlayView (compact tiles: CPU, memory, each GPU — no clock/fan/power sections, by decision)
+                         API: /api/system/cpu/detail (Endpoints/CpuEndpoints). Frontend: CpuView (components/views/cpu/: hero, tiles, per-core grid, temperature,
+                         clock/power, specs, activity) and OverlayView (compact tiles: CPU, memory, each GPU — no clock/fan/power sections, by decision)
   interface/             ISystemInfoProvider, ISnapshotStore
   Native/                 NativeInterop.cs (P/Invoke bridge), NativeKernels.cs (safe span wrappers + C# reference implementations)
 backend/SystemMonitor.Tests/  dependency-free test runner (analytics, storage, native wrappers); links sources instead of referencing the Api project
 native/                  C++ engine: include/native_engine.h (C ABI), src/common.cpp, src/simd_dispatch.cpp (CPUID + dispatch + self-test),
-                         src/smbios/ (platform-neutral table parsing), platform/{linux,windows}/ (cpu, storage, fan, memory, smbios_source, provider), build.sh
+                         src/smbios/ (platform-neutral table parsing), platform/{linux,windows}/ (cpu, cpu_detail, storage, fan, memory, smbios_source, provider), build.sh,
+                         src/cpu_detail.cpp (CPUID identity/features + the one JSON document behind the CPU tab, si_cpu_detail_json; null = not readable, never 0)
 assembly/                NASM: cpu/ (benchmark_loop, simd_loop, get_constant), math/vector_math.asm, memory/memory_kernels.asm (SSE2/AVX2), abi.inc
 scripts/                 sync-version.mjs, check-version.mjs, archive-changelog.mjs, make-update-manifest.mjs
 tests/native/            C++/Assembly tests (ctest)
