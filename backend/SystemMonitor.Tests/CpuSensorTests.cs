@@ -43,6 +43,15 @@ static class CpuSensorTests
         Check(intel.Sensors.Select(s => s.Label).SequenceEqual(["CPU Package", "Core #1", "Core #2"]), "package first, cores in order, derived and broken sensors dropped");
         Check(intel.Sensors.All(s => s.CoreKey is null), "a library core number is never passed off as an OS core key");
 
+        // ---- the library's Intel naming ("CPU Core #N") counts as per-core sensors too
+        var intelNamed = CpuSensorSelection.Select([T("CPU Core #2", 57), T("CPU Core #1", 55)], null, none);
+        Check(intelNamed.PackageC == 57 && intelNamed.Sensors.Count(s => s.Kind == "core") == 2, "CPU Core #N names are per-core sensors");
+
+        // ---- the reason for a missing reading says what is actually wrong
+        Check(CpuSensorSelection.ExplainMissingTemperature(false, true).Contains("not running as administrator"), "not elevated is named first");
+        Check(CpuSensorSelection.ExplainMissingTemperature(true, false).Contains("PawnIO"), "elevated without the driver names the driver");
+        Check(!CpuSensorSelection.ExplainMissingTemperature(true, true).Contains("not running"), "elevated with the driver blames the processor, not the user");
+
         // ---- AMD: Tctl/Tdie headline, chiplets listed separately and never averaged in
         var amd = CpuSensorSelection.Select([T("CCD1 (Tdie)", 52), T("Core (Tctl/Tdie)", 61), T("CCD2 (Tdie)", 50)], null, none);
         Check(amd.PackageC == 61 && amd.Sensors.Count(s => s.Kind == "ccd") == 2, "AMD headline is Tctl/Tdie, CCDs listed");

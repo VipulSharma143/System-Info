@@ -12,7 +12,7 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.7.0 · **License:** none — no `LICENSE` file exists in the repo.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.6.3 · **License:** none — no `LICENSE` file exists in the repo.
 
 ## 📖 What it is
 
@@ -120,10 +120,12 @@ History: background service appends every sample to `.jsonl` → frontend Analyt
 | Battery | Battery-class-driver IOCTL | sysfs `BAT*`, dynamic discovery |
 | GPU | `Win32_VideoController` + `GPU Engine` perf counters (every adapter, live per-engine) | native engine `get_gpu_vendor()`/`get_amd_gpu_usage_percent()` (sysfs) — narrower than Windows |
 | System identity | `Win32_ComputerSystem`/`Win32_BIOS`/`Win32_OperatingSystem` | DMI sysfs, `/etc/os-release`, `/proc/uptime` |
-| CPU temp / fan RPM | CPU temp: LibreHardwareMonitorLib via `services/Cpu/LibreHardwareCpuSensorSource.cs` (2.7.0; usually needs administrator; selection rules in `CpuSensorSelection.cs`, native value never replaced). Fan RPM: native, `Unavailable` if no trustworthy sensor | Native engine + sysfs thermal zones, same rule |
+| CPU temp / fan RPM | CPU temp: LibreHardwareMonitorLib via `services/Cpu/LibreHardwareCpuSensorSource.cs` (2.6.3; needs administrator, and the PawnIO driver for the library version in use; the reason for a missing value comes from `CpuSensorSelection.ExplainMissingTemperature`; selection rules in `CpuSensorSelection.cs`, native value never replaced). Fan RPM: native, `Unavailable` if no trustworthy sensor | Native engine + sysfs thermal zones, same rule |
 
 ## 🪟 Desktop shell (Tauri 2) details
 
+
+**Windows elevation (2.6.3):** `frontend/src-tauri/build.rs` embeds `windows-app-manifest.xml` (`requireAdministrator`) only for **release** builds targeting Windows; `tauri dev` stays non-elevated (an elevated manifest makes `cargo run` fail with os error 740). Children inherit the token, so there is one UAC prompt per launch and no code in `process.rs` re-elevates. Never add `runas`/`ShellExecute` relaunch logic. Elevation does not guarantee a CPU temperature (driver/firmware must expose it).
 Window: 1280×820 default, 980×650 minimum, both platforms. `supervisor.rs` (Tauri-free lifecycle core, unit-tested) + `process.rs` (resource lookup, command building) start the backend (`:5132`) — the supervisor is generic over a list of services and starts them **concurrently**, polling `/health` every 100 ms; a child that dies during startup is reported immediately, a busy port is detected before spawn, a pid file lets the next launch reap leftovers (Linux). The 45 s timeout is an upper bound only. `get_service_status` is lock-free and must stay non-blocking — sync Tauri commands run on the UI thread, and holding a lock across the readiness wait froze the window once. `start_services`/`stop_services` are async + `spawn_blocking` for the same reason. Stage timings land in `<data>/logs/startup.log`. Data dir resolution: `%LOCALAPPDATA%\SystemInfo` (Win) / `~/.local/share/SystemInfo` (Linux). `ServiceControls.tsx` (Tauri-only, not shown under plain `npm run dev`) exposes Stop (halt services, keep window) and Exit (stop + close); the native window's `X` button does the same full shutdown as Exit. Orphan hardening: Windows uses `win32job` Job Objects (`KILL_ON_JOB_CLOSE`) so the backend dies even on an app crash; Linux uses the pid file + `/proc/<pid>/exe` check to reap leftovers.
 
 ## 🔄 In-app updates (since 2.2.0)
@@ -168,6 +170,8 @@ Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job
 - **2.4.8 — CPU temperature:** never read `thermal_zone0` or any `acpitz` zone as the CPU; it is a constant ~28 °C. Select by hwmon name (coretemp/k10temp/zenpower) or thermal type (x86_pkg_temp/cpu-thermal). Missing sensor = `null` + a note, never 0 or -1. Native (`cpu_temperature.cpp`) and managed (`CpuTemperatureSelection.cs`) must stay in agreement — `CpuTemperatureTests` checks it.
 - **2.4.8 — updates:** `stop_services` returning is NOT proof the installer may overwrite files. Use `prepare_for_update` (waits for port/process/file release) and never start the installer when it reports `released: false`. Retry only failures `classifyUpdateError` calls transient (`frontend/src/lib/updateFlow.ts`); failures are logged to `update.log`.
 - **2.4.8 — tests:** never assert a specific CPU/GPU/RAM/temperature of the machine running the test. Use fixture trees, fakes and temp dirs; live-host checks assert only universal properties.
+- **2.6.3 — CPU usage:** `get_cpu_usage_percent` (both platforms) must never sleep per call; it diffs against the previous call and only the first call waits one 200 ms window. Covered by `tests/native/cpu_usage_test.cpp`.
+- **2.6.3 — Windows CPU temp:** the sensor library names Intel cores `CPU Core #N` (AMD/others `Core #N`); `CpuSensorSelection` accepts both. A missing reading must carry the specific reason (`ExplainMissingTemperature`), never a number. Do not touch GPU detection/utilization/VRAM/temperature code when working on CPU monitoring.
 - **2.4.8 — polling:** use `scheduleWhenVisible` (lib/visibility.ts) for any new poll loop so hidden windows stop fetching.
 
 - **Never hardcode an API host/port** outside `frontend/src/lib/apiConfig.ts`. Packaged builds get an OS-assigned/non-fixed backend port — a hardcoded `localhost:5132` broke the shipped app once already. Prod uses same-origin relative URLs (`import.meta.env.DEV ? 'http://localhost:5132' : ''`).

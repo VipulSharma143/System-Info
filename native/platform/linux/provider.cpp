@@ -5,6 +5,8 @@
 #include <cstring>
 #include <vector>
 #include <unistd.h>
+#include <chrono>
+#include <mutex>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -80,16 +82,36 @@ int get_cpu_info(char* modelNameOut, int bufferSize) {
     return coreCount;
 }
 
+// Usage is the busy share of CPU time since the previous call, so a call never sleeps. Only the first call has no
+// earlier sample and waits one 200 ms window to make one. Calls closer than 100 ms apart return the last value:
+// a window that short is mostly scheduler noise.
 double get_cpu_usage_percent() {
-    CpuTimes sample1 = read_cpu_times();
-    usleep(200000);
-    CpuTimes sample2 = read_cpu_times();
+    static std::mutex gate;
+    static bool primed = false;
+    static CpuTimes prev{0, 0};
+    static std::chrono::steady_clock::time_point prevAt;
+    static double last = 0.0;
 
-    long long idleDelta = sample2.idle - sample1.idle;
-    long long totalDelta = sample2.total - sample1.total;
+    if (!gate.try_lock()) return last;   // another caller is already sampling; reuse its result
+    std::lock_guard<std::mutex> hold(gate, std::adopt_lock);
 
-    if (totalDelta == 0) return 0.0;
-    return (1.0 - (double)idleDelta / totalDelta) * 100.0;
+    if (!primed) {
+        prev = read_cpu_times();
+        prevAt = std::chrono::steady_clock::now();
+        usleep(200000);
+        primed = true;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - prevAt < std::chrono::milliseconds(100)) return last;
+
+    const CpuTimes cur = read_cpu_times();
+    const long long idleDelta = cur.idle - prev.idle;
+    const long long totalDelta = cur.total - prev.total;
+    prev = cur;
+    prevAt = now;
+    if (totalDelta <= 0) return last;
+    last = (1.0 - (double)idleDelta / totalDelta) * 100.0;
+    return last;
 }
 
 double get_cpu_temperature() {

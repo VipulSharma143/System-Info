@@ -5,18 +5,23 @@ All notable changes to SystemInfo are documented here.
 ## [Unreleased]
 
 
-## [2.6.2] - 2026-10-10
+## [2.6.3] - 2026-10-11
 
 ### Added
 - **CPU temperature on Windows.** The CPU and Overlay tabs can now show your processor's temperature on Windows, read with the open-source LibreHardwareMonitor library. The tab lists each sensor the processor reports by its own name (package, individual cores, and chiplets on AMD) and never mixes them into one average. The headline number is the package sensor, or the hottest core when a processor has no package sensor, and the tab says which.
 - A one-minute temperature trend on Windows, matching the one Linux already had.
+- **System Info now asks for administrator rights when it starts on Windows** (the normal Windows permission prompt, once per launch). The background services it starts share that permission, so nothing asks again. Development runs (`tauri dev`) are not elevated.
+- When Windows has no temperature to show, the tab now says why: not running as administrator, the sensor driver (PawnIO) not installed, or the processor not reporting a sensor.
 
 ### Changed
 - The CPU and Overlay tabs read the same temperature on Windows, so they always agree. A value from the native engine is never replaced, so Linux is unchanged.
+- **Faster processor-usage reading.** The native engine no longer pauses for 200 ms on every usage request on Windows and Linux; it measures usage since the previous request and only the very first request waits.
+- Intel per-core sensors named "CPU Core #N" by the sensor library are now listed as cores.
 
 ### Known Issues
-- **Windows usually allows this reading only when System Info runs as administrator**, and some computers do not expose a processor temperature at all. When no real sensor value is available the tabs say "Unavailable" and give the reason; nothing is estimated, and the Windows thermal zone is never shown as the processor temperature.
-- The Windows sensor code could not be run on a Windows PC in the build environment. Check it on a real Intel and a real AMD machine, with and without administrator rights.
+- **Windows usually allows the temperature reading only when System Info runs as administrator**, and some computers do not expose a processor temperature at all, or need the PawnIO sensor driver installed. When no real sensor value is available the tabs say "Unavailable" and give the reason; nothing is estimated, and the Windows thermal zone is never shown as the processor temperature.
+- The Windows elevation and sensor code could not be run on a Windows PC in the build environment. Check it on a real Intel (for example Core i7-12700H) and a real AMD machine, with and without administrator rights.
+- The in-app updater launches the installer from the elevated app. Installs are per-user, so on a PC where a different administrator account approves the prompt, update from the normal account's session instead.
 
 ## [2.6.1] - 2026-10-10
 

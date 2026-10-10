@@ -73,6 +73,10 @@ public sealed class LibreHardwareCpuSensorSource : ICpuSensorSource, IDisposable
                 CloseComputer();
             }
 
+            if (failure is null && !raw.Any(r => CpuSensorSelection.Plausible(r.Value)))
+                failure = CpuSensorSelection.ExplainMissingTemperature(
+                    WindowsSensorAccess.IsElevated(), WindowsSensorAccess.SensorDriverRegistered());
+
             lock (_gate)
             {
                 var reading = CpuSensorSelection.Select(raw, failure, _history);

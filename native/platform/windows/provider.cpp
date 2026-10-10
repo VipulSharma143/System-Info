@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <string>
 #include <cstring>
+#include <mutex>
 
 // DXGI is used for GPU vendor detection — the standard, reliable way to
 // enumerate graphics adapters on Windows without needing driver-specific SDKs.
@@ -40,32 +41,54 @@ int get_cpu_info(char* modelNameOut, int bufferSize) {
     return coreCount;
 }
 
-// GetSystemTimes is the Windows-native equivalent of reading /proc/stat —
-// it directly returns kernel/user/idle time since boot, no external tools needed.
+// GetSystemTimes is the Windows-native equivalent of reading /proc/stat. Usage is the busy share of CPU time since the
+// previous call, so a call never sleeps; only the first call waits one 200 ms window to have a baseline. Calls closer
+// than 100 ms apart return the last value (a window that short is mostly noise).
+static ULONGLONG filetime_to_ull(const FILETIME& ft) {
+    ULARGE_INTEGER uli;
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+    return uli.QuadPart;
+}
+
 double get_cpu_usage_percent() {
-    FILETIME idleTime1, kernelTime1, userTime1;
-    FILETIME idleTime2, kernelTime2, userTime2;
+    static std::mutex gate;
+    static bool primed = false;
+    static ULONGLONG prevIdle = 0, prevBusy = 0;
+    static ULONGLONG prevTick = 0;
+    static double last = 0.0;
 
-    GetSystemTimes(&idleTime1, &kernelTime1, &userTime1);
-    Sleep(200); // 200ms sample window, matches the Linux implementation
-    GetSystemTimes(&idleTime2, &kernelTime2, &userTime2);
+    if (!gate.try_lock()) return last;   // another caller is already sampling; reuse its result
+    std::lock_guard<std::mutex> hold(gate, std::adopt_lock);
 
-    auto toULL = [](const FILETIME& ft) -> ULONGLONG {
-        ULARGE_INTEGER uli;
-        uli.LowPart = ft.dwLowDateTime;
-        uli.HighPart = ft.dwHighDateTime;
-        return uli.QuadPart;
+    auto sample = [](ULONGLONG& idle, ULONGLONG& busy) {
+        FILETIME i, k, u;
+        if (!GetSystemTimes(&i, &k, &u)) return false;
+        idle = filetime_to_ull(i);
+        busy = filetime_to_ull(k) + filetime_to_ull(u);   // kernel time already includes idle time
+        return true;
     };
 
-    ULONGLONG idle1 = toULL(idleTime1), idle2 = toULL(idleTime2);
-    ULONGLONG kernel1 = toULL(kernelTime1), kernel2 = toULL(kernelTime2);
-    ULONGLONG user1 = toULL(userTime1), user2 = toULL(userTime2);
+    if (!primed) {
+        if (!sample(prevIdle, prevBusy)) return 0.0;
+        prevTick = GetTickCount64();
+        Sleep(200);
+        primed = true;
+    }
+    const ULONGLONG nowTick = GetTickCount64();
+    if (nowTick - prevTick < 100) return last;
 
-    ULONGLONG idleDelta = idle2 - idle1;
-    ULONGLONG totalDelta = (kernel2 - kernel1) + (user2 - user1);
-
-    if (totalDelta == 0) return 0.0;
-    return (1.0 - (double)idleDelta / totalDelta) * 100.0;
+    ULONGLONG idle = 0, busy = 0;
+    if (!sample(idle, busy)) return last;
+    const ULONGLONG idleDelta = idle - prevIdle;
+    const ULONGLONG totalDelta = busy - prevBusy;
+    prevIdle = idle;
+    prevBusy = busy;
+    prevTick = nowTick;
+    if (totalDelta == 0) return last;
+    last = (1.0 - (double)idleDelta / (double)totalDelta) * 100.0;
+    if (last < 0.0) last = 0.0;
+    return last;
 }
 
 // No reliable, universally-supported public API exists for CPU temperature on Windows (the ACPI thermal zone is a

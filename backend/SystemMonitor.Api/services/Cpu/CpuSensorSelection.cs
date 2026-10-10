@@ -21,7 +21,7 @@ public interface ICpuSensorSource
 /// <summary>
 /// Chooses the processor's temperatures out of everything a hardware library lists. Rules (readings are never mixed or averaged):
 ///   package  = "CPU Package" (Intel), else "Core (Tctl/Tdie)" / "Core (Tdie)" / "Core (Tctl)" (AMD), else the hottest "Core #N";
-///   per core = "Core #N", per chiplet = "CCDn (Tdie)";
+///   per core = "Core #N" or "CPU Core #N" (the library's Intel naming), per chiplet = "CCDn (Tdie)";
 ///   never    = "Core Max", "Core Average", "Distance to TjMax" (derived values, not a sensor of the die).
 /// A value outside 1..125 °C is a broken sensor and is skipped. Nothing is estimated.
 /// </summary>
@@ -32,7 +32,7 @@ public static class CpuSensorSelection
 
     private static readonly string[] PackageNames =
         ["CPU Package", "Core (Tctl/Tdie)", "Core (Tdie)", "Core (Tctl)", "CPU (Tctl/Tdie)"];
-    private static readonly Regex CoreName = new(@"^Core #(\d+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex CoreName = new(@"^(?:CPU )?Core #(\d+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex CcdName = new(@"^CCD\d* ?\(Tdie\)$|^CCD #?\d+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public static bool Plausible(double? v) => v is > 1 and < 125 && !double.IsNaN(v.Value);
@@ -69,13 +69,24 @@ public static class CpuSensorSelection
             note = failure ?? (raw.Count == 0
                 ? "The hardware sensor library found no CPU temperature sensor on this computer."
                 : "The CPU temperature sensors returned no usable value.");
-            note += " Windows normally allows this reading only when System Info runs as administrator; some computers do not expose it at all.";
+            if (!note.Contains("administrator", StringComparison.OrdinalIgnoreCase))
+                note += " Windows normally allows this reading only when System Info runs as administrator; some computers do not expose it at all.";
         }
         else if (package is null)
         {
             note = "This processor reports per-core temperatures but no package sensor; the headline value is the hottest core.";
         }
         return new CpuSensorReading(packageC, packageLabel, sensors, note, history);
+    }
+
+    /// <summary>The most specific true statement about why no processor temperature came back.</summary>
+    public static string ExplainMissingTemperature(bool elevated, bool driverRegistered)
+    {
+        if (!elevated)
+            return "System Info is not running as administrator, so Windows does not let it read the processor sensors.";
+        if (!driverRegistered)
+            return "System Info is running as administrator, but the PawnIO sensor driver does not appear to be installed (the sensor library needs it for processor temperatures).";
+        return "System Info is running as administrator and the sensor driver is present, but this processor reported no temperature sensor.";
     }
 
     private static int CoreNumber(string name) => int.TryParse(CoreName.Match(name).Groups[1].Value, out var n) ? n : int.MaxValue;

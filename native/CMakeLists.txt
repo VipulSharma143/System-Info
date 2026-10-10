@@ -116,6 +116,11 @@ if(BUILD_NATIVE_TESTS)
     set_tests_properties(cpu_temperature_test PROPERTIES TIMEOUT 30)
 
     # Logical-processor identity and hybrid core classes: parser, fake /sys tree, live self-consistency.
+    add_executable(cpu_usage_test ../tests/native/cpu_usage_test.cpp)
+    target_link_libraries(cpu_usage_test systemmonitor_native)
+    add_test(NAME cpu_usage_test COMMAND cpu_usage_test)
+    set_tests_properties(cpu_usage_test PROPERTIES TIMEOUT 30)
+
     add_executable(cpu_logical_test ../tests/native/cpu_logical_test.cpp)
     target_link_libraries(cpu_logical_test systemmonitor_native)
     add_test(NAME cpu_logical_test COMMAND cpu_logical_test)
