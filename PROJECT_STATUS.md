@@ -277,7 +277,6 @@ Not yet verified on real machines: the full download/install/relaunch cycle on W
 - Local snapshot storage has no retention/TTL policy — `data/snapshots/` grows unbounded, a known trade-off.
 - Full SMART storage health needs root and isn't implemented; only basic disk capacity/usage is read today.
 - There are no frontend tests, and no automated test runs an *installed* build. `docs/` and `database/` are empty placeholder directories.
-- No `LICENSE` file is present in the repository.
 
 ---
 
@@ -348,7 +347,7 @@ Not yet verified on real machines: the full download/install/relaunch cycle on W
 - [ ] Add frontend tests; add a CI job that launches an installed build
 - [ ] Reconcile `/api/speed-test` (implemented, unused) with the frontend's client-side Cloudflare measurement — wire it in or remove it
 - [ ] Independently re-verify the full Windows release pipeline (Rust setup, `tauri build`, NSIS output) end to end, beyond the migration's own review of the workflow file
-- [ ] Add a `LICENSE` file
+- [x] Add a `LICENSE` file (MIT)
 
 ---
 

@@ -455,7 +455,7 @@ See [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) for the full, itemized list of wh
 
 ## 📄 License
 
-No `LICENSE` file is currently present in this repository.
+System Info is released under the **[MIT License](./LICENSE)** — Copyright (c) 2026 Vipul Sharma. Third-party components keep their own licenses; see [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) for the full list (including PawnIO, which is GPL-2.0-or-later with an exception, and LibreHardwareMonitorLib, MPL-2.0).
 
 ---
 

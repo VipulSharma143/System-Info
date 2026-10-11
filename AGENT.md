@@ -12,7 +12,7 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.6.5 · **License:** none — no `LICENSE` file exists in the repo.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.6.5 · **License:** MIT, Copyright (c) 2026 Vipul Sharma (`LICENSE`); third-party licenses in `THIRD_PARTY_NOTICES.md` — update it when a dependency is added or removed.
 
 ## 📖 What it is
 
