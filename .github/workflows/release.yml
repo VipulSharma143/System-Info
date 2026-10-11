@@ -316,7 +316,7 @@ jobs:
           $requiredFiles = @(
             "frontend/src-tauri/resources/backend/SystemMonitor.Api.exe",
             "frontend/src-tauri/resources/backend/systemmonitor_native.dll",
-            "frontend/src-tauri/resources/backend/drivers/PawnIO_setup.exe",
+            "frontend/src-tauri/resources/backend/PawnIO_setup.exe",
             "frontend/src-tauri/icons/icon.ico"
           )
 

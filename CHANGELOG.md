@@ -5,6 +5,15 @@ All notable changes to SystemInfo are documented here.
 ## [Unreleased]
 
 
+## [2.6.5] - 2026-10-11
+
+### Fixed
+- **The bundled PawnIO sensor driver was never found by the installed app, so CPU temperature still said the driver was missing.** The Windows packager copies bundled files flat, so the driver installer sits next to the backend, not in a `drivers` sub-folder where the app looked. The app now checks both places.
+- When the automatic driver install runs, its result is saved in `sensor-driver-install.txt` in the data folder (`%LOCALAPPDATA%\SystemInfo\data`), so a failure can be read instead of guessed.
+
+### Known Issues
+- Not yet confirmed on a real Windows PC after this fix: check the CPU temperature on an Intel Core i7-12700H launched as administrator.
+
 ## [2.6.4] - 2026-10-11
 
 ### Added

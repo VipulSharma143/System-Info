@@ -26,14 +26,19 @@ public sealed class SensorDriverBootstrap : BackgroundService
             if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("SYSTEMINFO_NO_DRIVER_INSTALL") == "1") return;
             await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
             if (WindowsSensorAccess.SensorDriverRegistered() || !WindowsSensorAccess.IsElevated()) return;
-            if (SensorDriverInstaller.BundledInstallerPath() is null) return;   // nothing bundled: leave it to the CPU tab button
+            if (SensorDriverInstaller.BundledInstallerPath() is null)
+            {
+                _log.LogWarning("PawnIO_setup.exe was not found next to the backend; the CPU tab button is the only way to install the driver.");
+                return;
+            }
 
             var version = typeof(SensorDriverBootstrap).Assembly.GetName().Version?.ToString() ?? "unknown";
-            if (File.Exists(_marker) && File.ReadAllText(_marker).Trim() == version) return;
+            if (File.Exists(_marker) && File.ReadLines(_marker).FirstOrDefault()?.Trim() == version) return;
             Directory.CreateDirectory(Path.GetDirectoryName(_marker)!);
-            File.WriteAllText(_marker, version);   // written first: an attempt that crashes must not repeat on every launch
+            File.WriteAllText(_marker, version + "\n(attempt started)");   // written first: an attempt that crashes must not repeat on every launch
 
             var (ok, message) = await SensorDriverInstaller.InstallAsync(stoppingToken);
+            File.WriteAllText(_marker, version + "\n" + (ok ? "ok: " : "failed: ") + message + "\n" + DateTime.Now.ToString("u"));
             _log.LogInformation("Automatic sensor driver install: {Ok} - {Message}", ok, message);
         }
         catch (OperationCanceledException) { /* shutting down */ }

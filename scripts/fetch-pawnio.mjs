@@ -2,7 +2,9 @@
 // Fetches the official PawnIO installer into the backend resources so the Windows build can set up the CPU sensor driver
 // itself (see backend services/Cpu/SensorDriverInstaller.cs). The file is downloaded from the project's own GitHub release
 // and refused unless its SHA-256 equals the pinned value (the same value winget publishes for this version).
-// Usage: node scripts/fetch-pawnio.mjs [destinationDir]   (default: frontend/src-tauri/resources/backend/drivers)
+// Usage: node scripts/fetch-pawnio.mjs [destinationDir]   (default: frontend/src-tauri/resources/backend)
+// The default is flat on purpose: Tauri copies resources given as a glob map ("resources/backend/**/*": "backend/") without
+// their sub-folders, so a file in drivers/ would land beside the backend exe anyway.
 // Updating PawnIO: change VERSION and SHA256 here and BundledSha256 in SensorDriverInstaller.cs together.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -14,7 +16,7 @@ const SHA256 = '1F519A22E47187F70A1379A48CA604981C4FCF694F4E65B734AAA74A9FBA3032
 const URL = `https://github.com/namazso/PawnIO.Setup/releases/download/${VERSION}/PawnIO_setup.exe`;
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const destDir = resolve(process.argv[2] ?? join(root, 'frontend', 'src-tauri', 'resources', 'backend', 'drivers'));
+const destDir = resolve(process.argv[2] ?? join(root, 'frontend', 'src-tauri', 'resources', 'backend'));
 const dest = join(destDir, 'PawnIO_setup.exe');
 const sha = (buf) => createHash('sha256').update(buf).digest('hex').toUpperCase();
 
