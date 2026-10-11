@@ -1,7 +1,8 @@
-import { memo, type ReactNode } from 'react';
+import { memo, useState, type ReactNode } from 'react';
 import { Activity as ActivityIcon, Gauge as GaugeIcon, Microchip, Thermometer } from 'lucide-react';
 
 import type { CpuDetail } from '../../../types/cpu';
+import { API_BASE } from '../../../lib/apiConfig';
 import Panel from '../../common/Panel';
 import UsageBar from '../../common/UsageBar';
 import { Badge, InfoRow, Unavailable } from '../../common/Primitives';
@@ -19,6 +20,30 @@ function Row({ label, value, reason, hint }: { label: string; value: ReactNode |
 const ClockText = (mhz: number | null) => formatClock(mhz);
 
 /* ----------------------------------------------------------------------------------- Temperature */
+
+/** Offered only when the sensor note says the PawnIO driver is missing; installs it after the person clicks. */
+function InstallSensorDriver() {
+  const [state, setState] = useState<{ busy: boolean; message: string | null }>({ busy: false, message: null });
+  const install = async () => {
+    setState({ busy: true, message: null });
+    try {
+      const res = await fetch(`${API_BASE}/api/system/cpu/sensor-driver/install`, { method: 'POST', headers: { 'X-SystemInfo-Action': 'install-sensor-driver' } });
+      const body = (await res.json()) as { message?: string };
+      setState({ busy: false, message: body.message ?? 'Done.' });
+    } catch {
+      setState({ busy: false, message: 'The install request failed. Install PawnIO manually and reopen System Info.' });
+    }
+  };
+  return (
+    <div className="mt-3">
+      <button type="button" onClick={install} disabled={state.busy}
+        className="rounded-md border border-line px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-surface disabled:opacity-60">
+        {state.busy ? 'Installing…' : 'Install the sensor driver (PawnIO)'}
+      </button>
+      {state.message && <p className="mt-2 text-[12px] leading-relaxed text-muted">{state.message}</p>}
+    </div>
+  );
+}
 
 export const TemperaturePanel = memo(function TemperaturePanel({ detail }: { detail: CpuDetail }) {
   const { live, sensors, throttle } = detail;
@@ -48,6 +73,7 @@ export const TemperaturePanel = memo(function TemperaturePanel({ detail }: { det
         </ul>
       ) : null}
       {detail.sensorsNote && <p className="mt-3 text-[12px] leading-relaxed text-muted">{detail.sensorsNote}</p>}
+      {detail.platform === 'windows' && detail.sensors.length === 0 && detail.sensorsNote?.includes('PawnIO') && <InstallSensorDriver />}
       <div className="mt-3 border-t border-line pt-1">
         <Row label="Thermal throttling" reason={throttleReason}
           value={throttleKnown ? `${formatCount(throttle.packageEvents) ?? DASH} package${num(throttle.coreEvents) ? ` · ${formatCount(throttle.coreEvents)} core` : ''} since boot` : null} />

@@ -5,6 +5,18 @@ All notable changes to SystemInfo are documented here.
 ## [Unreleased]
 
 
+## [2.6.4] - 2026-10-11
+
+### Added
+- **The CPU sensor driver now comes with the app (Windows).** The installer bundles the official, signed PawnIO driver installer (pinned by version and SHA-256, see `THIRD_PARTY_NOTICES.md`). On the first launch with administrator rights, System Info installs it once, silently, so CPU temperatures work with nothing to download, and the temperature appears within about 15 seconds with no restart. If that ever fails, the CPU tab shows an "Install the sensor driver" button to try again. Set `SYSTEMINFO_NO_DRIVER_INSTALL=1` to turn the automatic install off.
+
+### Changed
+- If the sensor driver is missing, the CPU tab says so and, when the automatic install did not work, offers an "Install the sensor driver" button. The app checks again every 15 seconds, so a driver installed in the meantime is picked up without a restart.
+
+### Known Issues
+- The automatic driver install and the Windows CPU temperature have not yet been run on a real Windows PC. Check them on an Intel Core i7-12700H, launched as administrator.
+- The PawnIO driver stays installed when System Info is uninstalled (other programs may use it). Remove "PawnIO" from Windows "Installed apps" if you do not want it.
+
 ## [2.6.3] - 2026-10-11
 
 ### Added

@@ -299,6 +299,15 @@ jobs:
           New-Item -ItemType Directory -Path $backendDest -Force | Out-Null
           Copy-Item "build/backend/*" $backendDest -Recurse -Force
 
+      - name: Bundle PawnIO sensor driver installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Official signed PawnIO installer, pinned by version and SHA-256; the app runs it once (elevated) so CPU
+          # temperatures work without the person installing anything. Must run after the staging step, which recreates the folder.
+          node scripts/fetch-pawnio.mjs
+          if ($LASTEXITCODE -ne 0) { Write-Error "Could not fetch the PawnIO installer."; exit 1 }
+
       - name: Validate Tauri resource staging
         shell: pwsh
         run: |
@@ -307,6 +316,7 @@ jobs:
           $requiredFiles = @(
             "frontend/src-tauri/resources/backend/SystemMonitor.Api.exe",
             "frontend/src-tauri/resources/backend/systemmonitor_native.dll",
+            "frontend/src-tauri/resources/backend/drivers/PawnIO_setup.exe",
             "frontend/src-tauri/icons/icon.ico"
           )
 

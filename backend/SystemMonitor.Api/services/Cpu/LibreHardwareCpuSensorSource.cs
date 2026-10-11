@@ -8,13 +8,13 @@ namespace SystemMonitor.Api.Services;
 /// Windows CPU temperatures through LibreHardwareMonitorLib. The native engine cannot read them on Windows (there is no public
 /// API; the ACPI thermal zone is not the processor). Sampling happens on a pool thread: Read returns the last sample at once and
 /// starts a refresh when it is older than <see cref="RefreshMs"/>, so an API request never waits on the driver.
-/// If the library cannot start (no driver access, not elevated) the reason is kept and a retry happens at most once a minute.
+/// If the library cannot start (no driver access, not elevated) the reason is kept and a retry happens at most every 15 seconds.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class LibreHardwareCpuSensorSource : ICpuSensorSource, IDisposable
 {
     public const int RefreshMs = OverlayService.SampleIntervalMs;
-    private const long RetryAfterFailureMs = 60_000;
+    private const long RetryAfterFailureMs = 15_000;
 
     private readonly ILogger<LibreHardwareCpuSensorSource> _log;
     private readonly object _gate = new();
@@ -74,8 +74,11 @@ public sealed class LibreHardwareCpuSensorSource : ICpuSensorSource, IDisposable
             }
 
             if (failure is null && !raw.Any(r => CpuSensorSelection.Plausible(r.Value)))
+            {
                 failure = CpuSensorSelection.ExplainMissingTemperature(
                     WindowsSensorAccess.IsElevated(), WindowsSensorAccess.SensorDriverRegistered());
+                CloseComputer();   // reopen on the next try so a driver installed in the meantime is picked up without a restart
+            }
 
             lock (_gate)
             {

@@ -18,5 +18,15 @@ public static class CpuEndpoints
                 return Results.Json(new { error = reason, starting = cpu.Problem is null }, statusCode: StatusCodes.Status503ServiceUnavailable);
             })
             .WithName("GetCpuDetail");
+
+        // Windows only, and only when the person clicks the button in the CPU tab: installs the PawnIO sensor driver.
+        app.MapPost("/api/system/cpu/sensor-driver/install", async (HttpRequest request, CancellationToken ct) =>
+            {
+                if (!request.Headers.ContainsKey(SensorDriverInstaller.ActionHeader))
+                    return Results.Json(new { ok = false, message = "Missing request header." }, statusCode: StatusCodes.Status400BadRequest);
+                var (ok, message) = await SensorDriverInstaller.InstallAsync(ct);
+                return Results.Json(new { ok, message });
+            })
+            .WithName("InstallCpuSensorDriver");
     }
 }
