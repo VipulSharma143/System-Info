@@ -35,6 +35,8 @@ if (OperatingSystem.IsWindows())
 {
     // Windows has no public CPU temperature API; this fills in what the native engine cannot (see CpuSensorSelection).
     builder.Services.AddSingleton<ICpuSensorSource, LibreHardwareCpuSensorSource>();
+    // Integrated Intel/AMD GPU temperature, the same way and only where the native engine has none (see GpuSensorSelection).
+    builder.Services.AddSingleton<IGpuSensorSource, LibreHardwareGpuSensorSource>();
     // Installs the bundled PawnIO sensor driver once (when elevated and missing) so CPU temperatures need no manual setup.
     builder.Services.AddHostedService(sp => new SensorDriverBootstrap(dataDir, sp.GetRequiredService<ILogger<SensorDriverBootstrap>>()));
 }

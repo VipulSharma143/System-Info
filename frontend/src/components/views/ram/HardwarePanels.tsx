@@ -13,7 +13,8 @@ import { EmptyState } from '../../common/States';
 import { Badge, InfoRow } from '../../common/Primitives';
 
 
-import { NotReported, val, yesNo } from './cells';
+import { NotReported } from './cells';
+import { val, yesNo } from './cellValues';
 
 /* ------------------------------------------------------------------ */
 /* Physical hardware sections                                          */

@@ -7,7 +7,7 @@ import { Badge, type BadgeTone } from '../../common/Primitives';
 import Sparkline from '../../common/Sparkline';
 import UsageBar from '../../common/UsageBar';
 
-export function batteryTone(battery: BatteryInfo): BadgeTone {
+function batteryTone(battery: BatteryInfo): BadgeTone {
   if (!battery.available) return 'muted';
   if (battery.status === 'Charging' || battery.status === 'Fully Charged') return 'ok';
   const pct = battery.capacityPercent;

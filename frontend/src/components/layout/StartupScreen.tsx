@@ -1,12 +1,8 @@
 import { AlertTriangle, Check, RefreshCw } from 'lucide-react';
 import { ALERT_COPY } from '../../lib/errors';
+import type { StartupStep } from '../../lib/startupSteps';
 import Button from '../common/Button';
 import BrandMark from './BrandMark';
-
-export interface StartupStep {
-  label: string;
-  done: boolean;
-}
 
 interface StartupScreenProps {
   /** One entry per checklist line, in display order. */
@@ -14,19 +10,6 @@ interface StartupScreenProps {
   /** True once STARTUP_GRACE_MS has passed with no successful load. */
   failed: boolean;
   onRetry: () => void;
-}
-
-// The four dashboard lines share one flag because they arrive together in a single
-// /api/system/all response. System identity and GPU details load later, when the System page opens.
-export function buildStartupSteps(args: { servicesReady: boolean; metricsLoaded: boolean }): StartupStep[] {
-  return [
-    { label: 'Starting System Info', done: true },
-    { label: 'Loading services', done: args.servicesReady },
-    { label: 'Reading processor', done: args.metricsLoaded },
-    { label: 'Reading memory', done: args.metricsLoaded },
-    { label: 'Reading storage', done: args.metricsLoaded },
-    { label: 'Reading network', done: args.metricsLoaded },
-  ];
 }
 
 // The one decorative moment in the app: a heartbeat line that draws itself while the backend starts.

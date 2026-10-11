@@ -22,12 +22,14 @@ public sealed class OverlayService : IHostedService
     private string? _lastJson;
     private OverlaySnapshot? _last;
     private readonly ICpuSensorSource? _cpuSensors;
+    private readonly IGpuSensorSource? _gpuSensors;
 
-    public OverlayService(IOverlayEngine engine, ILogger<OverlayService> log, ICpuSensorSource? cpuSensors = null)
+    public OverlayService(IOverlayEngine engine, ILogger<OverlayService> log, ICpuSensorSource? cpuSensors = null, IGpuSensorSource? gpuSensors = null)
     {
         _engine = engine;
         _log = log;
         _cpuSensors = cpuSensors;
+        _gpuSensors = gpuSensors;
     }
 
     public string? Problem => _engine.Problem;
@@ -48,7 +50,12 @@ public sealed class OverlayService : IHostedService
     public OverlaySnapshot? Read()
     {
         var native = ReadNative();
-        return native is null || _cpuSensors is null ? native : WithCpuSensors(native, _cpuSensors.Read());
+        var merged = native is null || _cpuSensors is null ? native : WithCpuSensors(native, _cpuSensors.Read());
+        // The managed GPU source is consulted only while an integrated Intel/AMD adapter has no native temperature, so a
+        // machine without one (or any non-Windows host, where no source exists) never starts the library.
+        return merged is not null && _gpuSensors is not null && merged.Gpus.Any(GpuSensorSelection.Wants)
+            ? GpuSensorSelection.Apply(merged, _gpuSensors.Read())
+            : merged;
     }
 
     /// <summary>

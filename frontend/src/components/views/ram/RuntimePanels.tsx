@@ -13,7 +13,8 @@ import UsageRing from '../../common/UsageRing';
 import { InfoRow, StatTile, TileGrid } from '../../common/Primitives';
 import { usageColor } from '../../../lib/hues';
 
-import { NotReported, val } from './cells';
+import { NotReported } from './cells';
+import { val } from './cellValues';
 
 /** "Usage" row whose bar already prints the percentage, or the shared unknown value. */
 function UsageRow({ percent }: { percent: number | null }) {

@@ -76,11 +76,43 @@ si_vec_add_f32_avx2:
     ret
 
 ; ---------------- dot product ----------------
+; Four independent accumulators hide the 4-cycle addps latency (a single accumulator is latency-bound at ~1 vector
+; per 4 cycles). Only xmm0-xmm5 are used, so nothing needs saving on Windows x64 (xmm6+ are callee-saved there).
 si_dot_f32_sse2:                ; a=ARG1 b=ARG2 n=ARG3
     xor r10d, r10d
     mov r11, ARG3
-    and r11, -4
+    and r11, -16                ; whole 16-float blocks
     xorps xmm0, xmm0
+    xorps xmm3, xmm3
+    xorps xmm4, xmm4
+    xorps xmm5, xmm5
+.v16:
+    cmp r10, r11
+    jae .v16done
+    movups xmm1, [ARG1 + r10*4]
+    movups xmm2, [ARG2 + r10*4]
+    mulps  xmm1, xmm2
+    addps  xmm0, xmm1
+    movups xmm1, [ARG1 + r10*4 + 16]
+    movups xmm2, [ARG2 + r10*4 + 16]
+    mulps  xmm1, xmm2
+    addps  xmm3, xmm1
+    movups xmm1, [ARG1 + r10*4 + 32]
+    movups xmm2, [ARG2 + r10*4 + 32]
+    mulps  xmm1, xmm2
+    addps  xmm4, xmm1
+    movups xmm1, [ARG1 + r10*4 + 48]
+    movups xmm2, [ARG2 + r10*4 + 48]
+    mulps  xmm1, xmm2
+    addps  xmm5, xmm1
+    add r10, 16
+    jmp .v16
+.v16done:
+    addps xmm0, xmm3
+    addps xmm4, xmm5
+    addps xmm0, xmm4
+    mov r11, ARG3
+    and r11, -4                 ; remaining 4-float blocks (0..3)
 .v:
     cmp r10, r11
     jae .h
@@ -108,11 +140,37 @@ si_dot_f32_sse2:                ; a=ARG1 b=ARG2 n=ARG3
 .d:
     ret
 
-si_dot_f32_avx2:
+si_dot_f32_avx2:                ; four accumulators, 32 floats per iteration (see the SSE2 note); ymm0-ymm5 only
     xor r10d, r10d
     mov r11, ARG3
-    and r11, -8
+    and r11, -32                ; whole 32-float blocks
     vxorps ymm0, ymm0, ymm0
+    vxorps ymm2, ymm2, ymm2
+    vxorps ymm3, ymm3, ymm3
+    vxorps ymm4, ymm4, ymm4
+.v32:
+    cmp r10, r11
+    jae .v32done
+    vmovups ymm1, [ARG1 + r10*4]
+    vmovups ymm5, [ARG1 + r10*4 + 32]
+    vmulps  ymm1, ymm1, [ARG2 + r10*4]
+    vmulps  ymm5, ymm5, [ARG2 + r10*4 + 32]
+    vaddps  ymm0, ymm0, ymm1
+    vaddps  ymm2, ymm2, ymm5
+    vmovups ymm1, [ARG1 + r10*4 + 64]
+    vmovups ymm5, [ARG1 + r10*4 + 96]
+    vmulps  ymm1, ymm1, [ARG2 + r10*4 + 64]
+    vmulps  ymm5, ymm5, [ARG2 + r10*4 + 96]
+    vaddps  ymm3, ymm3, ymm1
+    vaddps  ymm4, ymm4, ymm5
+    add r10, 32
+    jmp .v32
+.v32done:
+    vaddps ymm0, ymm0, ymm2
+    vaddps ymm3, ymm3, ymm4
+    vaddps ymm0, ymm0, ymm3
+    mov r11, ARG3
+    and r11, -8                 ; remaining 8-float blocks (0..3)
 .v:
     cmp r10, r11
     jae .h

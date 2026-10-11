@@ -12,7 +12,7 @@
 
 Read this before making changes — it's written to be scanned instead of exploring the whole repo cold. If this file and the code disagree, trust the code and update this file. `README.md` (fuller feature/architecture writeup + mermaid diagram) and `PROJECT_STATUS.md` (verification status, full history) go deeper if you need it.
 
-**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.6.5 · **License:** MIT, Copyright (c) 2026 Vipul Sharma (`LICENSE`); third-party licenses in `THIRD_PARTY_NOTICES.md` — update it when a dependency is added or removed.
+**Repo:** github.com/VipulSharma143/System-Info · **Current version:** 2.6.6 · **License:** MIT, Copyright (c) 2026 Vipul Sharma (`LICENSE`); third-party licenses in `THIRD_PARTY_NOTICES.md` — update it when a dependency is added or removed.
 
 ## 📖 What it is
 
@@ -121,6 +121,7 @@ History: background service appends every sample to `.jsonl` → frontend Analyt
 | GPU | `Win32_VideoController` + `GPU Engine` perf counters (every adapter, live per-engine) | native engine `get_gpu_vendor()`/`get_amd_gpu_usage_percent()` (sysfs) — narrower than Windows |
 | System identity | `Win32_ComputerSystem`/`Win32_BIOS`/`Win32_OperatingSystem` | DMI sysfs, `/etc/os-release`, `/proc/uptime` |
 | CPU temp / fan RPM | CPU temp: LibreHardwareMonitorLib via `services/Cpu/LibreHardwareCpuSensorSource.cs` (2.6.3; needs administrator, and the PawnIO driver for the library version in use; the reason for a missing value comes from `CpuSensorSelection.ExplainMissingTemperature`; selection rules in `CpuSensorSelection.cs`, native value never replaced). Fan RPM: native, `Unavailable` if no trustworthy sensor | Native engine + sysfs thermal zones, same rule |
+| Integrated GPU temp (Windows) | LibreHardwareMonitorLib via `services/Gpu/LibreHardwareGpuSensorSource.cs` (2.6.6), merged into the overlay snapshot by `GpuSensorSelection.Apply` (called from `OverlayService.Read`): only an `integrated` Intel/AMD adapter with no native temperature, from the `GPU Core` sensor, 1..125 °C, paired by normalised name or by lone-adapter elimination; otherwise a specific note, never a number | Native engine / sysfs, NVIDIA via NVML, all unchanged |
 
 ## 🪟 Desktop shell (Tauri 2) details
 
@@ -173,6 +174,7 @@ Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job
 - **2.6.5 — PawnIO:** the Windows temperature library needs the PawnIO kernel driver. The release job runs `scripts/fetch-pawnio.mjs` (pinned version + SHA-256, **after** the staging step, which recreates the folder) to put `PawnIO_setup.exe` in `resources/backend/`; `SensorDriverBootstrap` runs it once per app version when elevated, `SensorDriverInstaller` checks the hash first and falls back to winget. To update PawnIO change `VERSION`/`SHA256` in the script and `BundledSha256` in `SensorDriverInstaller.cs` together (the script refuses to run if they differ). It is GPL: keep `THIRD_PARTY_NOTICES.md` shipped and never modify or re-sign the installer.
 - **2.6.3 — CPU usage:** `get_cpu_usage_percent` (both platforms) must never sleep per call; it diffs against the previous call and only the first call waits one 200 ms window. Covered by `tests/native/cpu_usage_test.cpp`.
 - **2.6.3 — Windows CPU temp:** the sensor library names Intel cores `CPU Core #N` (AMD/others `Core #N`); `CpuSensorSelection` accepts both. A missing reading must carry the specific reason (`ExplainMissingTemperature`), never a number. Do not touch GPU detection/utilization/VRAM/temperature code when working on CPU monitoring.
+- **2.6.6 — Windows integrated GPU temp:** the library only builds its Intel GPU group when the CPU group is enabled too, so `LibreHardwareGpuSensorSource` opens `new Computer { IsCpuEnabled = true, IsGpuEnabled = true }` and updates only `GpuIntel`/`GpuAmd` hardware. **Never call `Computer.Close()` on it (or reopen it) while the app runs:** `Close()` runs the library's static `OpCode.Close()`/`Mutexes.Close()`, which nulls delegates the CPU source's own `Computer` uses, so it is closed only in `Dispose` at shutdown. Keep it a separate instance so a graphics-driver fault cannot reach CPU temperatures. The native value always wins; the source is read only while `GpuSensorSelection.Wants` is true for some adapter. Do not widen the sensor choice beyond `GPU Core` (hot spot, memory and regulator sensors are different quantities) and do not add name-based guessing to the pairing.
 - **2.4.8 — polling:** use `scheduleWhenVisible` (lib/visibility.ts) for any new poll loop so hidden windows stop fetching.
 
 - **Never hardcode an API host/port** outside `frontend/src/lib/apiConfig.ts`. Packaged builds get an OS-assigned/non-fixed backend port — a hardcoded `localhost:5132` broke the shipped app once already. Prod uses same-origin relative URLs (`import.meta.env.DEV ? 'http://localhost:5132' : ''`).

@@ -172,3 +172,15 @@ if(BUILD_NATIVE_TESTS)
     add_test(NAME smbios_loader_test COMMAND smbios_loader_test)
     set_tests_properties(smbios_loader_test PROPERTIES TIMEOUT 30)
 endif()
+
+# Kernel benchmark (not a test): cmake -DBUILD_NATIVE_BENCH=ON .. && cmake --build . --target kernel_bench && ./kernel_bench [add|dot|sum|minmax|xor|stats]
+# Prints GB/s for every Assembly tier against its portable C++ fallback at L1, L2, L3 and DRAM-sized inputs.
+option(BUILD_NATIVE_BENCH "Build the Assembly kernel benchmark" OFF)
+if(BUILD_NATIVE_BENCH)
+    add_executable(kernel_bench ../tests/native/kernel_bench.cpp $<TARGET_OBJECTS:systemmonitor_objects>)
+    if(WIN32)
+        target_link_libraries(kernel_bench dxgi psapi pdh)
+    else()
+        target_link_libraries(kernel_bench stdc++fs ${CMAKE_DL_LIBS})
+    endif()
+endif()

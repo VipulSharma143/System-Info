@@ -209,7 +209,7 @@ int si_kernel_selftest_impl(int onlyTier);
 int si_kernel_selftest() { return si_kernel_selftest_impl(0); }
 
 int si_kernel_selftest_impl(int onlyTier) {
-    const size_t lens[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 33, 1000, 4099};
+    const size_t lens[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 96, 127, 1000, 4099};   // 16/32/64-element block edges exercise the unrolled dot loops
     const size_t maxN = 4099 + 8;
     std::vector<float> fa(maxN + 4), fb(maxN + 4), fo(maxN + 4), fr(maxN + 4);
     std::vector<int> ia(maxN + 4);

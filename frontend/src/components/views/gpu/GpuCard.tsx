@@ -10,7 +10,8 @@ import Panel from '../../common/Panel';
 import Sparkline from '../../common/Sparkline';
 import UsageBar from '../../common/UsageBar';
 import { Badge, InfoRow, StatTile, TileGrid } from '../../common/Primitives';
-import { NotReported, val } from '../ram/cells';
+import { NotReported } from '../ram/cells';
+import { val } from '../ram/cellValues';
 
 const unit = (suffix: string) => (n: number) => `${formatNumber(n, n % 1 === 0 ? 0 : 1)} ${suffix}`;
 const celsius = unit('°C');

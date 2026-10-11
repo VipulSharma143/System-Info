@@ -4,6 +4,27 @@ All notable changes to SystemInfo are documented here.
 
 ## [Unreleased]
 
+## [2.6.6] - 2026-10-11
+
+### Fixed
+- **Integrated GPU temperature on Windows.** An Intel or AMD integrated GPU now shows its temperature on the GPU and Overlay pages when its graphics driver reports one. Before, Windows only had a temperature for NVIDIA GPUs, so integrated GPUs showed none and gave no reason. The value is the "GPU Core" sensor read through LibreHardwareMonitor (Intel through the graphics driver's telemetry, AMD through its driver API). It only fills a gap: a temperature the engine already has is never replaced, a dedicated GPU is never touched, and the CPU temperature path is unchanged. If the driver reports no temperature, the sensor library cannot start, or the adapter cannot be matched with certainty, the page shows no number and says which of those it is. Nothing is estimated or borrowed from another adapter.
+
+### Changed
+- **Faster dot-product kernel in the native engine (Assembly).** The AVX2 and SSE2 versions of `si_dot_f32` now add with four independent accumulators instead of one, so the CPU no longer waits on each addition before starting the next. Measured with the new `kernel_bench` on a 2.8 GHz Intel Xeon test machine: AVX2 went from 54 to 123 GB/s on a 16 KB input and from 50 to 95 GB/s on 256 KB; SSE2 from 26 to 94 GB/s and from 26 to 49 GB/s. Inputs larger than the CPU cache are unchanged, because memory speed is the limit there. Floats are now added in a different order, so a result can differ from before in its last digits. No displayed hardware metric uses this kernel, and the portable fallback is untouched.
+- The four code-style warnings reported by the linter are gone: helper functions moved out of component files into their own modules. No behaviour or bundle-size change.
+
+### Added
+- `kernel_bench`, an opt-in benchmark for every Assembly kernel against its portable fallback at cache-sized and memory-sized inputs (`cmake -DBUILD_NATIVE_BENCH=ON`). It prints numbers only and is not part of the normal tests.
+- The kernel self-test now also checks lengths at the 16-, 32- and 64-element block edges that the new dot-product loops depend on.
+
+### Notes
+- The sensor library is only started while an integrated Intel or AMD GPU lacks a temperature, so a PC without one (and any Linux PC) never loads it. It samples at most once a second and keeps one small history per adapter.
+- It runs in its own library instance, opened once and closed only when the app exits, because closing one instance resets state the CPU temperature reader shares.
+- Measured and deliberately left alone: the `sum` kernel is limited by the CPU's shuffle port, not by dependent additions, so unrolling would not help; the `stats` kernel feeds the overlay's displayed averages and is already about 9 times faster than the portable loop on the small inputs it receives; one overlay sample takes about 64-88 microseconds and one uncached CPU-detail document about 187 microseconds, so the C++ collection code needed no change.
+- The faster dot-product kernel, the linter cleanup and the benchmark under Changed and Added were prepared before this fix and ship with it. They touch no hardware metric.
+
+### Known Issues
+- The integrated GPU temperature has not been run on a real Windows PC yet. Please check an Intel integrated GPU and an AMD processor with integrated graphics, and a laptop with both an integrated and a dedicated GPU (the dedicated GPU's temperature should look exactly as before).
 
 ## [2.6.5] - 2026-10-11
 
