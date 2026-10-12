@@ -10,8 +10,13 @@ namespace SystemMonitor.Api.Services;
 public static class SnapshotLogger
 {
     private static ISnapshotStore? _store;
+    private static BatteryHistoryService? _battery;
 
-    public static void Initialize(ISnapshotStore store) => _store = store;
+    public static void Initialize(ISnapshotStore store, BatteryHistoryService? battery = null)
+    {
+        _store = store;
+        _battery = battery;
+    }
 
     public static void Append(CpuInfo? cpu, List<NetworkInfo>? network, BatteryInfo? battery = null)
     {
@@ -20,6 +25,7 @@ public static class SnapshotLogger
         try
         {
             var timestamp = DateTime.UtcNow;
+            _battery?.Observe(timestamp, battery);   // plug-in / unplug sessions; ignores a desktop or an unknown status
 
             var networkArray = new JsonArray();
             foreach (var n in network ?? [])

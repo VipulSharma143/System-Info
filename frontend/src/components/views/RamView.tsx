@@ -13,6 +13,7 @@ import { EmptyState, ErrorState } from '../common/States';
 import { ViewContainer } from '../common/Primitives';
 
 import { HealthPanel, ModulesPanel, PlatformPanel, SourcesPanel } from './ram/HardwarePanels';
+import { MemoryModulesPanel } from './sensors/SensorPanels';
 import { CommitPanel, CurrentUsage, Overview, RuntimeSkeleton, SwapPanel } from './ram/RuntimePanels';
 
 /*
@@ -69,6 +70,7 @@ function RamView({ active }: { active: boolean }) {
 
       <PlatformPanel hw={hw} summary={hw.data?.summary ?? null} />
       <ModulesPanel hw={hw} />
+      <MemoryModulesPanel active={active} />
 
       {ram.data && (
         <div className="grid grid-cols-1 items-start gap-3.5 xl:grid-cols-2">

@@ -7,10 +7,17 @@ var builder = WebApplication.CreateBuilder(args);
 var dataDir = AppDataPath.ResolveAndEnsureCreated();
 Console.WriteLine($"[Startup] Local data directory: {dataDir}");
 var snapshotStore = new LocalJsonSnapshotStore(dataDir);
-SnapshotLogger.Initialize(snapshotStore);
 builder.Services.AddSingleton<ISnapshotStore>(snapshotStore);
+// Battery plug-in / unplug sessions (local JSON, 7 days), the 7-day limit on all saved history, and the "reset data" action.
+var batteryHistory = new BatteryHistoryService(dataDir);
+SnapshotLogger.Initialize(snapshotStore, batteryHistory);
+builder.Services.AddSingleton(_ => batteryHistory);   // factory registration, so the container disposes it (a final save) at shutdown
+builder.Services.AddSingleton(sp => new DataResetService(
+    sp.GetRequiredService<ISnapshotStore>(), sp.GetRequiredService<BatteryHistoryService>(), dataDir, sp.GetRequiredService<ILogger<DataResetService>>()));
+builder.Services.AddHostedService<DataRetentionService>();
 
 builder.Services.AddSingleton<HostSnapshotService>();
+builder.Services.AddSingleton<HardwareSensorService>();
 if (OperatingSystem.IsWindows())
 {
     builder.Services.AddSingleton<ISystemInfoProvider, WindowsSystemInfoProvider>();
@@ -37,6 +44,8 @@ if (OperatingSystem.IsWindows())
     builder.Services.AddSingleton<ICpuSensorSource, LibreHardwareCpuSensorSource>();
     // Integrated Intel/AMD GPU temperature, the same way and only where the native engine has none (see GpuSensorSelection).
     builder.Services.AddSingleton<IGpuSensorSource, LibreHardwareGpuSensorSource>();
+    // Drive, motherboard and memory-module sensors (see HardwareSensorSelection); Linux reads sysfs instead.
+    builder.Services.AddSingleton<IHardwareSensorSource, LibreHardwareBoardSensorSource>();
     // Installs the bundled PawnIO sensor driver once (when elevated and missing) so CPU temperatures need no manual setup.
     builder.Services.AddHostedService(sp => new SensorDriverBootstrap(dataDir, sp.GetRequiredService<ILogger<SensorDriverBootstrap>>()));
 }
@@ -94,6 +103,8 @@ app.MapOverlayEndpoints();
 app.MapCpuEndpoints();
 app.MapNativeEndpoints();
 app.MapAnalyticsEndpoints();
+app.MapDataEndpoints();
+app.MapSensorEndpoints();
 app.MapSpeedTestEndpoints();
 
 // Packaged app: serve the built frontend from wwwroot (absent in development).

@@ -7,11 +7,12 @@ import Panel from '../common/Panel';
 import { StatTile, TileGrid, ViewContainer } from '../common/Primitives';
 import DriveCard from './storage/DriveCard';
 import DriveTable from './storage/DriveTable';
+import { DriveTemperaturesPanel } from './sensors/SensorPanels';
 
 // Up to this many drives each gets a card; beyond it the table keeps the page compact.
 const TABLE_THRESHOLD = 4;
 
-function StorageView({ disks }: { disks: DiskInfo[] }) {
+function StorageView({ disks, active }: { disks: DiskInfo[]; active: boolean }) {
   const totals = useMemo(() => {
     const total = disks.reduce((s, d) => s + d.totalGB, 0);
     const used = disks.reduce((s, d) => s + d.usedGB, 0);
@@ -49,6 +50,7 @@ function StorageView({ disks }: { disks: DiskInfo[] }) {
       ) : (
         <DriveTable disks={disks} />
       )}
+      <DriveTemperaturesPanel active={active} />
     </ViewContainer>
   );
 }

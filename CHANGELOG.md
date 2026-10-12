@@ -4,6 +4,32 @@ All notable changes to SystemInfo are documented here.
 
 ## [Unreleased]
 
+## [2.6.7] - 2026-10-12
+
+### Added
+- **Drive temperatures.** The Storage page now has a "Drive temperatures" panel: every SSD, NVMe and SATA drive that reports a temperature, with its model, its readings (for NVMe the composite temperature and each extra sensor) and the drive's own high and critical limits when it gives them. A drive that reports nothing is explained, not shown as blank.
+- **Motherboard sensors.** The System page now lists the motherboard's sensor chips (and, on laptops that expose it, the embedded controller or ACPI thermal zone) with their temperatures, voltages and fan speeds. Sensor inputs that are not connected (0 °C or −127 °C, a 0 V rail) are left out instead of shown as readings.
+- **Memory module temperatures.** The RAM page now lists the temperature of each memory module that has a thermal sensor (DDR5 SPD hub or a DDR4 thermal sensor), with its SMBus address on Linux.
+- **Hottest core and busiest core.** The CPU tab's Temperature panel now shows the hottest core (from the per-core temperature sensors) and the busiest core with its load, its fastest thread's clock and, when the hardware reports one for that core, its temperature. When a value is not available the row says why.
+- **Battery charging history.** The Battery page now lists every time the charger was connected and every stretch on battery for the last 7 days: when you plugged in or unplugged, the percentage at the start and end, how much it charged or drained, how long it took, and the speed in % per hour. A summary shows how many times you plugged in, how much was charged in total, the longest time on battery, and how long a full battery lasts at your measured drain (shown only when it can be measured from a stretch of 10 minutes or more with no gaps; otherwise it says "Not enough data").
+- **Reset data.** A new "Saved data" panel on the System page has a "Reset data…" button. It asks which data to delete (CPU, GPU, Battery, Network, other cached information, or everything), warns that it cannot be undone, deletes the choice, and restarts System Info. GPU deletes only the cached graphics adapter details, because the app does not store GPU readings over time.
+
+### Fixed
+- **Saved history no longer grows without limit.** Daily history files older than the current day plus the six before it are now deleted automatically, shortly after start-up and then every 6 hours. Before, nothing was ever deleted. The battery history follows the same 7-day limit.
+
+### Notes
+- On Linux the drive, motherboard and memory sensors are read straight from the kernel (`/sys/class/hwmon`), with no root and no extra software. SATA drive temperatures need the `drivetemp` kernel module, DDR5 memory needs `spd5118` and DDR4 `jc42`; when a module is missing the page names it.
+- On Windows they come from LibreHardwareMonitor, in their own library instance that is opened once and closed only when the app exits, so a fault there cannot reach the CPU or GPU temperatures. Drive temperatures need administrator rights, and the page says so when System Info is not running as administrator.
+- Memory module temperature on Windows is **off by default**, because reading it talks to the memory modules over the SMBus, which can misbehave on some computers. Set the environment variable `SYSTEMINFO_DIMM_SENSORS=1` and restart System Info to turn it on.
+- The sensors are read only while the page that shows them is open.
+- The CPU temperature collection itself is unchanged. Per-core temperatures still appear only when the processor, driver and sensor library report them; if your CPU tab shows only the package temperature, the Temperature panel's note says why.
+- The battery history is recorded while System Info is running. If the app was closed or the PC was off or asleep, that time is shown as such on the row and counted separately, and when the charger was connected or removed during that time is not guessed. A charger that flickers for less than 45 seconds is ignored.
+- The history is kept in `data/battery/sessions.json`. Reset data never deletes the PawnIO driver install marker or any file System Info did not create.
+
+### Known Issues
+- Not yet run on real hardware: the Windows drive, motherboard and memory sensors; the battery history on a real laptop battery; and Reset data with the app restart in the desktop build. The new pages and the reset dialog have been tested as logic and compiled, but not looked at on screen. Please check them on your PC and report what you see.
+- The integrated GPU temperature from 2.6.6 still shows "Not reported" on Intel Iris Xe graphics, because that driver exposes no temperature sensor for it (confirmed with the stock LibreHardwareMonitor).
+
 ## [2.6.6] - 2026-10-11
 
 ### Fixed

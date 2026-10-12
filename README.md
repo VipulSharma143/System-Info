@@ -134,7 +134,7 @@ System Info/
 │   │   │                            # Overlay (services/Overlay/): OverlayService (hosts the native engine), OverlayModels, GpuEngineMapper
 │   │   │                            #   (live GPU numbers for the GPU page come from the same engine snapshot)
 │   │   │                            # Memory: MemoryHardwareService, MemoryHealthReader, MemoryMapping, RamDetailsReader
-│   │   │                            # History: SystemMonitorBackgroundService, SnapshotLogger, LocalJsonSnapshotStore,
+│   │   │                            # History: SystemMonitorBackgroundService, SnapshotLogger, LocalJsonSnapshotStore, DataRetention(+Service), DataResetService, Battery/BatteryTracker + BatteryHistoryService,
 │   │   │                            #   AnalyticsService; paths: AppDataPath
 │   │   ├── interface/               # ISystemInfoProvider, ISnapshotStore
 │   │   └── Native/                  # NativeInterop.cs (P/Invoke), NativeKernels.cs (safe span wrappers)
@@ -189,6 +189,7 @@ There is no database directory. `docs/` is an empty placeholder. Tests live next
 | **System Identity** | `Win32_ComputerSystem`, `Win32_BIOS`, `Win32_OperatingSystem` | DMI sysfs (`/sys/class/dmi/id/*`), `/etc/os-release`, `/proc/uptime` | Manufacturer, model, BIOS version, Windows edition/build, uptime |
 | CPU temperature | LibreHardwareMonitorLib (`services/Cpu/LibreHardwareCpuSensorSource.cs`); needs administrator rights and, on current library versions, the PawnIO sensor driver | Native engine, sysfs `coretemp`/`k10temp`/CPU thermal zones | `Unavailable` with the reason where no trustworthy sensor exists — never guessed or estimated; the Windows ACPI thermal zone is never shown as the CPU |
 | Integrated GPU temperature (Windows) | LibreHardwareMonitorLib (`services/Gpu/LibreHardwareGpuSensorSource.cs`, merged by `GpuSensorSelection.cs`): the `GPU Core` sensor of an Intel (driver telemetry) or AMD (driver API) integrated GPU. Only started while such a GPU has no native temperature | Native engine / sysfs (unchanged); NVIDIA through NVML (unchanged) | No number, with the reason (driver reports none / library cannot start / adapter not matched with certainty) — never estimated, never borrowed from another adapter, a native value is never replaced, a discrete GPU is never touched |
+| Drive / motherboard / memory-module sensors | LibreHardwareMonitorLib in its own instance (`services/Sensors/LibreHardwareBoardSensorSource.cs`); drive temperatures need administrator rights; memory-module temperature is off unless `SYSTEMINFO_DIMM_SENSORS=1` | Kernel hwmon files under `/sys/class/hwmon` (`LinuxHwmonReader`): `nvme`, `drivetemp` (needs the module), `spd5118`/`jc42`, and known sensor-chip names | No devices and a note naming what is missing; unconnected inputs (0 °C, 0 V) are dropped; nothing estimated |
 | Fan RPM | Native engine | Native engine | Correctly reports `Unavailable` on hardware with no exposed sensor |
 
 **Design principle, applied everywhere above:** *if the OS can prove it, display it — if it can't, display "Unavailable." Never fill the gap with a guess.*
@@ -206,6 +207,9 @@ All endpoints are served by the .NET backend on `:5132` (or the port the fronten
 | `GET` | `/api/system/cpu` | Cached CPU usage |
 | `GET` | `/api/system/ram` | Runtime RAM in bytes (`RamDetails`): total/used/available, free/cached/buffers, swap or page file, commit. A value the OS doesn't report is `null`, never 0; `source` says whether it came from the native engine or the managed fallback |
 | `GET` | `/api/system/memory/hardware` | Physical RAM: platform summary + one entry per populated module (SMBIOS Type 16/17). `available: false` (still HTTP 200) when the firmware tables can't be read — on Linux `/sys/firmware/dmi/tables/DMI` is root-only. Cached, since DIMMs don't change at runtime |
+| `GET` | `/api/system/sensors` | Drive, motherboard and memory-module sensors (`HardwareSensors`): `drives`, `board`, `memory`, each a list of devices with temperature / voltage / fan sensors (plus the drive's high and critical limits), or a `note` saying why there are none. Linux reads `/sys/class/hwmon`; Windows uses LibreHardwareMonitor. `ready: false` while the Windows library is still opening. Impossible readings (0 °C, 0 V) are dropped, never shown. |
+| `GET` | `/api/battery/history` | Charge and discharge sessions of the last 7 days (`BatteryHistory`). |
+| `POST` | `/api/data/reset` | Deletes the chosen saved data (`cpu`, `gpu`, `battery`, `network`, `cache`, or `all`); needs the `X-SystemInfo-Action` header. The frontend restarts the app afterwards. |
 | `GET` | `/api/system/memory/health` | ECC capability / enabled / corrected+uncorrected error counters (Linux EDAC). Each is `null` unless the platform actually reports it |
 | `GET` | `/api/system/disk` | Disk capacity/usage |
 | `GET` | `/api/system/network` | Cached network throughput |
@@ -310,6 +314,8 @@ npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or
 | Development (`Development` env) | `./data` |
 | Windows (packaged) | `%LOCALAPPDATA%\SystemInfo\data` |
 | Linux (packaged) | `~/.local/share/SystemInfo/data` |
+
+**7-day limit.** `DataRetentionService` deletes day files older than today plus the six days before it (`DataRetention.FirstKeptDay`), 30 s after start and then every 6 hours; empty month and year folders go with them. The battery sessions in `data/battery/sessions.json` (`BatteryHistoryService`, fed by `SnapshotLogger` from the same battery readings) follow the same limit. **Reset data** (System page → "Saved data", `POST /api/data/reset`, which requires the `X-SystemInfo-Action` header) removes CPU, network or battery fields from the saved lines, deletes cached files, or everything, then the frontend restarts the app through the Tauri process plugin. `GET /api/battery/history` feeds the "Charging history" panel on the Battery page.
 
 `AnalyticsService` reads these `.jsonl` files directly for the requested date range; malformed lines are logged and skipped rather than crashing the request, and an "all time" query is clamped to the oldest day that actually has data. Results are cached for 5 seconds. There is currently **no retention/TTL policy** — the snapshot directory grows unbounded over time (a known, documented trade-off, not a bug).
 

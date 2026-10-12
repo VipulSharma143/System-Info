@@ -5,6 +5,7 @@ import Panel from '../common/Panel';
 import { EmptyState } from '../common/States';
 import { ViewContainer } from '../common/Primitives';
 import BatteryHero from './battery/BatteryHero';
+import BatteryHistoryPanel from './battery/BatteryHistoryPanel';
 import { BatteryDetailPanels, BatteryHealthTiles } from './battery/BatteryDetails';
 
 /*
@@ -13,7 +14,7 @@ import { BatteryDetailPanels, BatteryHealthTiles } from './battery/BatteryDetail
   so the UI renders "we don't know" compactly and honestly instead of filling the page with
   disabled cards.
 */
-function BatteryView({ battery, chargeHistory }: { battery: BatteryInfo; chargeHistory: number[] }) {
+function BatteryView({ battery, chargeHistory, active }: { battery: BatteryInfo; chargeHistory: number[]; active: boolean }) {
   if (!battery.available) {
     return (
       <ViewContainer>
@@ -34,6 +35,7 @@ function BatteryView({ battery, chargeHistory }: { battery: BatteryInfo; chargeH
       <BatteryHero battery={battery} chargeHistory={chargeHistory} />
       <BatteryHealthTiles battery={battery} />
       <BatteryDetailPanels battery={battery} />
+      <BatteryHistoryPanel active={active} />
       {(battery.cycleCountNote || battery.note) && (
         <div className="rounded-[var(--r-md)] bg-surface-2 px-4 py-3 text-[12px] leading-relaxed text-muted">
           {battery.cycleCountNote && <div>{battery.cycleCountNote}</div>}

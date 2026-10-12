@@ -36,6 +36,15 @@
     <Compile Include="../SystemMonitor.Api/services/Overlay/GpuEngineMapper.cs" Link="linked/GpuEngineMapper.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuSensorSelection.cs" Link="linked/CpuSensorSelection.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/GpuSensorSelection.cs" Link="linked/GpuSensorSelection.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Sensors/HardwareSensorModels.cs" Link="linked/HardwareSensorModels.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Sensors/HardwareSensorSelection.cs" Link="linked/HardwareSensorSelection.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Sensors/LinuxHwmonReader.cs" Link="linked/LinuxHwmonReader.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Sensors/HardwareSensorService.cs" Link="linked/HardwareSensorService.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Battery/BatteryTracker.cs" Link="linked/BatteryTracker.cs" />
+    <Compile Include="../SystemMonitor.Api/services/Battery/BatteryHistoryService.cs" Link="linked/BatteryHistoryService.cs" />
+    <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataRetention.cs" Link="linked/DataRetention.cs" />
+    <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataResetService.cs" Link="linked/DataResetService.cs" />
+    <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataRetentionService.cs" Link="linked/DataRetentionService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuDetailModels.cs" Link="linked/CpuDetailModels.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuDetailService.cs" Link="linked/CpuDetailService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlMatching.cs" Link="linked/NvmlMatching.cs" />

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using SystemMonitor.Api.Interface;
 
 namespace SystemMonitor.Api.Services;
@@ -70,6 +71,71 @@ public class LocalJsonSnapshotStore : ISnapshotStore
                     Console.Error.WriteLine($"[LocalJsonSnapshotStore] flush to {file} failed: {ex.Message}");
                 }
             }
+        }
+    }
+
+    public int Prune(DateTime nowUtc)
+    {
+        lock (_lock)
+        {
+            var first = DataRetention.FirstKeptDay(nowUtc);
+            foreach (var file in _pending.Keys.Where(f => DataRetention.DayOf(f) is { } d && d < first).ToList()) _pending.Remove(file);
+            var removed = DataRetention.PruneSnapshotFiles(_rootDir, nowUtc);
+            if (removed > 0) _knownDirs.Clear();   // a folder that was just deleted must be created again if it is ever written to
+            return removed;
+        }
+    }
+
+    public int ResetData(IReadOnlySet<string> fields, bool all)
+    {
+        lock (_lock)
+        {
+            if (all)
+            {
+                var files = Directory.Exists(_rootDir) ? Directory.EnumerateFiles(_rootDir, "*.jsonl", SearchOption.AllDirectories).Count() : 0;
+                _pending.Clear();   // lines still in memory must not reappear on the next flush
+                if (Directory.Exists(_rootDir)) Directory.Delete(_rootDir, recursive: true);
+                Directory.CreateDirectory(_rootDir);
+                _knownDirs.Clear();
+                return files;
+            }
+
+            Flush();   // so recent lines are cleaned too, not appended later with the removed fields
+            var changedLines = 0;
+            foreach (var file in Directory.EnumerateFiles(_rootDir, "*.jsonl", SearchOption.AllDirectories).ToList())
+            {
+                var kept = new List<string>();
+                var changedHere = 0;
+                foreach (var line in File.ReadLines(file))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    try
+                    {
+                        if (JsonNode.Parse(line) is JsonObject obj)
+                        {
+                            var removedAny = false;
+                            foreach (var f in fields) removedAny |= obj.Remove(f);
+                            if (removedAny)
+                            {
+                                changedHere++;
+                                if (obj.Count > 1) kept.Add(obj.ToJsonString());   // a line left with only its timestamp holds no data
+                                continue;
+                            }
+                        }
+                    }
+                    catch (JsonException) { /* keep a line we cannot read exactly as it is */ }
+                    kept.Add(line);
+                }
+                if (changedHere == 0) continue;
+                changedLines += changedHere;
+                if (kept.Count == 0) { File.Delete(file); continue; }
+                var tmp = file + ".tmp";
+                File.WriteAllLines(tmp, kept);
+                File.Move(tmp, file, overwrite: true);
+            }
+            DataRetention.RemoveEmptyFolders(_rootDir);
+            _knownDirs.Clear();
+            return changedLines;
         }
     }
 

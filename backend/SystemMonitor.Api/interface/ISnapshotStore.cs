@@ -16,4 +16,14 @@ public interface ISnapshotStore
 
     /// <summary>Writes anything still buffered. A no-op for unbuffered stores.</summary>
     void Flush() { }
+
+    /// <summary>Deletes stored day files older than the retention window (see DataRetention). Returns how many were removed.</summary>
+    int Prune(DateTime nowUtc) => 0;
+
+    /// <summary>
+    /// The "reset data" action. Removes the named top-level fields (cpuUsedPercent, network, battery) from every stored line, or
+    /// everything when <paramref name="all"/> is true, and discards anything still buffered so it cannot be written back.
+    /// Returns the number of lines changed or files deleted.
+    /// </summary>
+    int ResetData(IReadOnlySet<string> fields, bool all) => 0;
 }

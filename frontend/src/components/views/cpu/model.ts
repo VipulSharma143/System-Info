@@ -1,4 +1,4 @@
-import type { CoreKind, CpuCache, CpuCore, CpuDetail, CpuTimeBreakdown } from '../../../types/cpu';
+import type { CoreKind, CpuCache, CpuCore, CpuDetail, CpuSensor, CpuTimeBreakdown } from '../../../types/cpu';
 import { formatMemory } from '../../../lib/format.ts';
 import { num, sourceLabel } from '../overlay/model.ts';
 
@@ -40,6 +40,37 @@ export function groupCores(cores: CpuCore[]): CoreGroup[] {
     g.usagePercent = measured.length > 0 ? measured.reduce((a, b) => a + b, 0) / measured.length : null;
   }
   return [...groups.values()];
+}
+
+export interface BusiestCore {
+  label: string;
+  usagePercent: number;
+  /** The fastest thread of the core; null when no thread reported a clock. */
+  mhz: number | null;
+  /** Only when the hardware reports a temperature for this particular core. */
+  temperatureC: number | null;
+}
+
+/** The physical core with the highest load right now (the mean of its threads, as the core grid shows it), or null when no load was measured. */
+export function busiestCore(cores: CpuCore[]): BusiestCore | null {
+  const measured = groupCores(cores).filter((g): g is CoreGroup & { usagePercent: number } => num(g.usagePercent));
+  if (measured.length === 0) return null;
+  const top = measured.reduce((a, b) => (b.usagePercent > a.usagePercent ? b : a));
+  const clocks = top.threads.map((t) => t.mhz).filter(num);
+  return { label: top.label, usagePercent: top.usagePercent, mhz: clocks.length > 0 ? Math.max(...clocks) : null, temperatureC: num(top.temperatureC) ? top.temperatureC : null };
+}
+
+export interface HottestCore {
+  label: string;
+  tempC: number;
+}
+
+/** The hottest of the per-core temperature sensors (not the package sensor), or null when the hardware reports none. */
+export function hottestCore(sensors: CpuSensor[]): HottestCore | null {
+  const cores = sensors.filter((s) => s.kind === 'core' && num(s.tempC));
+  if (cores.length === 0) return null;
+  const top = cores.reduce((a, b) => ((b.tempC as number) > (a.tempC as number) ? b : a));
+  return { label: top.label ?? 'Core', tempC: top.tempC as number };
 }
 
 export function cacheLabel(c: Pick<CpuCache, 'level' | 'type'>): string {

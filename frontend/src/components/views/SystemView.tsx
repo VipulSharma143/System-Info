@@ -6,6 +6,8 @@ import Button from '../common/Button';
 import Panel from '../common/Panel';
 import { EmptyState, LoadingState } from '../common/States';
 import { ViewContainer } from '../common/Primitives';
+import DataPanel from './system/DataPanel';
+import { BoardSensorsPanel } from './sensors/SensorPanels';
 import GpuPanels from './system/GpuPanels';
 import { ApplicationPanel, IdentityPanels, SystemTiles } from './system/IdentityPanels';
 
@@ -16,13 +18,14 @@ interface SystemViewProps {
   data: SystemSnapshot;
   gpus: GpuInfo[] | null;
   gpuError: string | null;
+  active: boolean;
 }
 
 /*
   Reference information the user reads once, not something they monitor — so it is a spec-sheet
   layout (label ··· value), not a grid of large cards.
 */
-function SystemView({ info, infoError, onRetryInfo, data, gpus, gpuError }: SystemViewProps) {
+function SystemView({ info, infoError, onRetryInfo, data, gpus, gpuError, active }: SystemViewProps) {
   if (infoError) {
     return (
       <ViewContainer>
@@ -54,7 +57,9 @@ function SystemView({ info, infoError, onRetryInfo, data, gpus, gpuError }: Syst
       <SystemTiles info={info} ram={data.ram} />
       <IdentityPanels info={info} ram={data.ram} cpuPercent={data.cpu.usedPercent} />
       <GpuPanels gpus={gpus} error={gpuError} />
+      <BoardSensorsPanel active={active} />
       <ApplicationPanel info={info} drives={data.disks.length} interfaces={data.network.length} />
+      <DataPanel />
     </ViewContainer>
   );
 }

@@ -7,6 +7,7 @@ import Panel from '../../common/Panel';
 import UsageBar from '../../common/UsageBar';
 import { Badge, InfoRow, Unavailable } from '../../common/Primitives';
 import { formatClock, formatTemp, num } from '../overlay/model';
+import { busiestCore, hottestCore } from './model';
 import {
   cacheLabel, cacheValue, cpuSourceLabel, featureBadges, formatCount, formatRate, formatWatts, missingFrequencyReason, timeSegments,
 } from './model';
@@ -47,12 +48,18 @@ function InstallSensorDriver() {
 
 export const TemperaturePanel = memo(function TemperaturePanel({ detail }: { detail: CpuDetail }) {
   const { live, sensors, throttle } = detail;
+  const hot = hottestCore(sensors);
+  const busy = busiestCore(detail.cores);
   const throttleKnown = num(throttle.packageEvents) || num(throttle.coreEvents);
   const throttleReason = detail.platform === 'windows' ? 'Windows does not count thermal throttling events.' : 'This processor’s driver does not report throttling.';
   return (
     <Panel title="Temperature" icon={Thermometer} hue="cpu">
       <Row label="CPU temperature" value={formatTemp(live?.temperatureC ?? null)} reason={live?.temperatureNote ?? 'This computer does not report a CPU temperature.'}
         hint={num(live?.temperatureC) ? `from ${cpuSourceLabel(live?.temperatureSource ?? null) ?? 'the system sensor'}` : undefined} />
+      <Row label="Hottest core" value={hot ? `${hot.label} · ${formatTemp(hot.tempC)}` : null}
+        reason={sensors.some((s) => s.kind === 'core') ? 'No core has reported a temperature yet.' : 'This computer reports no temperature for individual cores.'} />
+      <Row label="Busiest core" value={busy ? `${busy.label} · ${Math.round(busy.usagePercent)}%${busy.mhz !== null ? ` · ${ClockText(busy.mhz)}` : ''}${busy.temperatureC !== null ? ` · ${formatTemp(busy.temperatureC)}` : ''}` : null}
+        reason="No core has reported a load yet." />
       {sensors.length > 0 ? (
         <ul className="mt-2 space-y-2.5">
           {sensors.map((s, i) => {

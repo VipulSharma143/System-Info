@@ -189,6 +189,18 @@ finally { try { Directory.Delete(dir, true); } catch { } }
     failures += nf; checks += nc;
 }
 {
+    var (nf, nc) = BatteryHistoryTests.Run();
+    failures += nf; checks += nc;
+}
+{
+    var (nf, nc) = DataLifecycleTests.Run();
+    failures += nf; checks += nc;
+}
+{
+    var (nf, nc) = HardwareSensorTests.Run();
+    failures += nf; checks += nc;
+}
+{
     var (nf, nc) = HostSnapshotTests.Run();
     failures += nf; checks += nc;
 }

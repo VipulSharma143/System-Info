@@ -178,12 +178,12 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
       {show('ram', <RamView active={activeSection === 'ram'} />)}
       {show('gpu', <GpuView active={activeSection === 'gpu'} />)}
       {show('overlay', <OverlayView active={activeSection === 'overlay'} />)}
-      {show('storage', <StorageView disks={data.disks} />)}
+      {show('storage', <StorageView disks={data.disks} active={activeSection === 'storage'} />)}
       {show('network', <NetworkView network={data.network} history={history} />)}
-      {show('battery', <BatteryView battery={data.battery} chargeHistory={history.charge} />)}
+      {show('battery', <BatteryView battery={data.battery} chargeHistory={history.charge} active={activeSection === 'battery'} />)}
       {show(
         'system',
-        <SystemView info={info} infoError={infoError} onRetryInfo={retryInfo} data={data} gpus={gpus} gpuError={gpuError} />
+        <SystemView info={info} infoError={infoError} onRetryInfo={retryInfo} data={data} gpus={gpus} gpuError={gpuError} active={activeSection === 'system'} />
       )}
       {show('updates', <UpdatesView updater={updater} />)}
 
