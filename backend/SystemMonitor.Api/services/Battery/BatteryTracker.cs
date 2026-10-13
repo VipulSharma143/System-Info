@@ -40,7 +40,11 @@ public sealed record BatteryTrackerState(
 /// </summary>
 public sealed class BatteryTracker
 {
-    public const int MinConfirmSec = 45;
+    /// <summary>
+    /// How long a change of power source must last to count. The battery is read every 10 s, so 15 s means two readings agree: a
+    /// charger connected for half a minute is recorded, a contact that flickers for a few seconds is not.
+    /// </summary>
+    public const int MinConfirmSec = 15;
     public static readonly TimeSpan GapThreshold = TimeSpan.FromMinutes(5);
     public const string Charge = "charge";
     public const string Discharge = "discharge";

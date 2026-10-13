@@ -25,7 +25,7 @@ public static class SnapshotLogger
         try
         {
             var timestamp = DateTime.UtcNow;
-            _battery?.Observe(timestamp, battery);   // plug-in / unplug sessions; ignores a desktop or an unknown status
+            _battery?.Observe(battery);   // plug-in / unplug sessions (the service uses its own clock, which is the same UTC clock in production)
 
             var networkArray = new JsonArray();
             foreach (var n in network ?? [])

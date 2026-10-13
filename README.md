@@ -134,7 +134,7 @@ System Info/
 │   │   │                            # Overlay (services/Overlay/): OverlayService (hosts the native engine), OverlayModels, GpuEngineMapper
 │   │   │                            #   (live GPU numbers for the GPU page come from the same engine snapshot)
 │   │   │                            # Memory: MemoryHardwareService, MemoryHealthReader, MemoryMapping, RamDetailsReader
-│   │   │                            # History: SystemMonitorBackgroundService, SnapshotLogger, LocalJsonSnapshotStore, DataRetention(+Service), DataResetService, Battery/BatteryTracker + BatteryHistoryService,
+│   │   │                            # History: SystemMonitorBackgroundService, SnapshotLogger, LocalJsonSnapshotStore, DataResetService, DataUsageService, Battery/BatteryTracker + BatteryHistoryService,
 │   │   │                            #   AnalyticsService; paths: AppDataPath
 │   │   ├── interface/               # ISystemInfoProvider, ISnapshotStore
 │   │   └── Native/                  # NativeInterop.cs (P/Invoke), NativeKernels.cs (safe span wrappers)
@@ -208,7 +208,8 @@ All endpoints are served by the .NET backend on `:5132` (or the port the fronten
 | `GET` | `/api/system/ram` | Runtime RAM in bytes (`RamDetails`): total/used/available, free/cached/buffers, swap or page file, commit. A value the OS doesn't report is `null`, never 0; `source` says whether it came from the native engine or the managed fallback |
 | `GET` | `/api/system/memory/hardware` | Physical RAM: platform summary + one entry per populated module (SMBIOS Type 16/17). `available: false` (still HTTP 200) when the firmware tables can't be read — on Linux `/sys/firmware/dmi/tables/DMI` is root-only. Cached, since DIMMs don't change at runtime |
 | `GET` | `/api/system/sensors` | Drive, motherboard and memory-module sensors (`HardwareSensors`): `drives`, `board`, `memory`, each a list of devices with temperature / voltage / fan sensors (plus the drive's high and critical limits), or a `note` saying why there are none. Linux reads `/sys/class/hwmon`; Windows uses LibreHardwareMonitor. `ready: false` while the Windows library is still opening. Impossible readings (0 °C, 0 V) are dropped, never shown. |
-| `GET` | `/api/battery/history` | Charge and discharge sessions of the last 7 days (`BatteryHistory`). |
+| `GET` | `/api/battery/history` | Charge and discharge sessions of the last 7 days plus `watching`, the latest battery reading the recorder received (`BatteryHistory`). |
+| `GET` | `/api/data/usage` | Disk space the saved data uses (`DataUsage`): total, split into history / battery / cache / other, days of history with the oldest and newest day, and the data folder. |
 | `POST` | `/api/data/reset` | Deletes the chosen saved data (`cpu`, `gpu`, `battery`, `network`, `cache`, or `all`); needs the `X-SystemInfo-Action` header. The frontend restarts the app afterwards. |
 | `GET` | `/api/system/memory/health` | ECC capability / enabled / corrected+uncorrected error counters (Linux EDAC). Each is `null` unless the platform actually reports it |
 | `GET` | `/api/system/disk` | Disk capacity/usage |
@@ -315,7 +316,7 @@ npx tauri signer generate -w ~/.tauri/systeminfo.key     # choose a password (or
 | Windows (packaged) | `%LOCALAPPDATA%\SystemInfo\data` |
 | Linux (packaged) | `~/.local/share/SystemInfo/data` |
 
-**7-day limit.** `DataRetentionService` deletes day files older than today plus the six days before it (`DataRetention.FirstKeptDay`), 30 s after start and then every 6 hours; empty month and year folders go with them. The battery sessions in `data/battery/sessions.json` (`BatteryHistoryService`, fed by `SnapshotLogger` from the same battery readings) follow the same limit. **Reset data** (System page → "Saved data", `POST /api/data/reset`, which requires the `X-SystemInfo-Action` header) removes CPU, network or battery fields from the saved lines, deletes cached files, or everything, then the frontend restarts the app through the Tauri process plugin. `GET /api/battery/history` feeds the "Charging history" panel on the Battery page.
+**Retention.** The snapshot history is never deleted automatically: it grows until the person resets it. The one exception is the battery sessions in `data/battery/sessions.json` (`BatteryHistoryService`, fed by `SnapshotLogger` from the same battery readings), which keep only the last 7 days. `GET /api/data/usage` (`DataUsageService`, plain file-size arithmetic, the same on Windows and Linux) feeds the System page's "Saved data" panel with the space used, a split by kind, the days of history and the data folder. **Reset data** (System page → "Saved data", `POST /api/data/reset`, which requires the `X-SystemInfo-Action` header) removes CPU, network or battery fields from the saved lines, deletes cached files, or everything, then the frontend restarts the app through the Tauri process plugin. `GET /api/battery/history` feeds the "Charging history" panel on the Battery page.
 
 `AnalyticsService` reads these `.jsonl` files directly for the requested date range; malformed lines are logged and skipped rather than crashing the request, and an "all time" query is clamped to the oldest day that actually has data. Results are cached for 5 seconds. There is currently **no retention/TTL policy** — the snapshot directory grows unbounded over time (a known, documented trade-off, not a bug).
 

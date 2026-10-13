@@ -18,9 +18,20 @@ export interface BatterySession {
   open: boolean;
 }
 
+/** The latest battery reading the recorder received, so the page can show that recording works (or why it cannot). */
+export interface BatteryWatching {
+  status: string | null;
+  percent: number | null;
+  readingUtc: string;
+  /** False when the status ("Unknown") does not say whether the charger is connected. */
+  understood: boolean;
+}
+
 export interface BatteryHistory {
   hasBattery: boolean;
   retentionDays: number;
   generatedAtUtc: string;
   sessions: BatterySession[];
+  /** Null until the recorder has received its first battery reading. */
+  watching: BatteryWatching | null;
 }

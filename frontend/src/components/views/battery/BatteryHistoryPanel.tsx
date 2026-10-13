@@ -5,9 +5,19 @@ import type { BatteryHistory, BatterySession } from '../../../types/batteryHisto
 import Panel from '../../common/Panel';
 import { StatTile, TileGrid } from '../../common/Primitives';
 import { Callout, EmptyState, LoadingState } from '../../common/States';
-import { formatDuration, formatWhen, newestFirst, percentChange, ratePerHour, sessionNotes, summarize } from './historyModel';
+import { describeWatching, formatDuration, formatWhen, newestFirst, percentChange, ratePerHour, sessionNotes, summarize } from './historyModel';
 
-const POLL_MS = 30_000;
+const POLL_MS = 10_000;
+
+/** One line saying whether the recorder is working, so "nothing recorded yet" is never a mystery. */
+function WatchingLine({ status }: { status: ReturnType<typeof describeWatching> }) {
+  return (
+    <p className={`flex items-start gap-2 text-[12px] leading-relaxed ${status.tone === 'ok' ? 'text-muted' : 'text-warn'}`}>
+      <span aria-hidden className={`mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full ${status.tone === 'ok' ? 'bg-[var(--hue-power)]' : 'bg-current'}`} />
+      <span>{status.text}</span>
+    </p>
+  );
+}
 
 function SessionRow({ session }: { session: BatterySession }) {
   const charging = session.kind === 'charge';
@@ -59,6 +69,7 @@ function BatteryHistoryPanel({ active }: { active: boolean }) {
   }
 
   const { sessions, retentionDays } = history.data;
+  const status = describeWatching(history.data.watching, Date.parse(history.data.generatedAtUtc));
   if (sessions.length === 0) {
     return (
       <Panel title="Charging history" icon={History} hue="power">
@@ -68,6 +79,7 @@ function BatteryHistoryPanel({ active }: { active: boolean }) {
           title="Nothing recorded yet"
           description={`System Info records every time the charger is connected or removed while it is running, and keeps the last ${retentionDays} days.`}
         />
+        <WatchingLine status={status} />
       </Panel>
     );
   }
@@ -93,7 +105,8 @@ function BatteryHistoryPanel({ active }: { active: boolean }) {
         />
       </TileGrid>
       <Panel title="Charging history" icon={History} hue="power" meta={`Last ${retentionDays} days`}>
-        <ul className="divide-y divide-line">
+        <WatchingLine status={status} />
+        <ul className="mt-2 divide-y divide-line">
           {newestFirst(sessions).map((s) => <SessionRow key={`${s.kind}-${s.startUtc}`} session={s} />)}
         </ul>
       </Panel>

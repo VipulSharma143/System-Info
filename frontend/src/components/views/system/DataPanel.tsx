@@ -1,14 +1,21 @@
 import { memo, useRef, useState } from 'react';
 import { Database, Trash2 } from 'lucide-react';
+import { useJsonResource } from '../../../hooks/useJsonResource';
+import { fileCount, formatBytes, historyRange, sharePercent } from '../../../lib/dataUsage';
+import type { DataUsage } from '../../../types/dataUsage';
 import { buildRequest, DATA_CATEGORIES, type DataCategory } from '../../../lib/dataReset';
 import { resetData, restartApp } from '../../../lib/dataResetClient';
 import Button from '../../common/Button';
 import Panel from '../../common/Panel';
+import UsageBar from '../../common/UsageBar';
 
-const RETENTION_DAYS = 7;
+const BATTERY_DAYS = 7;
+const USAGE_POLL_MS = 15_000;
 
-/** System page: where the saved history lives, and the button that deletes it (after asking which parts). */
-function DataPanel() {
+/** System page: how much space the saved data uses, where it lives, and the one button that deletes it (after asking which parts). */
+function DataPanel({ active }: { active: boolean }) {
+  const usage = useJsonResource<DataUsage>('/api/data/usage', { active, intervalMs: USAGE_POLL_MS });
+  const sizes = usage.data;
   const dialog = useRef<HTMLDialogElement>(null);
   const [selected, setSelected] = useState<ReadonlySet<DataCategory>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -39,9 +46,31 @@ function DataPanel() {
       action={<Button variant="danger" size="sm" icon={Trash2} onClick={open}>Reset data…</Button>}
     >
       <p className="text-[13px] leading-relaxed text-muted">
-        System Info keeps its history in local files on this computer and deletes anything older than {RETENTION_DAYS} days automatically.
-        You can also delete it yourself: you will be asked which data, and the app restarts afterwards.
+        System Info keeps its CPU, network and battery history in local files on this computer. It keeps growing until you delete it here;
+        only the battery charging history is limited, to the last {BATTERY_DAYS} days. You will be asked which data to delete, and the app restarts afterwards.
       </p>
+
+      {sizes ? (
+        <div className="mt-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <span className="text-[12px] text-muted">Space used by saved data</span>
+            <span className="num text-[15px] font-semibold text-ink">{formatBytes(sizes.totalBytes)}</span>
+          </div>
+          <div className="mt-0.5 text-[12px] text-faint">History covers {historyRange(sizes)}</div>
+          <ul className="mt-3 space-y-2.5">
+            {sizes.parts.map((p) => (
+              <li key={p.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 text-[12px]">
+                <span className="truncate text-muted">{p.label}</span>
+                <span className="num text-right text-ink">{formatBytes(p.bytes)}<span className="ml-1.5 text-faint">· {fileCount(p.files)}</span></span>
+                <div className="col-span-2"><UsageBar percent={sharePercent(p, sizes.totalBytes)} compact hue="sys" hideValue /></div>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 break-all text-[11px] text-faint">Stored in <span className="select-all">{sizes.path}</span></div>
+        </div>
+      ) : usage.error ? (
+        <p className="mt-3 text-[12px] text-muted">The size of the saved data could not be read right now.</p>
+      ) : null}
 
       <dialog
         ref={dialog}

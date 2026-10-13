@@ -52,9 +52,17 @@ static class BatteryHistoryTests
         // ---- a charger that flickers for under the confirmation time does not split the session
         t = new BatteryTracker();
         for (var i = 0; i < 20; i++) t.Observe(T0.AddSeconds(i * 10), false, 70, false);
-        for (var i = 0; i < 3; i++) t.Observe(T0.AddSeconds(200 + i * 10), true, 70, false);                 // 20 s on the charger
-        for (var i = 0; i < 20; i++) t.Observe(T0.AddSeconds(230 + i * 10), false, 70, false);
-        Check(t.Sessions().Count == 1 && t.Sessions()[0].Kind == "discharge", "a 20 s charger flicker is ignored");
+        for (var i = 0; i < 2; i++) t.Observe(T0.AddSeconds(200 + i * 10), true, 70, false);                 // seen for 10 s only
+        for (var i = 0; i < 20; i++) t.Observe(T0.AddSeconds(220 + i * 10), false, 70, false);
+        Check(t.Sessions().Count == 1 && t.Sessions()[0].Kind == "discharge", "a charger that is seen for only 10 s is ignored as a flicker");
+
+        // ---- but a short real plug-in (a quick test with the charger) is recorded
+        t = new BatteryTracker();
+        for (var i = 0; i < 6; i++) t.Observe(T0.AddSeconds(i * 10), false, 70, false);                      // 60 s on battery
+        for (var i = 0; i < 4; i++) t.Observe(T0.AddSeconds(60 + i * 10), true, 71, false);                  // charger for 30 s
+        for (var i = 0; i < 4; i++) t.Observe(T0.AddSeconds(90 + i * 10), false, 71, false);                 // unplugged again
+        ss = t.Sessions();
+        Check(ss.Count == 3 && ss[1].Kind == "charge" && !ss[1].Open && ss[1].DurationSec == 30 && ss[2].Kind == "discharge" && ss[2].Open, "a charger connected for 30 s and removed again is recorded as a charge session");
 
         // ---- sampling stops (app closed or PC asleep) and the power source is the same afterwards: one session, gap recorded
         t = new BatteryTracker();
@@ -84,7 +92,7 @@ static class BatteryHistoryTests
         t.Restore(new BatteryTrackerState([
             new BatterySession("discharge", T0.AddDays(-9), T0.AddDays(-8), 90, 20, 3600, 0, true, true, false, false),
             new BatterySession("charge", T0.AddDays(-3), T0.AddDays(-2), 20, 100, 3600, 0, true, true, true, false)], null, null, null));
-        Check(t.Prune(DataRetention.FirstKeptDay(T0)) == 1 && t.Sessions().Count == 1 && t.Sessions()[0].Kind == "charge", "a session that ended 8 days ago is dropped, one from 2 days ago is kept");
+        Check(t.Prune(BatteryHistoryService.FirstKeptDay(T0)) == 1 && t.Sessions().Count == 1 && t.Sessions()[0].Kind == "charge", "a session that ended 8 days ago is dropped, one from 2 days ago is kept");
 
         // ---- save / restore keeps an open session across a restart
         t = new BatteryTracker();

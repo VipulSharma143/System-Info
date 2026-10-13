@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using SystemMonitor.Api.Interface;
 
 namespace SystemMonitor.Api.Services;
@@ -8,18 +10,29 @@ namespace SystemMonitor.Api.Services;
 /// </summary>
 public sealed class SystemMonitorBackgroundService : BackgroundService
 {
-    private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan DefaultSampleInterval = TimeSpan.FromSeconds(1);
 
     // The cache is filled from the first sample so the UI has CPU data immediately. History
     // logging starts later so the backend's own JIT/Kestrel start-up load is not recorded as
     // system load.
-    private static readonly long LoggingWarmUpMs = 3_000;
+    private static readonly long DefaultLoggingWarmUpMs = 3_000;
 
     // Batching interval for disk writes (see LocalJsonSnapshotStore).
     private static readonly long FlushIntervalMs = 5_000;
 
     // Battery changes slowly and, on Windows, costs a driver IOCTL: refresh it less often.
-    private static readonly long BatteryRefreshMs = 10_000;
+    private static readonly long DefaultBatteryRefreshMs = 10_000;
+
+    private readonly TimeSpan _sampleInterval;
+    private readonly long _loggingWarmUpMs;
+    private readonly long _batteryRefreshMs;
+
+    /// <summary>
+    /// Whether the battery should be read now. <paramref name="lastMs"/> is null until the first read, which is due at once.
+    /// (An earlier version started the "last read" at long.MinValue, and now − long.MinValue overflows to a negative number, so the
+    /// check was never true: the battery was never read, never reached the history, and nothing was recorded.)
+    /// </summary>
+    public static bool BatteryReadDue(long nowMs, long? lastMs, long refreshMs) => lastMs is null || nowMs - lastMs.Value >= refreshMs;
 
     private readonly ISystemInfoProvider _provider;
     private readonly ILogger<SystemMonitorBackgroundService> _log;
@@ -28,10 +41,15 @@ public sealed class SystemMonitorBackgroundService : BackgroundService
     private List<NetworkInfo>? _network;
     private string? _lastError;
 
-    public SystemMonitorBackgroundService(ISystemInfoProvider provider, ILogger<SystemMonitorBackgroundService> log)
+    /// <param name="sampleInterval">How often CPU and network are sampled (default 1 s). The three optional timings exist so a test can run the real loop in seconds.</param>
+    public SystemMonitorBackgroundService(ISystemInfoProvider provider, ILogger<SystemMonitorBackgroundService> log,
+        TimeSpan? sampleInterval = null, long? loggingWarmUpMs = null, long? batteryRefreshMs = null)
     {
         _provider = provider;
         _log = log;
+        _sampleInterval = sampleInterval ?? DefaultSampleInterval;
+        _loggingWarmUpMs = loggingWarmUpMs ?? DefaultLoggingWarmUpMs;
+        _batteryRefreshMs = batteryRefreshMs ?? DefaultBatteryRefreshMs;
     }
 
     public CpuInfo? GetCachedCpu() { lock (_lock) return _cpu; }
@@ -43,10 +61,12 @@ public sealed class SystemMonitorBackgroundService : BackgroundService
         // Never hold up host start-up with the first sample.
         await Task.Yield();
 
-        long startedAt = Environment.TickCount64, lastFlush = startedAt, lastBattery = long.MinValue;
+        long startedAt = Environment.TickCount64, lastFlush = startedAt;
+        long? lastBattery = null;
+        string? lastBatteryError = null;
         BatteryInfo? battery = null;
         bool primed = false;
-        using var timer = new PeriodicTimer(SampleInterval);
+        using var timer = new PeriodicTimer(_sampleInterval);
 
         try
         {
@@ -70,11 +90,16 @@ public sealed class SystemMonitorBackgroundService : BackgroundService
                     if (!primed) { primed = true; continue; }
 
                     var now = Environment.TickCount64;
-                    if (now - startedAt >= LoggingWarmUpMs)
+                    if (now - startedAt >= _loggingWarmUpMs)
                     {
-                        if (now - lastBattery >= BatteryRefreshMs)
+                        if (BatteryReadDue(now, lastBattery, _batteryRefreshMs))
                         {
-                            battery = _provider.GetBattery();
+                            // Its own guard: a battery driver error must not stop the CPU and network history, and is retried at the next refresh.
+                            try { battery = _provider.GetBattery(); }
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                if (lastBatteryError != ex.Message) { lastBatteryError = ex.Message; _log.LogWarning(ex, "Reading the battery failed; will keep retrying."); }
+                            }
                             lastBattery = now;
                         }
                         SnapshotLogger.Append(cpu, network, battery);

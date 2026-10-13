@@ -193,6 +193,10 @@ finally { try { Directory.Delete(dir, true); } catch { } }
     failures += nf; checks += nc;
 }
 {
+    var (nf, nc) = BatteryRecorderTests.Run();
+    failures += nf; checks += nc;
+}
+{
     var (nf, nc) = DataLifecycleTests.Run();
     failures += nf; checks += nc;
 }

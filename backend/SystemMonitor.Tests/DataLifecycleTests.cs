@@ -31,44 +31,17 @@ static class DataLifecycleTests
         void Check(bool ok, string what) { checks++; if (!ok) { failures++; Console.WriteLine($"FAIL: {what}"); } }
         string Tmp() => Path.Combine(Path.GetTempPath(), "sysinfo-data-" + Guid.NewGuid().ToString("N"));
 
-        // ---- which days are kept
-        Check(DataRetention.FirstKeptDay(Now) == new DateTime(2026, 10, 5), "7 days = today plus the previous 6");
-        Check(DataRetention.DayOf(DayFile("/d", new DateTime(2026, 3, 9))) == new DateTime(2026, 3, 9), "a day file's date is read from its path");
-        Check(DataRetention.DayOf("/d/snapshots/readme.txt") is null && DataRetention.DayOf("/d/snapshots/2026/13/40.jsonl") is null, "files that do not follow the layout have no date");
-
-        // ---- pruning old day files (and only those)
+        // ---- the regular history is never deleted automatically: it keeps growing until the person resets it
         var dir = Tmp();
         try
         {
-            for (var d = new DateTime(2026, 9, 28); d <= Now.Date; d = d.AddDays(1)) Put(dir, d, Line(d.AddHours(1)));
-            File.WriteAllText(Path.Combine(dir, "snapshots", "notes.txt"), "keep me");
+            var ancient = new DateTime(2026, 1, 5);
+            Put(dir, ancient, Line(ancient.AddHours(1)));
+            Put(dir, ancient.AddDays(30), Line(ancient.AddDays(30).AddHours(1)));
             var store = new LocalJsonSnapshotStore(dir);
-            var removed = store.Prune(Now);
-            var left = Directory.EnumerateFiles(Path.Combine(dir, "snapshots"), "*.jsonl", SearchOption.AllDirectories).Select(f => DataRetention.DayOf(f)!.Value).OrderBy(x => x).ToList();
-            Check(removed == 7 && left.Count == 7 && left[0] == new DateTime(2026, 10, 5) && left[^1] == Now.Date, "pruning removes exactly the days before the window (28 Sep - 4 Oct) and keeps 5-11 Oct");
-            Check(!Directory.Exists(Path.Combine(dir, "snapshots", "2026", "09")), "the emptied month folder is removed");
-            Check(File.Exists(Path.Combine(dir, "snapshots", "notes.txt")), "a file the app did not write is left alone");
-            Check(store.Prune(Now) == 0, "pruning twice removes nothing more");
-
-            // The store remembers which folders exist. After one is deleted, writing to it again must still work.
-            var old = new DateTime(2026, 9, 30, 10, 0, 0, DateTimeKind.Utc);
-            store.AppendAsync(new SystemSnapshot(old, Line(old))).GetAwaiter().GetResult(); store.Flush();
-            store.Prune(Now);
-            store.AppendAsync(new SystemSnapshot(old, Line(old))).GetAwaiter().GetResult(); store.Flush();
-            Check(File.Exists(DayFile(dir, old)), "after its folder was pruned the store can create it again (no stuck writes)");
-        }
-        finally { try { Directory.Delete(dir, true); } catch { } }
-
-        // ---- pending lines for a day that is now too old are not written back
-        dir = Tmp();
-        try
-        {
-            var store = new LocalJsonSnapshotStore(dir);
-            var old = new DateTime(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
-            store.AppendAsync(new SystemSnapshot(old, Line(old))).GetAwaiter().GetResult();   // buffered, not flushed
-            store.Prune(Now);
-            store.Flush();
-            Check(!File.Exists(DayFile(dir, old)), "buffered lines of an expired day are discarded, not resurrected by the next flush");
+            store.AppendAsync(new SystemSnapshot(Now, Line(Now))).GetAwaiter().GetResult(); store.Flush();
+            Check(File.Exists(DayFile(dir, ancient)) && File.Exists(DayFile(dir, ancient.AddDays(30))) && File.Exists(DayFile(dir, Now)), "months-old history files are still there after new readings are written");
+            Check(typeof(ISnapshotStore).GetMethods().All(m => !m.Name.Contains("Prune", StringComparison.OrdinalIgnoreCase)), "the store has no automatic deletion at all");
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
 
@@ -151,6 +124,35 @@ static class DataLifecycleTests
             Check(!r.Ok && r.Cleared.Count == 0, "an invalid request deletes nothing");
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
+
+        // ---- how much space the saved data uses
+        dir = Tmp();
+        try
+        {
+            void Bytes(string rel, int n) { var f = Path.Combine(dir, rel); Directory.CreateDirectory(Path.GetDirectoryName(f)!); File.WriteAllBytes(f, new byte[n]); }
+            Bytes("snapshots/2026/10/10.jsonl", 1000); Bytes("snapshots/2026/10/11.jsonl", 2500); Bytes("snapshots/2026/09/30.jsonl", 500);
+            Bytes("snapshots/2026/10/stray.jsonl", 40);          // does not follow the day layout: counted in bytes, not as a day
+            Bytes("battery/sessions.json", 300);
+            Bytes("cache/gpu-hardware.json", 100); Bytes("cache/dashboard.json", 200);
+            Bytes("sensor-driver-install.txt", 7);
+            var usage = new DataUsageService(dir).Read();
+            Check(usage.Parts.Single(p => p.Id == "history").Bytes == 4040 && usage.Parts.Single(p => p.Id == "history").Files == 4, "history bytes and files are counted");
+            Check(usage.Parts.Single(p => p.Id == "battery").Bytes == 300 && usage.Parts.Single(p => p.Id == "cache").Bytes == 300 && usage.Parts.Single(p => p.Id == "cache").Files == 2, "battery history and cache are counted separately");
+            Check(usage.Parts.Single(p => p.Id == "other").Bytes == 7, "a file outside the known folders is shown as other, never lost from the total");
+            Check(usage.TotalBytes == 4647 && usage.TotalFiles == 8 && usage.TotalBytes == usage.Parts.Sum(p => p.Bytes), "the total is exactly the sum of the parts");
+            Check(usage.HistoryDays == 3 && usage.OldestDay == "2026-09-30" && usage.NewestDay == "2026-10-11", "days covered, oldest and newest come from the day files");
+            Check(usage.Path == Path.GetFullPath(dir), "the folder the data lives in is reported");
+            Check(new DataUsageService(dir).Read().TotalBytes == usage.TotalBytes, "reading twice gives the same answer (nothing is modified)");
+
+            var svc = new DataResetService(new LocalJsonSnapshotStore(dir), new BatteryHistoryService(dir, null, () => Now), dir);
+            svc.Reset(new DataResetRequest(null, true));
+            var after = new DataUsageService(dir).Read();
+            Check(after.Parts.Single(p => p.Id == "history").Bytes == 0 && after.HistoryDays == 0 && after.OldestDay is null && after.Parts.Single(p => p.Id == "other").Bytes == 7, "after reset everything is gone except the sensor-driver marker");
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+
+        var missing = new DataUsageService(Path.Combine(Path.GetTempPath(), "sysinfo-no-such-" + Guid.NewGuid().ToString("N"))).Read();
+        Check(missing.TotalBytes == 0 && missing.TotalFiles == 0 && missing.HistoryDays == 0 && missing.Parts.Count == 3, "a data folder that does not exist yet reports zero, not an error");
 
         return (failures, checks);
     }

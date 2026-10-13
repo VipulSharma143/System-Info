@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { formatDuration, formatWhen, newestFirst, percentChange, ratePerHour, sessionNotes, summarize } from '../src/components/views/battery/historyModel.ts';
-import type { BatterySession } from '../src/types/batteryHistory.ts';
+import { describeWatching, formatDuration, formatWhen, newestFirst, percentChange, ratePerHour, sessionNotes, STALE_AFTER_MS, summarize } from '../src/components/views/battery/historyModel.ts';
+import type { BatterySession, BatteryWatching } from '../src/types/batteryHistory.ts';
 
 const HOUR = 3600;
 const session = (over: Partial<BatterySession> = {}): BatterySession => ({
@@ -95,5 +95,35 @@ describe('formatWhen / newestFirst', () => {
     const input = [a, b];
     assert.deepEqual(newestFirst(input), [b, a]);
     assert.deepEqual(input, [a, b]);
+  });
+});
+
+const NOW = Date.parse('2026-10-13T08:00:00Z');
+const watching = (over: Partial<BatteryWatching> = {}): BatteryWatching => ({ status: 'Discharging', percent: 83, readingUtc: '2026-10-13T07:59:55Z', understood: true, ...over });
+
+describe('describeWatching', () => {
+  it('says it is waiting when no reading has arrived yet', () => {
+    const s = describeWatching(null, NOW);
+    assert.equal(s.tone, 'warn');
+    assert.match(s.text, /first battery reading/);
+  });
+  it('says what the battery is doing right now when recording works', () => {
+    assert.deepEqual(describeWatching(watching(), NOW), { tone: 'ok', text: 'Recording. Right now: on battery, 83%.' });
+    assert.match(describeWatching(watching({ status: 'Charging', percent: 40 }), NOW).text, /charging, 40%/);
+    assert.match(describeWatching(watching({ status: 'Fully Charged', percent: 100 }), NOW).text, /full, on the charger, 100%/);
+    assert.match(describeWatching(watching({ status: 'Not Charging', percent: 80 }), NOW).text, /plugged in, not charging/);
+    assert.equal(describeWatching(watching({ percent: null }), NOW).text, 'Recording. Right now: on battery.');
+  });
+  it('explains a status it cannot use instead of staying silent', () => {
+    const s = describeWatching(watching({ status: 'Unknown', understood: false }), NOW);
+    assert.equal(s.tone, 'warn');
+    assert.match(s.text, /"Unknown".*cannot record changes/);
+  });
+  it('says so when the readings stopped arriving', () => {
+    const old = new Date(NOW - STALE_AFTER_MS - 120_000).toISOString();
+    const s = describeWatching(watching({ readingUtc: old }), NOW);
+    assert.equal(s.tone, 'warn');
+    assert.match(s.text, /No battery reading for 3 min/);
+    assert.equal(describeWatching(watching({ readingUtc: new Date(NOW - 30_000).toISOString() }), NOW).tone, 'ok');
   });
 });

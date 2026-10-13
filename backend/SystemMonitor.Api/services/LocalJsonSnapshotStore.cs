@@ -74,18 +74,6 @@ public class LocalJsonSnapshotStore : ISnapshotStore
         }
     }
 
-    public int Prune(DateTime nowUtc)
-    {
-        lock (_lock)
-        {
-            var first = DataRetention.FirstKeptDay(nowUtc);
-            foreach (var file in _pending.Keys.Where(f => DataRetention.DayOf(f) is { } d && d < first).ToList()) _pending.Remove(file);
-            var removed = DataRetention.PruneSnapshotFiles(_rootDir, nowUtc);
-            if (removed > 0) _knownDirs.Clear();   // a folder that was just deleted must be created again if it is ever written to
-            return removed;
-        }
-    }
-
     public int ResetData(IReadOnlySet<string> fields, bool all)
     {
         lock (_lock)
@@ -133,11 +121,30 @@ public class LocalJsonSnapshotStore : ISnapshotStore
                 File.WriteAllLines(tmp, kept);
                 File.Move(tmp, file, overwrite: true);
             }
-            DataRetention.RemoveEmptyFolders(_rootDir);
+            RemoveEmptyFolders(_rootDir);
             _knownDirs.Clear();
             return changedLines;
         }
     }
+
+    // After a selective reset some day files are gone; remove the month and year folders that are left empty.
+    private static void RemoveEmptyFolders(string root)
+    {
+        if (!Directory.Exists(root)) return;
+        foreach (var yearDir in Directory.EnumerateDirectories(root).ToList())
+        {
+            foreach (var monthDir in Directory.EnumerateDirectories(yearDir).ToList())
+                if (!Directory.EnumerateFileSystemEntries(monthDir).Any()) TryDeleteFolder(monthDir);
+            if (!Directory.EnumerateFileSystemEntries(yearDir).Any()) TryDeleteFolder(yearDir);
+        }
+    }
+
+    private static void TryDeleteFolder(string dir)
+    {
+        try { Directory.Delete(dir); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* in use: leave it */ }
+    }
+
 
     public Task<IReadOnlyList<SystemSnapshot>> QueryAsync(
         DateTime from, DateTime to, CancellationToken cancellationToken = default)

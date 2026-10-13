@@ -1,4 +1,5 @@
 // /api/battery/history — the charge and discharge sessions of the last 7 days.
+// /api/data/usage      — how much disk space the saved data uses (see DataUsageService).
 // /api/data/reset      — deletes the kinds of saved data the person picked on the System page (see DataResetService).
 using SystemMonitor.Api.Services;
 
@@ -14,6 +15,9 @@ public static class DataEndpoints
     {
         app.MapGet("/api/battery/history", (BatteryHistoryService history) => Results.Ok(history.Read()))
             .WithName("GetBatteryHistory");
+
+        app.MapGet("/api/data/usage", (DataUsageService usage) => Results.Ok(usage.Read()))
+            .WithName("GetDataUsage");
 
         app.MapPost("/api/data/reset", async (HttpRequest request, DataResetService reset, CancellationToken ct) =>
             {

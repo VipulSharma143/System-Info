@@ -41,10 +41,11 @@
     <Compile Include="../SystemMonitor.Api/services/Sensors/LinuxHwmonReader.cs" Link="linked/LinuxHwmonReader.cs" />
     <Compile Include="../SystemMonitor.Api/services/Sensors/HardwareSensorService.cs" Link="linked/HardwareSensorService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Battery/BatteryTracker.cs" Link="linked/BatteryTracker.cs" />
+    <Compile Include="../SystemMonitor.Api/services/SnapshotLogger.cs" Link="linked/SnapshotLogger.cs" />
+    <Compile Include="../SystemMonitor.Api/services/SystemMonitorBackgroundService.cs" Link="linked/SystemMonitorBackgroundService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Battery/BatteryHistoryService.cs" Link="linked/BatteryHistoryService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataRetention.cs" Link="linked/DataRetention.cs" />
     <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataResetService.cs" Link="linked/DataResetService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataRetentionService.cs" Link="linked/DataRetentionService.cs" />
+    <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataUsageService.cs" Link="linked/DataUsageService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuDetailModels.cs" Link="linked/CpuDetailModels.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuDetailService.cs" Link="linked/CpuDetailService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlMatching.cs" Link="linked/NvmlMatching.cs" />

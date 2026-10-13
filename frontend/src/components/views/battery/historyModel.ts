@@ -1,4 +1,4 @@
-import type { BatterySession } from '../../../types/batteryHistory';
+import type { BatterySession, BatteryWatching } from '../../../types/batteryHistory';
 
 /*
   Everything the battery history screen derives from the recorded sessions. Pure functions of the data the backend returns:
@@ -99,3 +99,34 @@ export function formatWhen(iso: string, timeZone?: string, locale?: string): str
 /** Newest first, which is the order people read a history in. */
 export const newestFirst = (sessions: readonly BatterySession[]): BatterySession[] =>
   [...sessions].sort((a, b) => Date.parse(b.startUtc) - Date.parse(a.startUtc));
+
+/** No reading for this long means the recorder is not receiving the battery any more. */
+export const STALE_AFTER_MS = 60_000;
+
+export interface WatchingStatus {
+  /** `ok` = recording; `warn` = something the person should know about. */
+  tone: 'ok' | 'warn';
+  text: string;
+}
+
+const STATE_WORDS: Record<string, string> = {
+  discharging: 'on battery',
+  charging: 'charging',
+  'fully charged': 'full, on the charger',
+  full: 'full, on the charger',
+  'not charging': 'plugged in, not charging',
+};
+
+/** One plain sentence about whether the recorder is working, from the latest reading it received. */
+export function describeWatching(watching: BatteryWatching | null, nowMs: number): WatchingStatus {
+  if (!watching) return { tone: 'warn', text: 'Waiting for the first battery reading. It arrives a few seconds after System Info starts.' };
+  if (!watching.understood) {
+    return { tone: 'warn', text: `The battery reports its status as "${watching.status ?? 'unknown'}", so System Info cannot tell whether the charger is connected and cannot record changes.` };
+  }
+  const age = nowMs - Date.parse(watching.readingUtc);
+  if (Number.isFinite(age) && age > STALE_AFTER_MS) {
+    return { tone: 'warn', text: `No battery reading for ${formatDuration(age / 1000)}. Recording resumes when readings do.` };
+  }
+  const state = STATE_WORDS[(watching.status ?? '').trim().toLowerCase()] ?? (watching.status ?? 'unknown').toLowerCase();
+  return { tone: 'ok', text: `Recording. Right now: ${state}${watching.percent !== null ? `, ${watching.percent}%` : ''}.` };
+}

@@ -15,7 +15,7 @@ public sealed record DataResetResult(
     [property: JsonPropertyName("message")] string Message);
 
 /// <summary>
-/// The "reset data" action behind the System page button. What each choice deletes (and nothing else is touched):
+/// The "reset data" action behind the System page button, the one place saved history is deleted (it otherwise keeps growing). What each choice deletes (and nothing else is touched):
 ///   cpu      the saved CPU-usage history in the daily snapshot files
 ///   network  the saved network-speed history in the same files
 ///   battery  the saved battery history in those files, and the charge/discharge sessions file

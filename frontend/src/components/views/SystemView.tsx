@@ -59,7 +59,7 @@ function SystemView({ info, infoError, onRetryInfo, data, gpus, gpuError, active
       <GpuPanels gpus={gpus} error={gpuError} />
       <BoardSensorsPanel active={active} />
       <ApplicationPanel info={info} drives={data.disks.length} interfaces={data.network.length} />
-      <DataPanel />
+      <DataPanel active={active} />
     </ViewContainer>
   );
 }

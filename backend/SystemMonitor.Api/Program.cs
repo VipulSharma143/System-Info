@@ -8,13 +8,13 @@ var dataDir = AppDataPath.ResolveAndEnsureCreated();
 Console.WriteLine($"[Startup] Local data directory: {dataDir}");
 var snapshotStore = new LocalJsonSnapshotStore(dataDir);
 builder.Services.AddSingleton<ISnapshotStore>(snapshotStore);
-// Battery plug-in / unplug sessions (local JSON, 7 days), the 7-day limit on all saved history, and the "reset data" action.
-var batteryHistory = new BatteryHistoryService(dataDir);
+// Battery plug-in / unplug sessions (local JSON, last 7 days only), the saved-data size readout, and the "reset data" action.
+var batteryHistory = new BatteryHistoryService(dataDir, info: message => Console.WriteLine($"[BatteryHistory] {message}"));
 SnapshotLogger.Initialize(snapshotStore, batteryHistory);
 builder.Services.AddSingleton(_ => batteryHistory);   // factory registration, so the container disposes it (a final save) at shutdown
 builder.Services.AddSingleton(sp => new DataResetService(
     sp.GetRequiredService<ISnapshotStore>(), sp.GetRequiredService<BatteryHistoryService>(), dataDir, sp.GetRequiredService<ILogger<DataResetService>>()));
-builder.Services.AddHostedService<DataRetentionService>();
+builder.Services.AddSingleton(new DataUsageService(dataDir));
 
 builder.Services.AddSingleton<HostSnapshotService>();
 builder.Services.AddSingleton<HardwareSensorService>();
