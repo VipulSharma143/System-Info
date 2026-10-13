@@ -22,5 +22,12 @@ public interface ISnapshotStore
     /// everything when <paramref name="all"/> is true, and discards anything still buffered so it cannot be written back.
     /// Returns the number of lines changed or files deleted.
     /// </summary>
+
+    /// <summary>
+    /// Deletes snapshot day files older than the configured retention period.
+    /// Returns the number of deleted files.
+    /// </summary>
+    int Prune(DateTime utcNow) => 0;
+
     int ResetData(IReadOnlySet<string> fields, bool all) => 0;
 }

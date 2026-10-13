@@ -45,6 +45,7 @@
     <Compile Include="../SystemMonitor.Api/services/SystemMonitorBackgroundService.cs" Link="linked/SystemMonitorBackgroundService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Battery/BatteryHistoryService.cs" Link="linked/BatteryHistoryService.cs" />
     <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataResetService.cs" Link="linked/DataResetService.cs" />
+    <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataRetention.cs" Link="linked/DataRetention.cs" />
     <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataUsageService.cs" Link="linked/DataUsageService.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuDetailModels.cs" Link="linked/CpuDetailModels.cs" />
     <Compile Include="../SystemMonitor.Api/services/Cpu/CpuDetailService.cs" Link="linked/CpuDetailService.cs" />

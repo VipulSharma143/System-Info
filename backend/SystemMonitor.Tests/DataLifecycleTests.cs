@@ -31,7 +31,7 @@ static class DataLifecycleTests
         void Check(bool ok, string what) { checks++; if (!ok) { failures++; Console.WriteLine($"FAIL: {what}"); } }
         string Tmp() => Path.Combine(Path.GetTempPath(), "sysinfo-data-" + Guid.NewGuid().ToString("N"));
 
-        // ---- the regular history is never deleted automatically: it keeps growing until the person resets it
+        // ---- regular writes preserve history; explicit pruning applies the seven-day retention window
         var dir = Tmp();
         try
         {
@@ -41,7 +41,8 @@ static class DataLifecycleTests
             var store = new LocalJsonSnapshotStore(dir);
             store.AppendAsync(new SystemSnapshot(Now, Line(Now))).GetAwaiter().GetResult(); store.Flush();
             Check(File.Exists(DayFile(dir, ancient)) && File.Exists(DayFile(dir, ancient.AddDays(30))) && File.Exists(DayFile(dir, Now)), "months-old history files are still there after new readings are written");
-            Check(typeof(ISnapshotStore).GetMethods().All(m => !m.Name.Contains("Prune", StringComparison.OrdinalIgnoreCase)), "the store has no automatic deletion at all");
+            Check(store.Prune(Now) == 2, "explicit pruning deletes day files older than the seven-day retention window");
+            Check(!File.Exists(DayFile(dir, ancient)) && !File.Exists(DayFile(dir, ancient.AddDays(30))) && File.Exists(DayFile(dir, Now)), "pruning keeps recent history and removes expired history");
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
 
