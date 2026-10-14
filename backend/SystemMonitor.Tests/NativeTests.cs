@@ -17,7 +17,7 @@ static class NativeTests
         // =====================================================================
         // Native kernels through the managed wrappers, vs plain C# references.
         // Needs the built native library: set SYSTEMINFO_NATIVE_DIR, or build it
-        // under native/build*/. Skipped (loudly) if it cannot be found; CI builds it first.
+        // under Engine/Cpp/build*/. Skipped (loudly) if it cannot be found; CI builds it first.
         // =====================================================================
         static string? FindLibrary(string dir) =>
             !Directory.Exists(dir) ? null : Directory.EnumerateFiles(dir, "*systemmonitor_native*", SearchOption.AllDirectories)
@@ -27,13 +27,16 @@ static class NativeTests
         var configured = Environment.GetEnvironmentVariable("SYSTEMINFO_NATIVE_DIR");
         if (configured is not null) libraryPath = FindLibrary(configured);
         for (var d = new DirectoryInfo(AppContext.BaseDirectory); d is not null && libraryPath is null; d = d.Parent)
-            foreach (var n in d.EnumerateDirectories("native"))
-                foreach (var b in n.EnumerateDirectories("build*"))
-                    libraryPath ??= FindLibrary(b.FullName);
+        {
+            var engine = new DirectoryInfo(Path.Combine(d.FullName, "Engine", "Cpp"));
+            if (!engine.Exists) continue;
+            foreach (var b in engine.EnumerateDirectories("build*"))
+                libraryPath ??= FindLibrary(b.FullName);
+        }
         LoadedLibrary = libraryPath;
         if (libraryPath is null)
         {
-            Console.WriteLine("SKIPPED native tests: native library not found (build native/ or set SYSTEMINFO_NATIVE_DIR).");
+            Console.WriteLine("SKIPPED native tests: native library not found (build Engine/Cpp/ or set SYSTEMINFO_NATIVE_DIR).");
             if (Environment.GetEnvironmentVariable("CI") == "true") { Console.WriteLine("FAIL: native library must exist in CI"); failures++; }
         }
         else

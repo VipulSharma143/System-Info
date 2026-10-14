@@ -13,43 +13,44 @@
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <Compile Include="../SystemMonitor.Api/services/AnalyticsService.cs" Link="linked/AnalyticsService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/LocalJsonSnapshotStore.cs" Link="linked/LocalJsonSnapshotStore.cs" />
-    <Compile Include="../SystemMonitor.Api/interface/ISnapshotStore.cs" Link="linked/ISnapshotStore.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Analytics/AnalyticsService.cs" Link="linked/AnalyticsService.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Storage/LocalJsonSnapshotStore.cs" Link="linked/LocalJsonSnapshotStore.cs" />
+    <Compile Include="../SystemMonitor.Api/Contracts/ISnapshotStore.cs" Link="linked/ISnapshotStore.cs" />
     <Compile Include="../SystemMonitor.Api/Native/NativeInterop.cs" Link="linked/NativeInterop.cs" />
     <Compile Include="../SystemMonitor.Api/Native/HostSnapshot.cs" Link="linked/HostSnapshot.cs" />
-    <Compile Include="../SystemMonitor.Api/services/HostSnapshotService.cs" Link="linked/HostSnapshotService.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Sampling/HostSnapshotService.cs" Link="linked/HostSnapshotService.cs" />
     <Compile Include="../SystemMonitor.Api/Native/NativeKernels.cs" Link="linked/NativeKernels.cs" />
-    <Compile Include="../SystemMonitor.Api/interface/ISystemInfoProvider.cs" Link="linked/ISystemInfoProvider.cs" />
-    <Compile Include="../SystemMonitor.Api/interface/MemoryModels.cs" Link="linked/MemoryModels.cs" />
-    <Compile Include="../SystemMonitor.Api/services/MemoryMapping.cs" Link="linked/MemoryMapping.cs" />
-    <Compile Include="../SystemMonitor.Api/services/MemoryHealthReader.cs" Link="linked/MemoryHealthReader.cs" />
-    <Compile Include="../SystemMonitor.Api/services/SystemInfoCache.cs" Link="linked/SystemInfoCache.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Gpu/GpuCounters.cs" Link="linked/GpuCounters.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Gpu/GpuMath.cs" Link="linked/GpuMath.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Gpu/GpuModels.cs" Link="linked/GpuModels.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Gpu/GpuService.cs" Link="linked/GpuService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Gpu/LinuxGpuCollector.cs" Link="linked/LinuxGpuCollector.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Overlay/OverlayModels.cs" Link="linked/OverlayModels.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Overlay/OverlayEngine.cs" Link="linked/OverlayEngine.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Overlay/OverlayService.cs" Link="linked/OverlayService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Overlay/GpuEngineMapper.cs" Link="linked/GpuEngineMapper.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Cpu/CpuSensorSelection.cs" Link="linked/CpuSensorSelection.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Gpu/GpuSensorSelection.cs" Link="linked/GpuSensorSelection.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Sensors/HardwareSensorModels.cs" Link="linked/HardwareSensorModels.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Sensors/HardwareSensorSelection.cs" Link="linked/HardwareSensorSelection.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Sensors/LinuxHwmonReader.cs" Link="linked/LinuxHwmonReader.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Sensors/HardwareSensorService.cs" Link="linked/HardwareSensorService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Battery/BatteryTracker.cs" Link="linked/BatteryTracker.cs" />
-    <Compile Include="../SystemMonitor.Api/services/SnapshotLogger.cs" Link="linked/SnapshotLogger.cs" />
-    <Compile Include="../SystemMonitor.Api/services/SystemMonitorBackgroundService.cs" Link="linked/SystemMonitorBackgroundService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Battery/BatteryHistoryService.cs" Link="linked/BatteryHistoryService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataResetService.cs" Link="linked/DataResetService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataRetention.cs" Link="linked/DataRetention.cs" />
-    <Compile Include="../SystemMonitor.Api/services/DataLifecycle/DataUsageService.cs" Link="linked/DataUsageService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Cpu/CpuDetailModels.cs" Link="linked/CpuDetailModels.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Cpu/CpuDetailService.cs" Link="linked/CpuDetailService.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Gpu/NvmlMatching.cs" Link="linked/NvmlMatching.cs" />
-    <Compile Include="../SystemMonitor.Api/services/Gpu/PciIds.cs" Link="linked/PciIds.cs" />
+    <Compile Include="../SystemMonitor.Api/Contracts/ISystemInfoProvider.cs" Link="linked/ISystemInfoProvider.cs" />
+    <Compile Include="../SystemMonitor.Api/Contracts/MemoryModels.cs" Link="linked/MemoryModels.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Memory/MemoryMapping.cs" Link="linked/MemoryMapping.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Memory/MemoryHealthReader.cs" Link="linked/MemoryHealthReader.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Storage/SystemInfoCache.cs" Link="linked/SystemInfoCache.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Gpu/GpuCounters.cs" Link="linked/GpuCounters.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Gpu/GpuMath.cs" Link="linked/GpuMath.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Gpu/GpuModels.cs" Link="linked/GpuModels.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Gpu/GpuService.cs" Link="linked/GpuService.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Gpu/LinuxGpuCollector.cs" Link="linked/LinuxGpuCollector.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Overlay/OverlayModels.cs" Link="linked/OverlayModels.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Overlay/OverlayEngine.cs" Link="linked/OverlayEngine.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Overlay/OverlayService.cs" Link="linked/OverlayService.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Overlay/GpuEngineMapper.cs" Link="linked/GpuEngineMapper.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Cpu/CpuSensorSelection.cs" Link="linked/CpuSensorSelection.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Gpu/GpuSensorSelection.cs" Link="linked/GpuSensorSelection.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Sensors/HardwareSensorModels.cs" Link="linked/HardwareSensorModels.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Sensors/HardwareSensorSelection.cs" Link="linked/HardwareSensorSelection.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Sensors/LinuxHwmonReader.cs" Link="linked/LinuxHwmonReader.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Sensors/HardwareSensorService.cs" Link="linked/HardwareSensorService.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Battery/BatteryTracker.cs" Link="linked/BatteryTracker.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Battery/BatteryReadCache.cs" Link="linked/BatteryReadCache.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Storage/SnapshotLogger.cs" Link="linked/SnapshotLogger.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Sampling/SystemMonitorBackgroundService.cs" Link="linked/SystemMonitorBackgroundService.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Battery/BatteryHistoryService.cs" Link="linked/BatteryHistoryService.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/DataLifecycle/DataResetService.cs" Link="linked/DataResetService.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/DataLifecycle/DataRetention.cs" Link="linked/DataRetention.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/DataLifecycle/DataUsageService.cs" Link="linked/DataUsageService.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Cpu/CpuDetailModels.cs" Link="linked/CpuDetailModels.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Cpu/CpuDetailService.cs" Link="linked/CpuDetailService.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Gpu/NvmlMatching.cs" Link="linked/NvmlMatching.cs" />
+    <Compile Include="../SystemMonitor.Api/Services/Gpu/PciIds.cs" Link="linked/PciIds.cs" />
   </ItemGroup>
 </Project>

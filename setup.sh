@@ -82,7 +82,7 @@ echo "Building native C++ engine..."
 if [ -f "$PROJECT_ROOT/backend/SystemMonitor.Api/libsystemmonitor_native.so" ]; then
     ok "Native library already built. (delete it and re-run to rebuild)"
 else
-    cd "$PROJECT_ROOT/native"
+    cd "$PROJECT_ROOT/Engine/Cpp"
     bash build.sh
     ok "Native engine built."
 fi
@@ -105,7 +105,7 @@ echo ""
 # No database account, connection string, or cloud cluster needed — all
 # history is stored on this machine. SYSTEM_INFO_DATA_DIR can override the
 # location; otherwise it resolves to the platform default (see
-# backend/SystemMonitor.Api/services/AppDataPath.cs).
+# backend/SystemMonitor.Api/Services/Storage/AppDataPath.cs).
 echo "Setting up local historical storage..."
 DATA_DIR="${SYSTEM_INFO_DATA_DIR:-$HOME/.local/share/SystemInfo/data}"
 mkdir -p "$DATA_DIR/snapshots"

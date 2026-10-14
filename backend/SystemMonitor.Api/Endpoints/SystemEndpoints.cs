@@ -58,9 +58,9 @@ return cached ?? new List<NetworkInfo>();
 })
 .WithName("GetNetworkUsage");
 
-app.MapGet("/api/system/battery", (ISystemInfoProvider provider) =>
+app.MapGet("/api/system/battery", (BatteryReadCache battery) =>
 {
-return provider.GetBattery();
+return battery.Get(BatteryReadCache.DashboardMaxAgeMs);
 })
 .WithName("GetBatteryUsage");
 

@@ -1,11 +1,11 @@
-import { memo } from 'react';
+import { memo, useId, useMemo, useState } from 'react';
 import { BatteryMedium, History, PlugZap, TriangleAlert } from 'lucide-react';
 import { useJsonResource } from '../../../hooks/useJsonResource';
 import type { BatteryHistory, BatterySession } from '../../../types/batteryHistory';
 import Panel from '../../common/Panel';
 import { StatTile, TileGrid } from '../../common/Primitives';
 import { Callout, EmptyState, LoadingState } from '../../common/States';
-import { describeWatching, formatDuration, formatWhen, newestFirst, percentChange, ratePerHour, sessionNotes, summarize } from './historyModel';
+import { dateLabel, describeWatching, formatDuration, formatWhen, groupByDate, hasValidStart, percentChange, ratePerHour, resolveSelectedDate, sessionNotes, summarize } from './historyModel';
 
 const POLL_MS = 10_000;
 
@@ -54,8 +54,34 @@ function SessionRow({ session }: { session: BatterySession }) {
   );
 }
 
+/** Which day's records the list below shows. Only dates that have records are offered. */
+function DatePicker({ dates, value, onChange, nowMs }: { dates: readonly { key: string; count: number }[]; value: string; onChange: (key: string) => void; nowMs: number }) {
+  const id = useId();
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <label htmlFor={id} className="text-[12px] text-muted">Date</label>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-9 rounded-full bg-surface-2 px-4 text-[13px] text-ink focus:outline-2 focus:outline-[var(--focus)]"
+      >
+        {dates.map((d) => (
+          <option key={d.key} value={d.key}>{dateLabel(d.key, nowMs)} ({d.count})</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function BatteryHistoryPanel({ active }: { active: boolean }) {
   const history = useJsonResource<BatteryHistory>('/api/battery/history', { active, intervalMs: POLL_MS });
+  const [picked, setPicked] = useState<string | null>(null);
+
+  const sessions = history.data?.sessions;
+  const valid = useMemo(() => (sessions ? sessions.filter(hasValidStart) : []), [sessions]);
+  const groups = useMemo(() => groupByDate(valid), [valid]);
+  const summary = useMemo(() => summarize(valid), [valid]);
 
   if (history.error && !history.data) {
     return (
@@ -68,9 +94,10 @@ function BatteryHistoryPanel({ active }: { active: boolean }) {
     return <Panel title="Charging history" icon={History} hue="power"><LoadingState label="Loading battery history…" /></Panel>;
   }
 
-  const { sessions, retentionDays } = history.data;
-  const status = describeWatching(history.data.watching, Date.parse(history.data.generatedAtUtc));
-  if (sessions.length === 0) {
+  const { retentionDays } = history.data;
+  const nowMs = Date.parse(history.data.generatedAtUtc);
+  const status = describeWatching(history.data.watching, nowMs);
+  if (groups.length === 0) {
     return (
       <Panel title="Charging history" icon={History} hue="power">
         <EmptyState
@@ -84,7 +111,10 @@ function BatteryHistoryPanel({ active }: { active: boolean }) {
     );
   }
 
-  const summary = summarize(sessions);
+  const selected = resolveSelectedDate(groups, picked) as string;
+  const day = groups.find((g) => g.key === selected) ?? groups[0];
+  const label = dateLabel(day.key, nowMs);
+
   return (
     <>
       <TileGrid cols={4}>
@@ -104,10 +134,16 @@ function BatteryHistoryPanel({ active }: { active: boolean }) {
           detail={summary.averageDrainPerHour !== null ? `Estimated from your measured ${summary.averageDrainPerHour.toFixed(1)}%/h drain` : 'Needs a stretch of 10+ minutes on battery'}
         />
       </TileGrid>
-      <Panel title="Charging history" icon={History} hue="power" meta={`Last ${retentionDays} days`}>
+      <Panel
+        title="Charging history"
+        icon={History}
+        hue="power"
+        meta={`${label} · ${day.sessions.length} ${day.sessions.length === 1 ? 'entry' : 'entries'}`}
+        action={<DatePicker dates={groups.map((g) => ({ key: g.key, count: g.sessions.length }))} value={day.key} onChange={setPicked} nowMs={nowMs} />}
+      >
         <WatchingLine status={status} />
         <ul className="mt-2 divide-y divide-line">
-          {newestFirst(sessions).map((s) => <SessionRow key={`${s.kind}-${s.startUtc}`} session={s} />)}
+          {day.sessions.map((s) => <SessionRow key={`${s.kind}-${s.startUtc}`} session={s} />)}
         </ul>
       </Panel>
     </>

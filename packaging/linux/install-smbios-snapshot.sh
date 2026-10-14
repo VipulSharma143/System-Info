@@ -41,16 +41,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Find the helper + library: next to this script (installed package), or in the
-# native build folder (a source checkout after native/build.sh).
+# Engine build folder (a source checkout after Engine/Cpp/build.sh).
 HELPER=""
-for dir in "$SCRIPT_DIR" "$ROOT/native/build"; do
+for dir in "$SCRIPT_DIR" "$ROOT/Engine/Cpp/build"; do
     if [[ -x "$dir/si_smbios_snapshot" && -f "$dir/libsystemmonitor_native.so" ]]; then
         HELPER_DIR="$dir"; HELPER=1; break
     fi
 done
 if [[ -z "$HELPER" ]]; then
     echo "Could not find si_smbios_snapshot. Build the native library first:" >&2
-    echo "    ./native/build.sh" >&2
+    echo "    ./Engine/Cpp/build.sh" >&2
     exit 1
 fi
 

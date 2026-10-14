@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { describeWatching, formatDuration, formatWhen, newestFirst, percentChange, ratePerHour, sessionNotes, STALE_AFTER_MS, summarize } from '../src/components/views/battery/historyModel.ts';
+import { dateKeyOf, dateLabel, describeWatching, formatDuration, formatWhen, groupByDate, newestFirst, percentChange, resolveSelectedDate, ratePerHour, sessionNotes, STALE_AFTER_MS, summarize } from '../src/components/views/battery/historyModel.ts';
 import type { BatterySession, BatteryWatching } from '../src/types/batteryHistory.ts';
 
 const HOUR = 3600;
@@ -125,5 +125,69 @@ describe('describeWatching', () => {
     assert.equal(s.tone, 'warn');
     assert.match(s.text, /No battery reading for 3 min/);
     assert.equal(describeWatching(watching({ readingUtc: new Date(NOW - 30_000).toISOString() }), NOW).tone, 'ok');
+  });
+});
+
+describe('grouping by calendar date', () => {
+  const at = (iso: string, over: Partial<BatterySession> = {}) => session({ startUtc: iso, endUtc: null, ...over });
+
+  it('puts each session on the date it started, newest date and newest session first', () => {
+    const groups = groupByDate([
+      at('2026-10-11T08:00:00Z'), at('2026-10-13T09:00:00Z'), at('2026-10-11T20:00:00Z'), at('2026-10-13T07:00:00Z'),
+    ], 'UTC');
+    assert.deepEqual(groups.map((g) => g.key), ['2026-10-13', '2026-10-11']);
+    assert.deepEqual(groups[0].sessions.map((s) => s.startUtc), ['2026-10-13T09:00:00Z', '2026-10-13T07:00:00Z']);
+    assert.deepEqual(groups[1].sessions.map((s) => s.startUtc), ['2026-10-11T20:00:00Z', '2026-10-11T08:00:00Z']);
+  });
+
+  it('has no group for a date with no records, so it can never be selected', () => {
+    const groups = groupByDate([at('2026-10-13T09:00:00Z'), at('2026-10-11T09:00:00Z')], 'UTC');
+    assert.equal(groups.some((g) => g.key === '2026-10-12'), false);
+  });
+
+  it('decides the date in the viewer time zone, so a late-evening session lands on the viewer\'s own day', () => {
+    const iso = '2026-10-11T23:30:00Z';                          // 11 Oct in UTC, already 12 Oct in India
+    assert.equal(dateKeyOf(iso, 'UTC'), '2026-10-11');
+    assert.equal(dateKeyOf(iso, 'Asia/Kolkata'), '2026-10-12');
+    assert.equal(dateKeyOf('2026-10-12T00:30:00Z', 'America/New_York'), '2026-10-11');
+    assert.deepEqual(groupByDate([at(iso)], 'Asia/Kolkata').map((g) => g.key), ['2026-10-12']);
+  });
+
+  it('keeps a session that crosses midnight on its start date, with its end time intact', () => {
+    const crossing = at('2026-10-11T22:00:00Z', { endUtc: '2026-10-12T02:00:00Z' });
+    const groups = groupByDate([crossing], 'UTC');
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].key, '2026-10-11');
+    assert.equal(groups[0].sessions[0].endUtc, '2026-10-12T02:00:00Z');
+  });
+
+  it('leaves out entries whose start time is unreadable instead of guessing a date', () => {
+    const groups = groupByDate([at('not a time'), at(''), at('2026-10-11T08:00:00Z')], 'UTC');
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].sessions.length, 1);
+  });
+
+  it('handles an empty history', () => {
+    assert.deepEqual(groupByDate([], 'UTC'), []);
+    assert.equal(resolveSelectedDate([], null), null);
+    assert.equal(resolveSelectedDate([], '2026-10-11'), null);
+  });
+
+  it('keeps the picked date while it has records and falls back to the newest when it does not', () => {
+    const groups = groupByDate([at('2026-10-13T09:00:00Z'), at('2026-10-11T09:00:00Z')], 'UTC');
+    assert.equal(resolveSelectedDate(groups, null), '2026-10-13');            // nothing picked: follow the newest date
+    assert.equal(resolveSelectedDate(groups, '2026-10-11'), '2026-10-11');    // a pick survives new readings arriving
+    assert.equal(resolveSelectedDate(groups, '2026-10-05'), '2026-10-13');    // that date has aged out of the history
+    const later = groupByDate([at('2026-10-14T01:00:00Z'), at('2026-10-13T09:00:00Z'), at('2026-10-11T09:00:00Z')], 'UTC');
+    assert.equal(resolveSelectedDate(later, '2026-10-11'), '2026-10-11');    // still the same day after a new date appears
+  });
+
+  it('labels Today, Yesterday and older dates', () => {
+    const now = Date.parse('2026-10-14T10:00:00Z');
+    assert.equal(dateLabel('2026-10-14', now, 'UTC'), 'Today');
+    assert.equal(dateLabel('2026-10-13', now, 'UTC'), 'Yesterday');
+    assert.equal(dateLabel('2026-10-11', now, 'UTC', 'en-GB'), 'Sun 11 Oct');
+    assert.equal(dateLabel('2026-09-30', Date.parse('2026-10-01T10:00:00Z'), 'UTC'), 'Yesterday');   // across a month boundary
+    assert.equal(dateLabel('2026-10-12', Date.parse('2026-10-13T00:30:00Z'), 'America/New_York', 'en-GB'), 'Today');   // 12 Oct in New York
   });
 });

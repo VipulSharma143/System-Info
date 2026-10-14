@@ -34,6 +34,7 @@ else
 builder.Services.AddSingleton(sp => new SystemInfoCache(
     Path.Combine(dataDir, "cache"), sp.GetRequiredService<ILogger<SystemInfoCache>>()));
 builder.Services.AddSingleton<SystemInfoService>();
+builder.Services.AddSingleton<BatteryReadCache>();
 builder.Services.AddSingleton<SystemMonitorBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemMonitorBackgroundService>());
 builder.Services.AddSingleton<SystemSnapshotService>();

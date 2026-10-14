@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fetches the official PawnIO installer into the backend resources so the Windows build can set up the CPU sensor driver
-// itself (see backend services/Cpu/SensorDriverInstaller.cs). The file is downloaded from the project's own GitHub release
+// itself (see backend Services/Cpu/SensorDriverInstaller.cs). The file is downloaded from the project's own GitHub release
 // and refused unless its SHA-256 equals the pinned value (the same value winget publishes for this version).
 // Usage: node scripts/fetch-pawnio.mjs [destinationDir]   (default: frontend/src-tauri/resources/backend)
 // The default is flat on purpose: Tauri copies resources given as a glob map ("resources/backend/**/*": "backend/") without

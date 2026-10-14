@@ -94,13 +94,13 @@ $NativeLib = Join-Path $ProjectRoot "backend\SystemMonitor.Api\systemmonitor_nat
 if (Test-Path $NativeLib) {
     Ok "Native library already built. (delete it and re-run to rebuild)"
 } else {
-    Push-Location (Join-Path $ProjectRoot "native")
+    Push-Location (Join-Path $ProjectRoot "Engine\Cpp")
     try {
         cmake -B build -G "Visual Studio 17 2022" -A x64
         cmake --build build --config Release
         $builtDll = Get-ChildItem -Recurse -Filter "systemmonitor_native.dll" -Path "build" | Select-Object -First 1
         if (-not $builtDll) {
-            Fail "Build ran but systemmonitor_native.dll was not produced. This likely means native/ source has Linux-only code (sysfs/proc headers) that needs a Windows branch — check native/src for #ifdef __linux__ guards."
+            Fail "Build ran but systemmonitor_native.dll was not produced. This likely means Engine/Cpp source has Linux-only code (sysfs/proc headers) that needs a Windows branch — check Engine/Cpp/src for #ifdef __linux__ guards."
             exit 1
         }
         Copy-Item $builtDll.FullName -Destination (Join-Path $ProjectRoot "backend\SystemMonitor.Api\")
@@ -132,7 +132,7 @@ Write-Host ""
 # No database account, connection string, or cloud cluster needed — all
 # history is stored on this machine. SYSTEM_INFO_DATA_DIR can override the
 # location; otherwise it resolves to %LOCALAPPDATA%\SystemInfo\data (see
-# backend/SystemMonitor.Api/services/AppDataPath.cs).
+# backend/SystemMonitor.Api/Services/Storage/AppDataPath.cs).
 Write-Host "Setting up local historical storage..."
 $dataDir = if ($env:SYSTEM_INFO_DATA_DIR) { $env:SYSTEM_INFO_DATA_DIR } else { Join-Path $env:LOCALAPPDATA "SystemInfo\data" }
 New-Item -ItemType Directory -Force -Path (Join-Path $dataDir "snapshots") | Out-Null

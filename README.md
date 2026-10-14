@@ -125,34 +125,38 @@ System Info/
 │   ├── SystemMonitor.Api/           # .NET 10 Minimal API
 │   │   ├── Program.cs
 │   │   ├── Endpoints/               # SystemEndpoints, AnalyticsEndpoints, NativeEndpoints, SpeedTestEndpoints
-│   │   ├── services/                # Providers: LinuxSystemInfoProvider, WindowsSystemInfoProvider (+ .Battery,
-│   │   │                            #   .Gpu, .Identity partials), WindowsBatteryInterop
-│   │   │                            # Snapshots & startup cache: SystemSnapshotService, SystemInfoService, SystemInfoCache
-│   │   │                            # GPU (services/Gpu/): GpuService, LinuxGpuCollector, WindowsGpuCollector,
-│   │   │                            #   GpuCounters (DXGI matching), GpuMath, NvmlMatching, PciIds, GpuModels,
-│   │   │                            #   GpuSensorSelection + LibreHardwareGpuSensorSource (Windows integrated GPU temperature)
-│   │   │                            # Overlay (services/Overlay/): OverlayService (hosts the native engine), OverlayModels, GpuEngineMapper
-│   │   │                            #   (live GPU numbers for the GPU page come from the same engine snapshot)
-│   │   │                            # Memory: MemoryHardwareService, MemoryHealthReader, MemoryMapping, RamDetailsReader
-│   │   │                            # History: SystemMonitorBackgroundService, SnapshotLogger, LocalJsonSnapshotStore, DataResetService, DataUsageService, Battery/BatteryTracker + BatteryHistoryService,
-│   │   │                            #   AnalyticsService; paths: AppDataPath
-│   │   ├── interface/               # ISystemInfoProvider, ISnapshotStore
+│   │   ├── Services/                # Grouped by what the code is for (namespaces unchanged)
+│   │   │   ├── Platform/{Linux,Windows}/ # LinuxSystemInfoProvider, WindowsSystemInfoProvider (+ .Battery, .Gpu, .Identity
+│   │   │   │                        #   partials), WindowsBatteryInterop
+│   │   │   ├── Sampling/            # SystemMonitorBackgroundService (1 s sampler), SystemSnapshotService (dashboard),
+│   │   │   │                        #   SystemInfoService, HostSnapshotService
+│   │   │   ├── Storage/             # LocalJsonSnapshotStore, SnapshotLogger, SystemInfoCache, AppDataPath
+│   │   │   ├── Battery/             # BatteryTracker, BatteryHistoryService, BatteryReadCache (one shared battery read)
+│   │   │   ├── Analytics/           # AnalyticsService
+│   │   │   ├── Memory/              # MemoryHardwareService, MemoryHealthReader, MemoryMapping, RamDetailsReader
+│   │   │   ├── Cpu/                 # CpuDetailService, collectors, LibreHardwareCpuSensorSource, SensorDriverInstaller
+│   │   │   ├── Gpu/                 # GpuService, LinuxGpuCollector, WindowsGpuCollector, GpuCounters (DXGI matching),
+│   │   │   │                        #   GpuMath, NvmlMatching, PciIds, GpuModels, GpuSensorSelection, LibreHardwareGpuSensorSource
+│   │   │   ├── Overlay/             # OverlayService (hosts the native engine), OverlayModels, GpuEngineMapper
+│   │   │   ├── Sensors/             # HardwareSensorService and the drive / board / memory-module sensor sources
+│   │   │   └── DataLifecycle/       # retention, reset and size readout of the saved history
+│   │   ├── Contracts/               # ISystemInfoProvider (+ the data records it returns), ISnapshotStore, MemoryModels
 │   │   └── Native/                  # NativeInterop.cs (P/Invoke), NativeKernels.cs (safe span wrappers)
 │   └── SystemMonitor.Tests/         # dependency-free test runner: analytics, storage, startup cache, memory, GPU and CPU (fake sysfs/proc/NVML), native wrappers
 │
-├── native/                          # C++17 native engine (CMake)
-│   ├── include/native_engine.h      # Cross-platform C ABI (extern "C")
-│   ├── src/                         # common.cpp, simd_dispatch.cpp (CPUID + kernel dispatch, self-test), internal.h
-│   │   └── smbios/                  # platform-neutral SMBIOS memory-table parsing + DIMM API
-│   ├── platform/{linux,windows}/    # per-OS cpu, storage, fan, memory, smbios_source, snapshot_writer, provider
-│   ├── tools/                       # smbios_snapshot.cpp (Linux helper that saves the memory-only SMBIOS records)
-│   └── build.sh                     # Standalone native build used by ./build.sh
-│
-├── assembly/                        # x86-64 NASM: cpu/ (benchmark loops), math/ (vector add, dot, sum,
+├── Engine/                          # The native engine (everything that is not C#, TypeScript or Rust)
+│   ├── Cpp/                         # C++17 native engine (CMake)
+│   │   ├── include/native_engine.h  # Cross-platform C ABI (extern "C")
+│   │   ├── src/                     # common.cpp, simd_dispatch.cpp (CPUID + kernel dispatch, self-test), internal.h
+│   │   │   └── smbios/              # platform-neutral SMBIOS memory-table parsing + DIMM API
+│   │   ├── platform/{linux,windows}/ # per-OS cpu, storage, fan, memory, smbios_source, snapshot_writer, provider
+│   │   ├── tests/                   # C++/Assembly tests (ctest): kernel_selftest, asm_tiers, memory_info/hardware,
+│   │   │                            # smbios_parse/loader, battery_json, cpu_*, overlay_engine, host_snapshot
+│   │   ├── tools/                   # smbios_snapshot.cpp (Linux helper that saves the memory-only SMBIOS records)
+│   │   └── build.sh                 # Standalone native build used by ./build.sh
+│   └── Assembly/                    # x86-64 NASM: cpu/ (benchmark loops), math/ (vector add, dot, sum,
 │                                    # min/max), memory/ (memcpy, XOR checksum); abi.inc = arg registers
 │
-├── tests/native/                    # C++/Assembly tests (ctest): kernel_selftest, memory_info_test,
-│                                    # memory_hardware_test, smbios_parse_test, smbios_loader_test
 ├── packaging/linux/                 # systeminfo.png (icon source), install-smbios-snapshot.sh (one-time RAM-module setup)
 ├── scripts/                         # sync-version.mjs, check-version.mjs,
 │                                    # archive-changelog.mjs, make-update-manifest.mjs
@@ -187,9 +191,9 @@ There is no database directory. `docs/` is an empty placeholder. Tests live next
 | **Battery** | Battery class driver IOCTL (`IOCTL_BATTERY_QUERY_*`) | sysfs `BAT*` (dynamic discovery, unit auto-detection) | Cycle count/health are hardware-dependent; reported `Unavailable` when the driver doesn't expose them, never `0` |
 | **GPU** | `Win32_VideoController` (static) + `GPU Engine` performance-counter category (live, per-engine) | Native engine: `get_gpu_vendor()` / `get_amd_gpu_usage_percent()` (sysfs) | Windows returns every detected adapter as a list; multi-GPU laptops (integrated + discrete) are both reported |
 | **System Identity** | `Win32_ComputerSystem`, `Win32_BIOS`, `Win32_OperatingSystem` | DMI sysfs (`/sys/class/dmi/id/*`), `/etc/os-release`, `/proc/uptime` | Manufacturer, model, BIOS version, Windows edition/build, uptime |
-| CPU temperature | LibreHardwareMonitorLib (`services/Cpu/LibreHardwareCpuSensorSource.cs`); needs administrator rights and, on current library versions, the PawnIO sensor driver | Native engine, sysfs `coretemp`/`k10temp`/CPU thermal zones | `Unavailable` with the reason where no trustworthy sensor exists — never guessed or estimated; the Windows ACPI thermal zone is never shown as the CPU |
-| Integrated GPU temperature (Windows) | LibreHardwareMonitorLib (`services/Gpu/LibreHardwareGpuSensorSource.cs`, merged by `GpuSensorSelection.cs`): the `GPU Core` sensor of an Intel (driver telemetry) or AMD (driver API) integrated GPU. Only started while such a GPU has no native temperature | Native engine / sysfs (unchanged); NVIDIA through NVML (unchanged) | No number, with the reason (driver reports none / library cannot start / adapter not matched with certainty) — never estimated, never borrowed from another adapter, a native value is never replaced, a discrete GPU is never touched |
-| Drive / motherboard / memory-module sensors | LibreHardwareMonitorLib in its own instance (`services/Sensors/LibreHardwareBoardSensorSource.cs`); drive temperatures need administrator rights; memory-module temperature is off unless `SYSTEMINFO_DIMM_SENSORS=1` | Kernel hwmon files under `/sys/class/hwmon` (`LinuxHwmonReader`): `nvme`, `drivetemp` (needs the module), `spd5118`/`jc42`, and known sensor-chip names | No devices and a note naming what is missing; unconnected inputs (0 °C, 0 V) are dropped; nothing estimated |
+| CPU temperature | LibreHardwareMonitorLib (`Services/Cpu/LibreHardwareCpuSensorSource.cs`); needs administrator rights and, on current library versions, the PawnIO sensor driver | Native engine, sysfs `coretemp`/`k10temp`/CPU thermal zones | `Unavailable` with the reason where no trustworthy sensor exists — never guessed or estimated; the Windows ACPI thermal zone is never shown as the CPU |
+| Integrated GPU temperature (Windows) | LibreHardwareMonitorLib (`Services/Gpu/LibreHardwareGpuSensorSource.cs`, merged by `GpuSensorSelection.cs`): the `GPU Core` sensor of an Intel (driver telemetry) or AMD (driver API) integrated GPU. Only started while such a GPU has no native temperature | Native engine / sysfs (unchanged); NVIDIA through NVML (unchanged) | No number, with the reason (driver reports none / library cannot start / adapter not matched with certainty) — never estimated, never borrowed from another adapter, a native value is never replaced, a discrete GPU is never touched |
+| Drive / motherboard / memory-module sensors | LibreHardwareMonitorLib in its own instance (`Services/Sensors/LibreHardwareBoardSensorSource.cs`); drive temperatures need administrator rights; memory-module temperature is off unless `SYSTEMINFO_DIMM_SENSORS=1` | Kernel hwmon files under `/sys/class/hwmon` (`LinuxHwmonReader`): `nvme`, `drivetemp` (needs the module), `spd5118`/`jc42`, and known sensor-chip names | No devices and a note naming what is missing; unconnected inputs (0 °C, 0 V) are dropped; nothing estimated |
 | Fan RPM | Native engine | Native engine | Correctly reports `Unavailable` on hardware with no exposed sensor |
 
 **Design principle, applied everywhere above:** *if the OS can prove it, display it — if it can't, display "Unavailable." Never fill the gap with a guess.*
@@ -234,13 +238,13 @@ All endpoints are served by the .NET backend on `:5132` (or the port the fronten
 The RAM tab's *Memory platform* and *Memory modules* sections come from the firmware (SMBIOS). Linux only lets **root** read that table (`/sys/firmware/dmi/tables/DMI`), because it also contains the machine's serial number and UUID. The app deliberately does not run as root and never calls `dmidecode`, so on Linux these sections show "unavailable" until you run this once:
 
 ```bash
-./native/build.sh                                  # builds the library and the helper
+./Engine/Cpp/build.sh                              # builds the library and the helper
 sudo packaging/linux/install-smbios-snapshot.sh    # one time
 ```
 
 Then restart the backend and reopen the RAM tab. The helper runs as root, copies **only the memory records** (SMBIOS Type 16/17: slots, capacity, speed, manufacturer, part and serial number of the memory modules) to `/var/lib/system-info/smbios-memory.bin`, and the app reads that file. Nothing else from the firmware table (machine serial, UUID, ...) is copied. A systemd service refreshes the file at every boot, and the app ignores a snapshot taken before the last restart, so it can never show modules that are no longer installed. Remove it with `sudo packaging/linux/install-smbios-snapshot.sh --uninstall`.
 
-Without systemd, or to refresh by hand: `sudo ./native/build/si_smbios_snapshot`. Windows needs no setup.
+Without systemd, or to refresh by hand: `sudo ./Engine/Cpp/build/si_smbios_snapshot`. Windows needs no setup.
 
 **Speed test note:** the dashboard's `NetworkView` measures download/upload/ping directly from the browser against `speed.cloudflare.com`, so results aren't affected by a loopback hop through the local backend. `SpeedTestEndpoints.cs` implements the same measurement server-side but isn't currently called by the frontend.
 
@@ -427,7 +431,7 @@ This is a manual step you run after cutting a release — it isn't wired into CI
 | `setup.sh` / `setup.ps1` | First-time prerequisite install + local data directory setup (Linux full / Windows dev-only) |
 | `start-all.sh` / `start-all.ps1` | Dev-only: start backend + frontend together, waiting for readiness at each step. Production on both platforms uses the Tauri shell (`process.rs`) instead |
 | `build.sh` | Fail-fast full build/validation across every layer, ending with the native/Assembly and C# test suites |
-| `native/build.sh` | Standalone native-engine build used by `build.sh` |
+| `Engine/Cpp/build.sh` | Standalone native-engine build used by `build.sh` |
 | `clean.sh` | Strip generated build artifacts (`node_modules`, `dist`, `bin`/`obj`, caches) before archiving or sharing the repo — never removes source, `.git`, or config |
 | `scripts/sync-version.mjs` | Propagate `CHANGELOG.md`'s top version to all four version-bearing files |
 | `scripts/check-version.mjs` | Verify all four version-bearing files agree (run by CI) |
@@ -441,7 +445,7 @@ Nothing needs Python or a scripting runtime — only the toolchains you already 
 
 | Suite | What it covers | Run it |
 |---|---|---|
-| **Native + Assembly** (`tests/native/`, ctest) | Every SSE2/AVX2 kernel against a C++ reference at lengths 0–4099 with misaligned pointers; `memcpy` guard bytes; overlap handling; CPUID/OS feature consistency; topology, storage and fan enumeration; argument validation; the regression for the SIMD loop that hung on fewer than 4 iterations; the SMBIOS memory parser (Type 16/17: DDR3/4/5 mapping, capacities, empty slots, ranks, speeds, ECC, truncated/corrupt tables) against hand-built tables, and the Windows `RawSMBIOSData` header handling | `cmake -S native -B native/build-tests -DBUILD_NATIVE_TESTS=ON && cmake --build native/build-tests && ctest --test-dir native/build-tests --output-on-failure` |
+| **Native + Assembly** (`Engine/Cpp/tests/`, ctest) | Every SSE2/AVX2 kernel against a C++ reference at lengths 0–4099 with misaligned pointers; `memcpy` guard bytes; overlap handling; CPUID/OS feature consistency; topology, storage and fan enumeration; argument validation; the regression for the SIMD loop that hung on fewer than 4 iterations; the SMBIOS memory parser (Type 16/17: DDR3/4/5 mapping, capacities, empty slots, ranks, speeds, ECC, truncated/corrupt tables) against hand-built tables, and the Windows `RawSMBIOSData` header handling | `cmake -S native -B native/build-tests -DBUILD_NATIVE_TESTS=ON && cmake --build native/build-tests && ctest --test-dir native/build-tests --output-on-failure` |
 | **C#** (`backend/SystemMonitor.Tests`) | Analytics maths and JSON shape, torn/malformed snapshot lines, empty history, a full 86,400-row day, cancellation, the bounded "all time" query, and the managed native wrappers against plain C# reference implementations | `SYSTEMINFO_NATIVE_DIR=native/build-tests dotnet run --project backend/SystemMonitor.Tests` |
 | **Process supervisor** (`frontend/src-tauri/supervisor-tests`) | Starting services concurrently, `status()` never blocking during startup (the original window-freeze bug), a crashed child reported immediately, a busy port not mistaken for a healthy service, stale-process cleanup, cancellation, no leaked children | `cd frontend/src-tauri/supervisor-tests && cargo test` |
 

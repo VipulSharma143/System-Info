@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
 using SystemMonitor.Api.Interface;
 using SystemMonitor.Api.Services;
@@ -93,6 +95,79 @@ static class BatteryRecorderTests
         Check(msgs.Any(m => m.Contains("first battery reading")) && msgs.Any(m => m.Contains("running on battery")), "the recorder logs its first reading and each change of power source");
         svc.Reset();
         Check(svc.Read().Watching is null, "reset also forgets the latest reading");
+
+        // ---- one shared battery read: callers that accept an older reading do not touch the hardware
+        {
+            var counting = new FakeProvider(n => B("Discharging", 90 - n));
+            var cache = new BatteryReadCache(counting);
+            var first = cache.Get(60_000);
+            var second = cache.Get(60_000);
+            Check(counting.Reads == 1 && ReferenceEquals(first, second), "two callers inside the allowed age share one hardware read");
+            Check(cache.Get(0).CapacityPercent == 88 && counting.Reads == 2, "a caller that wants a fresh reading gets one, and it becomes the shared copy");
+            Check(cache.Get(60_000).CapacityPercent == 88 && counting.Reads == 2, "the fresh reading is what later callers share");
+            var failing = new FakeProvider(n => n == 1 ? B("Charging", 50) : throw new InvalidOperationException("driver gone"));
+            var failCache = new BatteryReadCache(failing);
+            failCache.Get(60_000);
+            var threw = false;
+            try { failCache.Get(0); } catch (InvalidOperationException) { threw = true; }
+            Check(threw && failCache.Get(60_000).CapacityPercent == 50, "a failed read throws to its caller and does not replace the last good reading");
+        }
+
+        // ---- the saved line: same fields, same order, same text as the JSON tree it replaced; the battery only when asked
+        var lineDir = Path.Combine(Path.GetTempPath(), "sysinfo-line-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new LocalJsonSnapshotStore(lineDir);
+            var history = new BatteryHistoryService(lineDir);
+            SnapshotLogger.Initialize(store, history);
+            var net = new List<NetworkInfo> { new("eth0", 1.5, 2.25), new("wlan \"0\" \u00e9", 0, 1234.5) };
+            var bat = new BatteryInfo(true, "Charging", 80, null, null, null, null, null, 93.5, null, 12.25, null, null, null);
+            SnapshotLogger.Append(new CpuInfo(12.5), net, bat);
+            SnapshotLogger.Append(new CpuInfo(7), net, bat, writeBatteryField: false);
+            SnapshotLogger.Append(null, null, null);
+            store.Flush();
+            var file = Directory.EnumerateFiles(Path.Combine(lineDir, "snapshots"), "*.jsonl", SearchOption.AllDirectories).Single();
+            var lines = File.ReadAllLines(file);
+            Check(lines.Length == 3, "every Append writes exactly one line");
+
+            var stamp = JsonDocument.Parse(lines[0]).RootElement.GetProperty("timestamp").GetString()!;
+            var expected = new JsonObject
+            {
+                ["timestamp"] = stamp,
+                ["cpuUsedPercent"] = 12.5,
+                ["network"] = new JsonArray(
+                    new JsonObject { ["iface"] = "eth0", ["rxKBps"] = 1.5, ["txKBps"] = 2.25 },
+                    new JsonObject { ["iface"] = "wlan \"0\" \u00e9", ["rxKBps"] = 0.0, ["txKBps"] = 1234.5 }),
+                ["battery"] = new JsonObject { ["status"] = "Charging", ["capacityPercent"] = 80, ["healthPercent"] = 93.5, ["powerWatts"] = 12.25 },
+            };
+            Check(lines[0] == expected.ToJsonString(), "a line with a battery is byte-for-byte what the previous format produced");
+            Check(!lines[1].Contains("\"battery\"") && lines[1].Contains("\"cpuUsedPercent\":7"), "a line that is not asked to carry the battery omits it");
+            Check(lines[2].Contains("\"cpuUsedPercent\":0") && lines[2].Contains("\"network\":[]") && !lines[2].Contains("\"battery\""), "no CPU reading and no network give 0 and an empty list");
+            var unavailable = new BatteryInfo(false, null, null, null, null, null, null, null, null, null, null, null, null, "No battery detected on this system");
+            SnapshotLogger.Append(new CpuInfo(1), [], unavailable);
+            store.Flush();
+            Check(!File.ReadAllLines(file).Last().Contains("battery"), "a desktop without a battery never gets a battery field");
+            Check(history.Read().Watching is { Percent: 80 }, "the history is still fed by a line that does not carry the battery field");
+        }
+        finally { try { Directory.Delete(lineDir, true); } catch { } }
+
+        // ---- a battery reader that stops working: its last value must not be fed to the history as if it were new
+        var staleDir = Path.Combine(Path.GetTempPath(), "sysinfo-stale-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new LocalJsonSnapshotStore(staleDir);
+            var history = new BatteryHistoryService(staleDir);
+            SnapshotLogger.Initialize(store, history);
+            var provider = new FakeProvider(n => n == 1 ? B("Discharging", 70) : throw new InvalidOperationException("battery driver stopped answering"));
+            var loop = new SystemMonitorBackgroundService(provider, NullLogger<SystemMonitorBackgroundService>.Instance, TimeSpan.FromMilliseconds(8), 30, 32);
+            loop.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Thread.Sleep(800);
+            loop.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+            var watching = history.Read().Watching;
+            Check(provider.Reads > 2, "a failing battery is retried at every refresh");
+            Check(watching is not null && (DateTime.UtcNow - watching.ReadingUtc).TotalMilliseconds > 300, "after the reader stops, the last reading stops being passed on as current");
+        }
+        finally { try { Directory.Delete(staleDir, true); } catch { } }
 
         return (failures, checks);
     }

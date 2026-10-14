@@ -13,8 +13,8 @@ anything beyond normal use.
 | TypeScript, TSX (React 19) | The dashboard UI (`frontend/src`) |
 | CSS (Tailwind CSS 4) | Styling |
 | C# (.NET 10, ASP.NET Core) | The backend service (`backend/`) |
-| C++17 | The native monitoring engine (`native/`) |
-| x86-64 Assembly (NASM, SSE2 and AVX2) | Vector and statistics kernels (`assembly/`) |
+| C++17 | The native monitoring engine (`Engine/Cpp/`) |
+| x86-64 Assembly (NASM, SSE2 and AVX2) | Vector and statistics kernels (`Engine/Assembly/`) |
 | Rust (Tauri 2) | The desktop shell, process supervision and updater (`frontend/src-tauri`) |
 | JavaScript modules (`.mjs`, Node.js) | Build, version and release scripts (`scripts/`) |
 | Bash and PowerShell | Setup and start scripts |

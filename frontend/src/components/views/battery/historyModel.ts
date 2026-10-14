@@ -130,3 +130,66 @@ export function describeWatching(watching: BatteryWatching | null, nowMs: number
   const state = STATE_WORDS[(watching.status ?? '').trim().toLowerCase()] ?? (watching.status ?? 'unknown').toLowerCase();
   return { tone: 'ok', text: `Recording. Right now: ${state}${watching.percent !== null ? `, ${watching.percent}%` : ''}.` };
 }
+
+/* ---------- grouping by calendar date ---------- */
+
+/** The sessions of one calendar day, in the viewer's time zone. A session belongs to the day it started; its row says when it ended. */
+export interface DateGroup {
+  /** `YYYY-MM-DD`. */
+  key: string;
+  sessions: BatterySession[];
+}
+
+/** `YYYY-MM-DD` of an instant in a time zone (the viewer's own when omitted), or null when the timestamp is not a real time. */
+export function dateKeyOf(iso: string, timeZone?: string): string | null {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  const parts = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone }).formatToParts(t);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value;
+  const [y, m, d] = [get('year'), get('month'), get('day')];
+  return y && m && d ? `${y}-${m}-${d}` : null;
+}
+
+/** A session with a start time that cannot be read cannot be placed on any date, so it is left out rather than guessed. */
+export const hasValidStart = (s: BatterySession): boolean => !Number.isNaN(Date.parse(s.startUtc));
+
+/** Newest date first, newest session first inside a date. Dates with no sessions do not exist, so they cannot be picked. */
+export function groupByDate(sessions: readonly BatterySession[], timeZone?: string): DateGroup[] {
+  const byKey = new Map<string, BatterySession[]>();
+  for (const s of newestFirst(sessions.filter(hasValidStart))) {
+    const key = dateKeyOf(s.startUtc, timeZone);
+    if (key === null) continue;
+    const list = byKey.get(key);
+    if (list) list.push(s);
+    else byKey.set(key, [s]);
+  }
+  return [...byKey.entries()].sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0)).map(([key, list]) => ({ key, sessions: list }));
+}
+
+/** The date to show: the person's pick while it still has records, otherwise the newest date. Null when there is nothing at all. */
+export function resolveSelectedDate(groups: readonly DateGroup[], picked: string | null): string | null {
+  if (picked !== null && groups.some((g) => g.key === picked)) return picked;
+  return groups[0]?.key ?? null;
+}
+
+function shiftDateKey(key: string, days: number): string {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/** "Today", "Yesterday", or "Sat 11 Oct". `nowMs` and the zone can be passed for tests. */
+export function dateLabel(key: string, nowMs: number = Date.now(), timeZone?: string, locale?: string): string {
+  const today = dateKeyOf(new Date(nowMs).toISOString(), timeZone);
+  if (today !== null) {
+    if (key === today) return 'Today';
+    if (key === shiftDateKey(today, -1)) return 'Yesterday';
+  }
+  const [y, m, d] = key.split('-').map(Number);
+  return new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(Date.UTC(y, m - 1, d, 12));
+}
+
+/** Time of day only, for rows that sit under a date heading. */
+export function formatClock(iso: string, timeZone?: string, locale?: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', timeZone }).format(d);
+}

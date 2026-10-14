@@ -3323,7 +3323,7 @@ dependencies = [
 
 [[package]]
 name = "system-info"
-version = "3.0.0"
+version = "2.6.9"
 dependencies = [
  "serde",
  "serde_json",

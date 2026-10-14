@@ -5,6 +5,31 @@ All notable changes to SystemInfo are documented here.
 ## [Unreleased]
 
 
+## [2.6.9] - 2026-10-14
+
+### Added
+- **Battery history by date.** The Battery page's charging history now shows one day at a time instead of one long list. A **Date** menu lists only the days that have records (shown as Today, Yesterday, then the weekday and date, with the number of entries), opens on the newest day, and switches the list to the entries recorded on the day you pick. Days are decided in your own time zone, so an entry made late in the evening stays on your evening. An entry that runs past midnight stays on the day it started and its row still shows when it ended. Your pick is kept when new readings arrive; if the day you picked ages out of the 7-day history, the page falls back to the newest day. The latest status line and the summary tiles stay above the list and do not change with the date. Entries whose start time cannot be read are left out instead of being given a guessed date.
+
+### Changed
+- **The native engine now lives in a top-level `Engine/` folder.** The C++ source moved from `native/` to `Engine/Cpp/`, the NASM Assembly from `assembly/` to `Engine/Assembly/`, and the native tests from `tests/native/` to `Engine/Cpp/tests/`. One copy of every file; no engine logic changed. Every reference was updated: the CMake file, `build.sh`, `setup.sh`, `setup.ps1`, `clean.sh`, `.gitignore`, the Linux SMBIOS helper installer, both CI workflows, the tests' include paths, and the C# test that looks for the built library. The VS Code setting that pointed at one developer's absolute path now uses the workspace folder.
+- **The backend folders are grouped by purpose.** `services/` is now `Services/` with `Platform/{Linux,Windows}`, `Sampling`, `Storage`, `Analytics` and `Memory` beside the existing `Battery`, `Cpu`, `Gpu`, `Overlay`, `Sensors` and `DataLifecycle`, instead of 25 loose files; `interface/` is now `Contracts/`. Files only moved: namespaces, routes and behaviour are the same.
+- **The battery is read far less often.** The dashboard asked the hardware for the battery about once a second (a driver enumeration plus IOCTLs on Windows, a sysfs pass on Linux) on top of the history recorder's own read every 10 s. All three readers (the recorder, the dashboard and `/api/system/battery`) now share one reading no more than 3 s old, so the hardware is read at most once every 3 s while the app is open and once every 10 s otherwise. Plug-in and unplug still show within a few seconds.
+- **Saved history lines carry the battery only after a new reading**, instead of repeating the same four values on every one-second line. Every other field, the order and the formatting are unchanged, and nothing that reads the history needs the repeated copies (it is optional there already, as on desktops).
+- Each saved line is written with a reusable JSON writer instead of building a JSON tree every second, and the day's file path is built once per day. The text written is identical to before (a test compares it byte for byte).
+- The Battery history panel computes its day groups and summary only when the history actually changes, not on every redraw.
+
+### Fixed
+- **A battery that stopped answering was still recorded as current.** The sampler kept passing the last good reading to the charging history every second, so a failed reader looked healthy and the Battery page could never say that readings had stopped. A reading that has not been refreshed for two refresh periods is no longer passed on.
+- **Linux battery details could vanish.** The native battery reader pasted the battery's status, model and manufacturer text into JSON without escaping it, so a name containing a quote or a backslash made the document invalid and the whole battery read failed. The text is now escaped. The reader also silently cut the document short when it did not fit the buffer; it now reports an error instead of returning broken JSON. The Windows placeholder gets the same buffer checks.
+- `frontend/src-tauri/Cargo.lock` recorded the app as version 3.0.0 while `Cargo.toml` said 2.6.8. It now matches the release version.
+
+### Notes
+- Battery collection, API routes and response formats, stored data, the CPU and GPU temperature code, the Assembly kernels and the native ABI are unchanged.
+- An audit of the frontend found every timer, listener and polling loop already cleaned up when its page closes, so no performance changes were made there beyond the history panel. No timing or memory improvement is claimed for this release: the changes above reduce how often the hardware is read and how much is written, and those counts were checked, but no benchmark of the whole app was run.
+
+### Known Issues
+- Built and run for this release: the native engine from its new location (15 native tests including a new one for the battery JSON, plus the no-Assembly run); the frontend type check, lint, production build and 104 tests; and the backend test runner on .NET 8 (801 checks, including new ones for the shared battery read, the saved line format and the stopped-reader case). Not run: the .NET 10 build of the backend project itself, the Windows build and its battery code, the installers, CI, and the Date menu on screen.
+
 ## [2.6.8] - 2026-10-13
 
 ### Added

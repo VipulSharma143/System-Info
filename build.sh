@@ -161,7 +161,8 @@ require_directory "backend/SystemMonitor.Api"
 require_directory "frontend"
 require_directory "frontend/src"
 
-require_directory "native"
+require_directory "Engine/Cpp"
+require_directory "Engine/Assembly"
 
 require_file "start-all.sh"
 require_file "setup.sh"
@@ -173,7 +174,7 @@ require_file "frontend/package.json"
 require_file "frontend/tsconfig.json"
 require_file "frontend/vite.config.ts"
 
-require_file "native/build.sh"
+require_file "Engine/Cpp/build.sh"
 
 ok "Project structure validation passed."
 
@@ -190,8 +191,8 @@ require_command cmake
 require_command gcc
 require_command g++
 require_command make
-# nasm assembles the Phase 6 benchmark files (assembly/*.asm) that
-# native/CMakeLists.txt unconditionally links into the native library.
+# nasm assembles the Phase 6 benchmark files (Engine/Assembly/**/*.asm) that
+# Engine/Cpp/CMakeLists.txt unconditionally links into the native library.
 # Missing it doesn't fail here — cmake/gcc/g++/make all still report fine —
 # it fails four steps later at the native build with a much less obvious
 # "No CMAKE_ASM_NASM_COMPILER could be found" error. Catch it up front
@@ -230,10 +231,10 @@ ok "Environment validation passed."
 
 step "4/8 — Building native C++ engine"
 
-cd "$PROJECT_ROOT/native"
+cd "$PROJECT_ROOT/Engine/Cpp"
 
 if [ ! -x "./build.sh" ]; then
-    warn "native/build.sh is not executable. Making it executable."
+    warn "Engine/Cpp/build.sh is not executable. Making it executable."
     chmod +x "./build.sh"
 fi
 
@@ -365,9 +366,9 @@ ok "Speed test frontend files validated."
 
 step "7/8 — Running tests"
 
-NATIVE_TEST_DIR="$PROJECT_ROOT/native/build-tests"
+NATIVE_TEST_DIR="$PROJECT_ROOT/Engine/Cpp/build-tests"
 log "Building and running native/Assembly tests (ctest)..."
-if run_command cmake -S "$PROJECT_ROOT/native" -B "$NATIVE_TEST_DIR" -DBUILD_NATIVE_TESTS=ON \
+if run_command cmake -S "$PROJECT_ROOT/Engine/Cpp" -B "$NATIVE_TEST_DIR" -DBUILD_NATIVE_TESTS=ON \
     && run_command cmake --build "$NATIVE_TEST_DIR" \
     && (cd "$NATIVE_TEST_DIR" && run_command ctest --output-on-failure); then
     ok "Native/Assembly tests passed."

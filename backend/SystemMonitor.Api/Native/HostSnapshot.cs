@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace SystemMonitor.Api.Native;
 
-/// <summary>Mirror of <c>SiHostSnapshot</c> in native/include/native_engine.h. The native side rejects a different <c>StructSize</c>.</summary>
+/// <summary>Mirror of <c>SiHostSnapshot</c> in Engine/Cpp/include/native_engine.h. The native side rejects a different <c>StructSize</c>.</summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct SiHostSnapshot
 {

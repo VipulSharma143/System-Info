@@ -72,27 +72,28 @@ frontend/src-tauri/     Rust shell: supervisor.rs (Tauri-free lifecycle core), p
                         tauri-plugin-shell / no generic command execution); supervisor-tests/ = std-only test crate for supervisor.rs
 backend/SystemMonitor.Api/
   Endpoints/            SystemEndpoints, CpuEndpoints, AnalyticsEndpoints, NativeEndpoints, SpeedTestEndpoints
-  services/             WindowsSystemInfoProvider / LinuxSystemInfoProvider, SystemMonitorBackgroundService, SystemSnapshotService
-                         (/api/system/all isolation), AnalyticsService, LocalJsonSnapshotStore, SnapshotLogger,
-                         WindowsBatteryInterop, AppDataPath, SystemInfoService + SystemInfoCache (startup cache),
-                         MemoryHardwareService/MemoryHealthReader/MemoryMapping/RamDetailsReader,
-                         services/Gpu/: GpuService (cached hardware + 1 s shared live sample), LinuxGpuCollector (DRM/sysfs), WindowsGpuCollector,
+  Services/             Grouped by purpose (namespaces unchanged): Platform/{Linux,Windows}/ (the two system-info providers + WindowsBatteryInterop),
+                         Sampling/ (SystemMonitorBackgroundService, SystemSnapshotService = /api/system/all isolation, SystemInfoService, HostSnapshotService),
+                         Storage/ (LocalJsonSnapshotStore, SnapshotLogger, SystemInfoCache = startup cache, AppDataPath), Analytics/AnalyticsService,
+                         Battery/ (BatteryTracker, BatteryHistoryService, BatteryReadCache = one shared battery read for the sampler, the dashboard and /api/system/battery),
+                         Memory/ (MemoryHardwareService/MemoryHealthReader/MemoryMapping/RamDetailsReader),
+                         Services/Gpu/: GpuService (cached hardware + 1 s shared live sample), LinuxGpuCollector (DRM/sysfs), WindowsGpuCollector,
                          GpuCounters/GpuMath (Windows counters are matched to adapters by LUID via native get_gpu_luid; per-engine sums), NvmlGpuSource (NVML via NativeLibrary, optional), PciIds (pci.ids names). API: /api/system/gpus/hardware and /gpus/live.
-                         services/Cpu/: CpuDetailService (merges the native CPU document with the overlay engine's live per-processor load, clocks and
+                         Services/Cpu/: CpuDetailService (merges the native CPU document with the overlay engine's live per-processor load, clocks and
                          CPU temperature — one source, so the CPU and Overlay tabs always agree) + CpuDetailModels. The headline CPU temperature is NEVER read
                          a second time: it is the overlay engine's value (native cpu_temperature.cpp; acpitz is NEVER a CPU temperature).
                          HostSnapshotService + Native/HostSnapshot.cs: ONE native call (si_read_host_snapshot) for CPU ticks + memory + CPU temperature, shared by the Linux provider.
                          API: /api/system/cpu/detail (Endpoints/CpuEndpoints). Frontend: CpuView (components/views/cpu/: hero, tiles, per-core grid, temperature,
                          clock/power, specs, activity) and OverlayView (compact tiles: CPU, memory, each GPU — no clock/fan/power sections, by decision)
-  interface/             ISystemInfoProvider, ISnapshotStore
+  Contracts/             ISystemInfoProvider (and the records it returns), ISnapshotStore, MemoryModels
   Native/                 NativeInterop.cs (P/Invoke bridge), NativeKernels.cs (safe span wrappers + C# reference implementations)
 backend/SystemMonitor.Tests/  dependency-free test runner (analytics, storage, native wrappers); links sources instead of referencing the Api project
-native/                  C++ engine: include/native_engine.h (C ABI), src/common.cpp, src/simd_dispatch.cpp (CPUID + dispatch + self-test),
+Engine/Cpp/              C++ engine: include/native_engine.h (C ABI), src/common.cpp, src/simd_dispatch.cpp (CPUID + dispatch + self-test),
                          src/smbios/ (platform-neutral table parsing), platform/{linux,windows}/ (cpu, cpu_detail, storage, fan, memory, smbios_source, provider), build.sh,
                          src/cpu_detail.cpp (CPUID identity/features + the one JSON document behind the CPU tab, si_cpu_detail_json; null = not readable, never 0)
-assembly/                NASM: cpu/ (benchmark_loop, simd_loop, get_constant), math/vector_math.asm, memory/memory_kernels.asm (SSE2/AVX2), abi.inc
+Engine/Assembly/         NASM: cpu/ (benchmark_loop, simd_loop, get_constant), math/vector_math.asm, memory/memory_kernels.asm (SSE2/AVX2), abi.inc
 scripts/                 sync-version.mjs, check-version.mjs, archive-changelog.mjs, make-update-manifest.mjs
-tests/native/            C++/Assembly tests (ctest)
+Engine/Cpp/tests/       C++/Assembly tests (ctest)
 packaging/linux/         systeminfo.png (icon source) + install-smbios-snapshot.sh (one-time Linux RAM-module setup).
 docs/                    Empty placeholder (there is no database/ directory).
 ```
@@ -120,8 +121,8 @@ History: background service appends every sample to `.jsonl` → frontend Analyt
 | Battery | Battery-class-driver IOCTL | sysfs `BAT*`, dynamic discovery |
 | GPU | `Win32_VideoController` + `GPU Engine` perf counters (every adapter, live per-engine) | native engine `get_gpu_vendor()`/`get_amd_gpu_usage_percent()` (sysfs) — narrower than Windows |
 | System identity | `Win32_ComputerSystem`/`Win32_BIOS`/`Win32_OperatingSystem` | DMI sysfs, `/etc/os-release`, `/proc/uptime` |
-| CPU temp / fan RPM | CPU temp: LibreHardwareMonitorLib via `services/Cpu/LibreHardwareCpuSensorSource.cs` (2.6.3; needs administrator, and the PawnIO driver for the library version in use; the reason for a missing value comes from `CpuSensorSelection.ExplainMissingTemperature`; selection rules in `CpuSensorSelection.cs`, native value never replaced). Fan RPM: native, `Unavailable` if no trustworthy sensor | Native engine + sysfs thermal zones, same rule |
-| Integrated GPU temp (Windows) | LibreHardwareMonitorLib via `services/Gpu/LibreHardwareGpuSensorSource.cs` (2.6.6), merged into the overlay snapshot by `GpuSensorSelection.Apply` (called from `OverlayService.Read`): only an `integrated` Intel/AMD adapter with no native temperature, from the `GPU Core` sensor, 1..125 °C, paired by normalised name or by lone-adapter elimination; otherwise a specific note, never a number | Native engine / sysfs, NVIDIA via NVML, all unchanged |
+| CPU temp / fan RPM | CPU temp: LibreHardwareMonitorLib via `Services/Cpu/LibreHardwareCpuSensorSource.cs` (2.6.3; needs administrator, and the PawnIO driver for the library version in use; the reason for a missing value comes from `CpuSensorSelection.ExplainMissingTemperature`; selection rules in `CpuSensorSelection.cs`, native value never replaced). Fan RPM: native, `Unavailable` if no trustworthy sensor | Native engine + sysfs thermal zones, same rule |
+| Integrated GPU temp (Windows) | LibreHardwareMonitorLib via `Services/Gpu/LibreHardwareGpuSensorSource.cs` (2.6.6), merged into the overlay snapshot by `GpuSensorSelection.Apply` (called from `OverlayService.Read`): only an `integrated` Intel/AMD adapter with no native temperature, from the `GPU Core` sensor, 1..125 °C, paired by normalised name or by lone-adapter elimination; otherwise a specific note, never a number | Native engine / sysfs, NVIDIA via NVML, all unchanged |
 
 ## 🪟 Desktop shell (Tauri 2) details
 
@@ -147,7 +148,7 @@ CORS locked to `localhost:5173` (Vite dev), `tauri.localhost` (Win WebView2), `t
 cd backend/SystemMonitor.Api && dotnet run  # :5132
 cd frontend && npm run dev                  # :5173
 cd frontend && npm run tauri dev            # actual desktop shell, dev mode
-cmake -S native -B native/build -DBUILD_NATIVE_TESTS=ON && cmake --build native/build && (cd native/build && ctest --output-on-failure)   # native + assembly tests
+cmake -S Engine/Cpp -B Engine/Cpp/build -DBUILD_NATIVE_TESTS=ON && cmake --build Engine/Cpp/build && (cd Engine/Cpp/build && ctest --output-on-failure)   # native + assembly tests
 cd frontend/src-tauri/supervisor-tests && cargo test   # process-supervision tests (std-only fake service; uses loopback ports 18101-18152)
 dotnet run --project backend/SystemMonitor.Tests   # analytics + storage + native wrapper tests (SYSTEMINFO_NATIVE_DIR=<native build dir>)
 ./build.sh                                  # fail-fast full validation build (native → backend → frontend)
@@ -191,7 +192,7 @@ Release = push a new top `CHANGELOG.md` entry to `main`. Pipeline: `version` job
 - **The SMBIOS parser is shared and byte-buffer driven.** Don't add platform branches inside the Type 16/17 parsing; only `si_dmi_load_table` (platform/<os>/smbios_source.cpp) is platform-specific. Any parser change needs a case in `tests/native/smbios_parse_test.cpp` (hand-built tables; unknown stays `-1`/empty, never a fabricated 0). `smbios_loader_test` `#include`s `hardware_info.cpp`, so it is a standalone target and must not link `systemmonitor_native`.
 - **Assembly kernels must stay verified.** Any new or changed kernel needs a C++ reference and a case in `si_kernel_selftest()` covering n = 0, 1, odd lengths, tails and misaligned pointers; SSE2 is the only baseline — AVX2 is reachable only through the CPUID+XGETBV dispatcher.
 - **An unbounded query range is a trap.** `ISnapshotStore.QueryAsync(DateTime.MinValue, …)` is legal because the store clamps to the oldest day on disk; don't add code that iterates calendar days itself.
-- When zipping the repo for sharing, don't exclude `native/build*` — it also matches `native/build.sh`.
+- When zipping the repo for sharing, don't exclude `Engine/Cpp/build*` — it also matches `Engine/Cpp/build.sh`. Leave out the built `libsystemmonitor_native.so` in `backend/SystemMonitor.Api/` too (it is a build output, rebuilt by `Engine/Cpp/build.sh`).
 
 ## ⚠️ Unverified / known-limited (check `PROJECT_STATUS.md` before assuming these work)
 

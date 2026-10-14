@@ -5,7 +5,7 @@ namespace SystemMonitor.Api.Native;
 
 public static class NativeInterop
 {
-    // Overlay engine: a native background sampler publishing one JSON snapshot (see native/src/overlay).
+    // Overlay engine: a native background sampler publishing one JSON snapshot (see Engine/Cpp/src/overlay).
     [DllImport("systemmonitor_native", EntryPoint = "si_overlay_start")]
     public static extern int OverlayStart(int intervalMs, IntPtr root);
 
@@ -16,7 +16,7 @@ public static class NativeInterop
     [DllImport("systemmonitor_native", EntryPoint = "si_overlay_snapshot_json")]
     public static extern int OverlaySnapshotJson([Out] byte[] buffer, int capacity);
 
-    // CPU tab: identity, topology, caches, sensors, power, policy and activity as one JSON document (native/src/cpu_detail.cpp).
+    // CPU tab: identity, topology, caches, sensors, power, policy and activity as one JSON document (Engine/Cpp/src/cpu_detail.cpp).
     // Length written, 0 = nothing readable, negative = buffer too small (the magnitude is the size needed).
     [DllImport("systemmonitor_native", EntryPoint = "si_cpu_detail_json")]
     public static extern int CpuDetailJson([Out] byte[] buffer, int capacity);
@@ -81,7 +81,7 @@ public static class NativeInterop
     [DllImport("systemmonitor_native", EntryPoint = "get_gpu_luid")]
     public static extern int GetGpuLuid(int adapterIndex, out long luid);
 
-    // ---- CPU features + Assembly kernels (native/src/simd_dispatch.cpp) ----
+    // ---- CPU features + Assembly kernels (Engine/Cpp/src/simd_dispatch.cpp) ----
     // Every 64-bit quantity crosses the boundary as C# long (== C++ long long);
     // nothing here narrows to int. Feature bits mirror SI_FEAT_* in native_engine.h.
     public const long FeatSse = 1L << 0, FeatSse2 = 1L << 1, FeatSse3 = 1L << 2, FeatSsse3 = 1L << 3,
@@ -125,7 +125,7 @@ public static class NativeInterop
     [DllImport("systemmonitor_native", EntryPoint = "si_memory_bandwidth")]
     public static extern int MemoryBandwidth(long bytes, int repeats, out double copyGBps, out double readGBps);
 
-    // ---- topology / storage / fans (native/platform/*, native/src/smbios/). 64-bit byte counts stay `long`. ----
+    // ---- topology / storage / fans (Engine/Cpp/platform/*, Engine/Cpp/src/smbios/). 64-bit byte counts stay `long`. ----
     [DllImport("systemmonitor_native", EntryPoint = "si_get_cpu_topology")]
     public static extern int GetCpuTopology(out int physicalCores, out int logicalCores, out int packages);
 
@@ -140,7 +140,7 @@ public static class NativeInterop
     [DllImport("systemmonitor_native", EntryPoint = "si_get_fan")]
     public static extern int GetFan(int index, StringBuilder labelOut, int labelSize, out int rpm);
 
-    // ---- RAM (native/platform/*, native/src/smbios/). Unknown numeric = -1, unknown string = "" (see native_engine.h). ----
+    // ---- RAM (Engine/Cpp/platform/*, Engine/Cpp/src/smbios/). Unknown numeric = -1, unknown string = "" (see native_engine.h). ----
     // Runtime state: total/available/free/cached/buffers/swap/commit, all 64-bit bytes.
     [DllImport("systemmonitor_native", EntryPoint = "si_get_memory_info")]
     public static extern int GetMemoryInfo(

@@ -194,6 +194,6 @@ dist
 
 # Native build artifacts
 *.so
-native/build/
+Engine/Cpp/build/
 backend/SystemMonitor.Api/data/
-native/build-tests/
+Engine/Cpp/build-tests/

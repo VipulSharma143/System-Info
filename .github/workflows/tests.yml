@@ -51,20 +51,20 @@ jobs:
       - name: Native + Assembly tests (ctest)
         run: |
           set -e
-          cmake -S native -B native/build-tests -DCMAKE_BUILD_TYPE=Release -DBUILD_NATIVE_TESTS=ON
-          cmake --build native/build-tests --parallel
-          ctest --test-dir native/build-tests --output-on-failure
+          cmake -S Engine/Cpp -B Engine/Cpp/build-tests -DCMAKE_BUILD_TYPE=Release -DBUILD_NATIVE_TESTS=ON
+          cmake --build Engine/Cpp/build-tests --parallel
+          ctest --test-dir Engine/Cpp/build-tests --output-on-failure
 
       - name: C# tests (analytics, storage, native wrappers)
         run: |
           set -e
-          export SYSTEMINFO_NATIVE_DIR="$PWD/native/build-tests"
+          export SYSTEMINFO_NATIVE_DIR="$PWD/Engine/Cpp/build-tests"
           dotnet run --project backend/SystemMonitor.Tests -c Release
 
       - name: Native tests with assembly disabled (portable tier must give identical answers)
         run: |
           set -e
-          SYSTEMINFO_NO_ASM=1 ctest --test-dir native/build-tests --output-on-failure -R "asm_tiers|kernel_selftest"
+          SYSTEMINFO_NO_ASM=1 ctest --test-dir Engine/Cpp/build-tests --output-on-failure -R "asm_tiers|kernel_selftest"
 
       - name: Process supervision + update-release tests (Rust, no Tauri toolchain needed)
         working-directory: frontend/src-tauri/supervisor-tests
@@ -119,15 +119,15 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $env:PATH = "C:\Program Files\NASM;$env:PATH"
-          cmake -S native -B native/build-tests -A x64 -DBUILD_NATIVE_TESTS=ON
-          cmake --build native/build-tests --config Release --parallel
-          ctest --test-dir native/build-tests -C Release --output-on-failure
+          cmake -S Engine/Cpp -B Engine/Cpp/build-tests -A x64 -DBUILD_NATIVE_TESTS=ON
+          cmake --build Engine/Cpp/build-tests --config Release --parallel
+          ctest --test-dir Engine/Cpp/build-tests -C Release --output-on-failure
 
       - name: C# tests (analytics, storage, native wrappers)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $dll = Get-ChildItem -Path native/build-tests -Recurse -Filter "systemmonitor_native.dll" | Select-Object -First 1
+          $dll = Get-ChildItem -Path Engine/Cpp/build-tests -Recurse -Filter "systemmonitor_native.dll" | Select-Object -First 1
           if (-not $dll) { Write-Error "systemmonitor_native.dll was not produced."; exit 1 }
           $env:SYSTEMINFO_NATIVE_DIR = $dll.DirectoryName
           dotnet run --project backend/SystemMonitor.Tests -c Release

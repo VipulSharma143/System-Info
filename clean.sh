@@ -17,7 +17,7 @@ for path in \
     frontend/node_modules frontend/dist frontend/.vite frontend/node_modules/.vite \
     frontend/src-tauri/target frontend/src-tauri/supervisor-tests/target \
     frontend/src-tauri/gen/schemas \
-    native/build native/build-tests native/cmake-build-debug native/cmake-build-release \
+    Engine/Cpp/build Engine/Cpp/build-tests Engine/Cpp/cmake-build-debug Engine/Cpp/cmake-build-release \
     node_modules logs; do
     remove "$ROOT/$path"
 done

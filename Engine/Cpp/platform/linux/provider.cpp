@@ -1,0 +1,308 @@
+#include "../../include/native_engine.h"
+#include "../../src/internal.h"
+#include <fstream>
+#include <locale>
+#include <sstream>
+#include <string>
+#include <cstring>
+#include <vector>
+#include <unistd.h>
+#include <chrono>
+#include <mutex>
+#include <filesystem>
+
+namespace fs = std::filesystem;
+
+// Exceptions must never cross the extern "C" boundary into .NET (that is a
+// process crash). std::filesystem's throwing overloads raise on permission
+// errors, unreadable /sys nodes, or a directory vanishing mid-scan (hot-unplug),
+// so every listing and existence check goes through these error_code versions.
+static bool path_exists(const std::string& p) {
+    std::error_code ec;
+    return fs::exists(p, ec) && !ec;
+}
+static std::vector<fs::directory_entry> list_dir(const std::string& p) {
+    std::vector<fs::directory_entry> out;
+    std::error_code ec;
+    fs::directory_iterator it(p, fs::directory_options::skip_permission_denied, ec);
+    for (fs::directory_iterator end; !ec && it != end; it.increment(ec)) out.push_back(*it);
+    return out;
+}
+
+// ------------------------------------------------------------
+// Internal helpers
+// ------------------------------------------------------------
+
+struct CpuTimes {
+    long long idle;
+    long long total;
+};
+
+static CpuTimes read_cpu_times() {
+    std::ifstream file("/proc/stat");
+    std::string line;
+    std::getline(file, line);
+
+    std::istringstream iss(line);
+    std::string cpuLabel;
+    iss >> cpuLabel;
+
+    std::vector<long long> values;
+    long long val;
+    while (iss >> val) values.push_back(val);
+
+    long long idle = values.size() > 3 ? values[3] : 0;
+    long long total = 0;
+    for (auto v : values) total += v;
+
+    return { idle, total };
+}
+
+extern "C" {
+
+int get_cpu_info(char* modelNameOut, int bufferSize) {
+    std::ifstream file("/proc/cpuinfo");
+    std::string line;
+    std::string modelName = "Unknown";
+    int coreCount = 0;
+
+    while (std::getline(file, line)) {
+        if (line.rfind("model name", 0) == 0 && modelName == "Unknown") {
+            size_t colonPos = line.find(':');
+            if (colonPos != std::string::npos) {
+                modelName = line.substr(colonPos + 2);
+            }
+        }
+        if (line.rfind("processor", 0) == 0) {
+            coreCount++;
+        }
+    }
+
+    std::strncpy(modelNameOut, modelName.c_str(), bufferSize - 1);
+    modelNameOut[bufferSize - 1] = '\0';
+
+    return coreCount;
+}
+
+// Usage is the busy share of CPU time since the previous call, so a call never sleeps. Only the first call has no
+// earlier sample and waits one 200 ms window to make one. Calls closer than 100 ms apart return the last value:
+// a window that short is mostly scheduler noise.
+double get_cpu_usage_percent() {
+    static std::mutex gate;
+    static bool primed = false;
+    static CpuTimes prev{0, 0};
+    static std::chrono::steady_clock::time_point prevAt;
+    static double last = 0.0;
+
+    if (!gate.try_lock()) return last;   // another caller is already sampling; reuse its result
+    std::lock_guard<std::mutex> hold(gate, std::adopt_lock);
+
+    if (!primed) {
+        prev = read_cpu_times();
+        prevAt = std::chrono::steady_clock::now();
+        usleep(200000);
+        primed = true;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - prevAt < std::chrono::milliseconds(100)) return last;
+
+    const CpuTimes cur = read_cpu_times();
+    const long long idleDelta = cur.idle - prev.idle;
+    const long long totalDelta = cur.total - prev.total;
+    prev = cur;
+    prevAt = now;
+    if (totalDelta <= 0) return last;
+    last = (1.0 - (double)idleDelta / totalDelta) * 100.0;
+    return last;
+}
+
+double get_cpu_temperature() {
+    double celsius = 0.0;
+    return si_cpu_temperature(&celsius, nullptr, 0) == 1 ? celsius : -1.0;
+}
+
+int get_gpu_vendor() {
+    const std::string drmPath = "/sys/class/drm";
+    if (!path_exists(drmPath)) return 0;
+
+    for (const auto& entry : list_dir(drmPath)) {
+        std::string name = entry.path().filename().string();
+        if (name.rfind("card", 0) != 0) continue;
+        if (name.find('-') != std::string::npos) continue;
+
+        std::string vendorPath = entry.path().string() + "/device/vendor";
+        std::ifstream file(vendorPath);
+        if (!file.is_open()) continue;
+
+        std::string vendorId;
+        file >> vendorId;
+
+        if (vendorId == "0x10de") return 1;
+        if (vendorId == "0x1002") return 2;
+        if (vendorId == "0x8086") return 3;
+    }
+
+    return 0;
+}
+
+double get_amd_gpu_usage_percent() {
+    const std::string drmPath = "/sys/class/drm";
+
+    for (const auto& entry : list_dir(drmPath)) {
+        std::string name = entry.path().filename().string();
+        if (name.rfind("card", 0) != 0) continue;
+        if (name.find('-') != std::string::npos) continue;
+
+        std::string busyPath = entry.path().string() + "/device/gpu_busy_percent";
+        std::ifstream file(busyPath);
+        if (!file.is_open()) continue;
+
+        int percent;
+        file >> percent;
+        return (double)percent;
+    }
+
+    return -1.0;
+}
+
+int get_fan_rpm() {
+    const std::string hwmonPath = "/sys/class/hwmon";
+    if (!path_exists(hwmonPath)) return -1;
+
+    for (const auto& entry : list_dir(hwmonPath)) {
+        std::string fanPath = entry.path().string() + "/fan1_input";
+        std::ifstream file(fanPath);
+        if (!file.is_open()) continue;
+
+        int rpm = -1;
+        if (!(file >> rpm)) continue;   // unreadable/garbled node: try the next hwmon, don't return junk
+        return rpm;
+    }
+
+    return -1;
+}
+
+int get_battery_info_json(char* bufferOut, int bufferSize) {
+    if (!bufferOut || bufferSize <= 0) return -1;
+    const std::string psPath = "/sys/class/power_supply";
+    std::string batteryDir;
+
+    // Dynamic discovery — same lesson as get_gpu_vendor(): don't assume BAT0.
+    // This machine reports BAT1; another might report BAT0 or CMB1.
+    if (path_exists(psPath)) {
+        for (const auto& entry : list_dir(psPath)) {
+            std::ifstream typeFile(entry.path().string() + "/type");
+            if (!typeFile.is_open()) continue;
+            std::string type;
+            typeFile >> type;
+            if (type == "Battery") {
+                batteryDir = entry.path().string();
+                break; // first battery only — multi-battery laptops deferred
+            }
+        }
+    }
+
+    if (batteryDir.empty()) {
+        // Desktop, or no battery exposed at all — honest, not a crash.
+        return copy_out_json(bufferOut, bufferSize, "{\"present\":false}", 0);
+    }
+
+    auto readStr = [&](const std::string& file) -> std::string {
+        std::ifstream f(batteryDir + "/" + file);
+        std::string val;
+        std::getline(f, val);
+        return val;
+    };
+    auto readLong = [&](const std::string& file) -> long long {
+        std::ifstream f(batteryDir + "/" + file);
+        long long val = -1;
+        f >> val;
+        return val;
+    };
+
+    std::string status = readStr("status");
+    if (status.empty()) status = "Unknown";
+
+    long long capacityPercent   = readLong("capacity");            // kernel-computed 0-100
+    long long cycleCount        = readLong("cycle_count");         // present but unreliable on some firmware
+    long long chargeFullDesign  = readLong("charge_full_design");  // µAh
+    long long chargeFull        = readLong("charge_full");         // µAh
+    long long chargeNow         = readLong("charge_now");          // µAh
+    long long voltageNowUv      = readLong("voltage_now");         // µV
+    long long currentNowUa      = readLong("current_now");         // µA
+
+    // Some hardware reports energy_* (µWh) instead of charge_* (µAh) — never both.
+    // Yours uses charge_*, but fall back for other machines this code runs on.
+    bool usingEnergyUnits = false;
+    if (chargeFullDesign <= 0 || chargeFull <= 0) {
+        long long energyFullDesign = readLong("energy_full_design");
+        long long energyFull       = readLong("energy_full");
+        long long energyNow        = readLong("energy_now");
+        if (energyFullDesign > 0 && energyFull > 0) {
+            chargeFullDesign = energyFullDesign;
+            chargeFull       = energyFull;
+            chargeNow        = energyNow;
+            usingEnergyUnits = true;
+        }
+    }
+
+    double designMah = chargeFullDesign > 0 ? chargeFullDesign / 1000.0 : -1.0;
+    double fullMah    = chargeFull > 0 ? chargeFull / 1000.0 : -1.0;
+    double nowMah     = chargeNow >= 0 ? chargeNow / 1000.0 : -1.0;
+
+    double healthPercent = (designMah > 0 && fullMah > 0)
+        ? (fullMah / designMah) * 100.0
+        : -1.0;
+
+    double voltageV = voltageNowUv > 0 ? voltageNowUv / 1000000.0 : -1.0;
+    double currentA  = currentNowUa >= 0 ? currentNowUa / 1000000.0 : -1.0;
+    double powerW    = (voltageV > 0 && currentA >= 0) ? voltageV * currentA : -1.0;
+
+    std::string model        = readStr("model_name");
+    std::string manufacturer = readStr("manufacturer");
+
+    std::ostringstream json;
+    json.imbue(std::locale::classic());   // never a decimal comma, whatever the host locale is
+    json << "{"
+         << "\"present\":true,"
+         << "\"status\":\"" << json_escape(status) << "\","
+         << "\"capacityPercent\":" << capacityPercent << ","
+         << "\"cycleCount\":" << cycleCount << ","
+         << "\"designCapacityMah\":" << designMah << ","
+         << "\"fullCapacityMah\":" << fullMah << ","
+         << "\"nowCapacityMah\":" << nowMah << ","
+         << "\"healthPercent\":" << healthPercent << ","
+         << "\"voltageNow\":" << voltageV << ","
+         << "\"currentNow\":" << currentA << ","
+         << "\"powerWatts\":" << powerW << ","
+         << "\"usingEnergyUnits\":" << (usingEnergyUnits ? "true" : "false") << ","
+         << "\"model\":\"" << json_escape(model) << "\","
+         << "\"manufacturer\":\"" << json_escape(manufacturer) << "\""
+         << "}";
+
+    return copy_out_json(bufferOut, bufferSize, json.str(), 1);
+}
+
+// Windows-only path (DXGI's DedicatedVideoMemory). Linux VRAM detection
+// would need a separate sysfs-based implementation (e.g.
+// /sys/class/drm/cardN/device/mem_info_vram_total on some AMD/Nouveau
+// drivers) — out of scope for this fix. This stub exists only so the
+// shared library exports the same symbol on both platforms; it always
+// reports "no such adapter" so a caller looping adapterIndex until 0
+// terminates immediately and never gets fabricated data.
+int get_gpu_vram_bytes(int adapterIndex, char* nameOut, int nameBufferSize,
+                        long long* dedicatedBytesOut, long long* sharedSystemBytesOut) {
+    (void)adapterIndex;
+    if (nameOut && nameBufferSize > 0) nameOut[0] = '\0';
+    if (dedicatedBytesOut) *dedicatedBytesOut = 0;
+    if (sharedSystemBytesOut) *sharedSystemBytesOut = 0;
+    return 0;
+}
+
+int get_gpu_luid(int adapterIndex, long long* luidOut) {
+    (void)adapterIndex;
+    if (luidOut) *luidOut = 0;
+    return 0;
+}
+
+} // extern "C"
