@@ -1,6 +1,6 @@
 [package]
 name = "system-info"
-version = "2.6.9"
+version = "2.7.0"
 license = "MIT"
 description = "System Info — native desktop shell"
 authors = ["Vipul Sharma"]

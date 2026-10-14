@@ -75,26 +75,28 @@ public partial class WindowsSystemInfoProvider : ISystemInfoProvider
 
     public Task<List<ProcessInfo>> GetProcessesAsync()
     {
-        var processes = Process.GetProcesses()
-            .Select(p =>
+        // Every Process object is disposed: this runs about once a second, and leaving hundreds of them for the finalizer is
+        // needless garbage and handle pressure.
+        var all = Process.GetProcesses();
+        var list = new List<ProcessInfo>(all.Length);
+        foreach (var p in all)
+        {
+            try
             {
-                try
-                {
-                    return new ProcessInfo(p.Id, p.ProcessName, p.WorkingSet64 / 1024 / 1024);
-                }
-                catch
-                {
-                    // Some processes (system/protected) throw on access — skip them
-                    return null;
-                }
-            })
-            .Where(p => p != null)
-            .Cast<ProcessInfo>()
-            .OrderByDescending(p => p.MemoryMB)
-            .Take(50)
-            .ToList();
+                list.Add(new ProcessInfo(p.Id, p.ProcessName, p.WorkingSet64 / 1024 / 1024));
+            }
+            catch
+            {
+                // Some processes (system/protected) throw on access — skip them
+            }
+            finally
+            {
+                p.Dispose();
+            }
+        }
 
-        return Task.FromResult(processes);
+        // OrderByDescending is stable, so processes with the same memory keep the order Windows listed them in.
+        return Task.FromResult(list.OrderByDescending(p => p.MemoryMB).Take(50).ToList());
     }
 
     public List<DiskInfo> GetDisks()

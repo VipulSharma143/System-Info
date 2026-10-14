@@ -151,7 +151,7 @@ System Info/
 │   │   │   └── smbios/              # platform-neutral SMBIOS memory-table parsing + DIMM API
 │   │   ├── platform/{linux,windows}/ # per-OS cpu, storage, fan, memory, smbios_source, snapshot_writer, provider
 │   │   ├── tests/                   # C++/Assembly tests (ctest): kernel_selftest, asm_tiers, memory_info/hardware,
-│   │   │                            # smbios_parse/loader, battery_json, cpu_*, overlay_engine, host_snapshot
+│   │   │                            # smbios_parse/loader, battery_json, storage_volume, cpu_*, overlay_engine, host_snapshot
 │   │   ├── tools/                   # smbios_snapshot.cpp (Linux helper that saves the memory-only SMBIOS records)
 │   │   └── build.sh                 # Standalone native build used by ./build.sh
 │   └── Assembly/                    # x86-64 NASM: cpu/ (benchmark loops), math/ (vector add, dot, sum,

@@ -273,6 +273,44 @@ public class LocalJsonSnapshotStore : ISnapshotStore
         }
     }
 
+    /// <summary>
+    /// The "timestamp" of one saved line. The whole line is still checked to be valid JSON (a half-written line is rejected, as
+    /// before), but it is read as a token stream instead of being built into a document first: this runs for every line of every
+    /// day that is queried. Throws the same exceptions a bad line always caused: JsonException (not valid JSON),
+    /// InvalidOperationException (not an object, or the timestamp is not a string), KeyNotFoundException (no timestamp) and
+    /// FormatException (not a date).
+    /// </summary>
+    internal static DateTime ReadTimestamp(string line)
+    {
+        var max = Encoding.UTF8.GetMaxByteCount(line.Length);
+        byte[]? rented = null;
+        Span<byte> buffer = max <= 512 ? stackalloc byte[512] : (rented = System.Buffers.ArrayPool<byte>.Shared.Rent(max));
+        try
+        {
+            var length = Encoding.UTF8.GetBytes(line, buffer);
+            var reader = new Utf8JsonReader(buffer[..length]);
+            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+                throw new InvalidOperationException("A snapshot line must be a JSON object.");
+
+            DateTime? timestamp = null;
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.PropertyName && reader.CurrentDepth == 1)
+                {
+                    var isTimestamp = reader.ValueTextEquals("timestamp"u8);
+                    reader.Read();
+                    if (isTimestamp) timestamp ??= reader.GetDateTime();
+                    else reader.Skip();
+                }
+            }
+            return timestamp ?? throw new KeyNotFoundException("timestamp");
+        }
+        finally
+        {
+            if (rented is not null) System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
     public Task<IReadOnlyList<SystemSnapshot>> QueryAsync(
         DateTime from,
         DateTime to,
@@ -313,10 +351,7 @@ public class LocalJsonSnapshotStore : ISnapshotStore
 
                 try
                 {
-                    using var doc = JsonDocument.Parse(line);
-                    timestamp = doc.RootElement
-                        .GetProperty("timestamp")
-                        .GetDateTime();
+                    timestamp = ReadTimestamp(line);
                 }
                 catch (Exception ex) when (
                     ex is JsonException or InvalidOperationException or

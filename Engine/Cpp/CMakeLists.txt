@@ -146,6 +146,12 @@ if(BUILD_NATIVE_TESTS)
     add_test(NAME battery_json_test COMMAND battery_json_test)
     set_tests_properties(battery_json_test PROPERTIES TIMEOUT 30)
 
+    # Storage listing: one consistent scan per listing, same answer on a repeat.
+    add_executable(storage_volume_test tests/storage_volume_test.cpp)
+    target_link_libraries(storage_volume_test systemmonitor_native)
+    add_test(NAME storage_volume_test COMMAND storage_volume_test)
+    set_tests_properties(storage_volume_test PROPERTIES TIMEOUT 30)
+
     # Host snapshot: pure parsers against fixture text, plus a live sanity read. No hardware assumptions.
     add_executable(host_snapshot_test tests/host_snapshot_test.cpp)
     target_link_libraries(host_snapshot_test systemmonitor_native)

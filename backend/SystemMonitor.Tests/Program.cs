@@ -197,6 +197,10 @@ finally { try { Directory.Delete(dir, true); } catch { } }
     failures += nf; checks += nc;
 }
 {
+    var (nf, nc) = StorageParsingTests.Run();
+    failures += nf; checks += nc;
+}
+{
     var (nf, nc) = DataLifecycleTests.Run();
     failures += nf; checks += nc;
 }

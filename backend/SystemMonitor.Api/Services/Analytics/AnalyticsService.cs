@@ -154,7 +154,8 @@ public sealed class AnalyticsService
 
         var cpuRuns = FindSustained(cpu, o.CpuSustainedThreshold, o.CpuSustainedMinSamples);
         var netRuns = FindSustained(net, o.NetSustainedThresholdKbps, o.NetSustainedMinSamples);
-        var inSustained = new HashSet<int>(cpuRuns.SelectMany(r => Enumerable.Range(r.Start, r.End - r.Start + 1)));
+        var inSustained = new bool[cpu.Count];
+        foreach (var r in cpuRuns) Array.Fill(inSustained, true, r.Start, r.End - r.Start + 1);
 
         Episode MakeEpisode(List<double?> values, (int Start, int End) r, string? cls)
         {
@@ -169,7 +170,7 @@ public sealed class AnalyticsService
         var netEpisodes = netRuns.Select(r => MakeEpisode(net, r, null)).ToList();
         var spikes = new List<Spike>();
         for (int i = 0; i < cpu.Count; i++)
-            if (cpu[i] is { } v && v >= o.CpuSpikeThreshold && !inSustained.Contains(i))
+            if (cpu[i] is { } v && v >= o.CpuSpikeThreshold && !inSustained[i])
                 spikes.Add(new Spike(Iso(ts[i]), Math.Round(v, 1)));
 
         return new BottlenecksResult(
@@ -187,22 +188,28 @@ public sealed class AnalyticsService
     /// <summary>Least-squares slope of value vs. elapsed seconds; null if fewer than 2 valid points or zero time spread.</summary>
     public static double? LinearSlopePerSecond(IReadOnlyList<DateTime> timestamps, IReadOnlyList<double?> values)
     {
-        var xs = new List<double>();
-        var ys = new List<double>();
+        // Two passes over the valid points (mean first, then the sums of products) with no temporary lists; the arithmetic and its
+        // order are the same as when the points were collected into lists, so the result is identical.
+        var n = Math.Min(values.Count, timestamps.Count);
         DateTime? t0 = null;
-        for (int i = 0; i < values.Count && i < timestamps.Count; i++)
+        int count = 0;
+        double sumX = 0, sumY = 0;
+        for (int i = 0; i < n; i++)
         {
             if (values[i] is not { } v || double.IsNaN(v) || double.IsInfinity(v)) continue;
             t0 ??= timestamps[i];
-            xs.Add((timestamps[i] - t0.Value).TotalSeconds);
-            ys.Add(v);
+            sumX += (timestamps[i] - t0.Value).TotalSeconds;
+            sumY += v;
+            count++;
         }
-        if (xs.Count < 2) return null;
-        double mx = xs.Average(), my = ys.Average(), num = 0, den = 0;
-        for (int i = 0; i < xs.Count; i++)
+        if (count < 2) return null;
+        double mx = sumX / count, my = sumY / count, num = 0, den = 0;
+        for (int i = 0; i < n; i++)
         {
-            num += (xs[i] - mx) * (ys[i] - my);
-            den += (xs[i] - mx) * (xs[i] - mx);
+            if (values[i] is not { } v || double.IsNaN(v) || double.IsInfinity(v)) continue;
+            var x = (timestamps[i] - t0!.Value).TotalSeconds;
+            num += (x - mx) * (v - my);
+            den += (x - mx) * (x - mx);
         }
         return den == 0 ? null : num / den;
     }
@@ -265,10 +272,11 @@ public sealed class AnalyticsService
         return await Task.Run(() =>
         {
             var list = new List<Sample>(rows.Count);
+            var names = new NameTable();
             foreach (var row in rows)
             {
                 ct.ThrowIfCancellationRequested();
-                var sample = ParseRow(row);
+                var sample = ParseRow(row, names);
                 if (sample is not null) list.Add(sample);
             }
             list.Sort((a, b) => a.Ts.CompareTo(b.Ts));
@@ -276,26 +284,91 @@ public sealed class AnalyticsService
         }, ct);
     }
 
-    private static Sample? ParseRow(SystemSnapshot row)
+    // Interface names repeat in every row; one string per distinct name is shared instead of one per row.
+    private sealed class NameTable
     {
+        private readonly List<(byte[] Utf8, string Text)> _names = new();
+
+        public string Read(ref Utf8JsonReader reader)
+        {
+            foreach (var (utf8, text) in _names)
+                if (reader.ValueTextEquals(utf8)) return text;
+            var name = reader.GetString()!;
+            _names.Add((System.Text.Encoding.UTF8.GetBytes(name), name));
+            return name;
+        }
+    }
+
+    private static Sample? ParseRow(SystemSnapshot row, NameTable names)
+    {
+        var json = row.Json;
+        var max = System.Text.Encoding.UTF8.GetMaxByteCount(json.Length);
+        byte[]? rented = null;
+        Span<byte> buffer = max <= 1024 ? stackalloc byte[1024] : (rented = System.Buffers.ArrayPool<byte>.Shared.Rent(max));
         try
         {
-            using var doc = JsonDocument.Parse(row.Json);
-            var root = doc.RootElement;
+            var length = System.Text.Encoding.UTF8.GetBytes(json, buffer);
+            var reader = new Utf8JsonReader(buffer[..length]);
+            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject) return null;
+
             var s = new Sample { Ts = DateTime.SpecifyKind(row.TimestampUtc, DateTimeKind.Utc) };
-            if (root.TryGetProperty("cpuUsedPercent", out var cpu) && cpu.ValueKind == JsonValueKind.Number) s.Cpu = cpu.GetDouble();
-            if (root.TryGetProperty("network", out var net) && net.ValueKind == JsonValueKind.Array)
-                foreach (var e in net.EnumerateArray())
+            while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+            {
+                if (reader.ValueTextEquals("cpuUsedPercent"u8))
                 {
-                    if (e.ValueKind != JsonValueKind.Object) continue;
-                    var iface = e.TryGetProperty("iface", out var i) && i.ValueKind == JsonValueKind.String ? i.GetString()! : "unknown";
-                    s.Net.Add((iface, Num(e, "rxKBps"), Num(e, "txKBps")));
+                    reader.Read();
+                    if (reader.TokenType == JsonTokenType.Number) s.Cpu = reader.GetDouble();
+                    else reader.Skip();
                 }
+                else if (reader.ValueTextEquals("network"u8))
+                {
+                    reader.Read();
+                    if (reader.TokenType == JsonTokenType.StartArray) ReadNetwork(ref reader, s, names);
+                    else reader.Skip();
+                }
+                else
+                {
+                    reader.Read();
+                    reader.Skip();
+                }
+            }
             return s;
         }
         catch (JsonException) { return null; }
+        finally
+        {
+            if (rented is not null) System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+        }
     }
 
-    private static double? Num(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : null;
+    // Reader is on the StartArray of "network"; returns with it on the matching EndArray.
+    private static void ReadNetwork(ref Utf8JsonReader reader, Sample s, NameTable names)
+    {
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+        {
+            if (reader.TokenType != JsonTokenType.StartObject) { reader.Skip(); continue; }
+            string iface = "unknown";
+            double? rx = null, tx = null;
+            while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+            {
+                if (reader.ValueTextEquals("iface"u8))
+                {
+                    reader.Read();
+                    if (reader.TokenType == JsonTokenType.String) iface = names.Read(ref reader);
+                    else { iface = "unknown"; reader.Skip(); }
+                }
+                else if (reader.ValueTextEquals("rxKBps"u8)) { reader.Read(); rx = NumberOrNull(ref reader); }
+                else if (reader.ValueTextEquals("txKBps"u8)) { reader.Read(); tx = NumberOrNull(ref reader); }
+                else { reader.Read(); reader.Skip(); }
+            }
+            s.Net.Add((iface, rx, tx));
+        }
+    }
+
+    private static double? NumberOrNull(ref Utf8JsonReader reader)
+    {
+        if (reader.TokenType == JsonTokenType.Number) return reader.GetDouble();
+        reader.Skip();
+        return null;
+    }
 }

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -18,14 +17,14 @@ public sealed record BatteryWatching(
 public sealed record BatteryHistory(
     [property: JsonPropertyName("hasBattery")] bool HasBattery,
     [property: JsonPropertyName("retentionDays")] int RetentionDays,
-    [property: JsonPropertyName("generatedAtUtc")] System.DateTime GeneratedAtUtc,
+    [property: JsonPropertyName("generatedAtUtc")] DateTime GeneratedAtUtc,
     [property: JsonPropertyName("sessions")] List<BatterySession> Sessions,
     [property: JsonPropertyName("watching")] BatteryWatching? Watching);
 
 /// <summary>The file on disk: data/battery/sessions.json.</summary>
 public sealed record BatteryHistoryFile(
     [property: JsonPropertyName("version")] int Version,
-    [property: JsonPropertyName("savedAtUtc")] System.DateTime SavedAtUtc,
+    [property: JsonPropertyName("savedAtUtc")] DateTime SavedAtUtc,
     [property: JsonPropertyName("hasBattery")] bool HasBattery,
     [property: JsonPropertyName("state")] BatteryTrackerState State);
 
