@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SystemMonitor.Api.Interface;
+using SystemMonitor.Api.Native;
 
 namespace SystemMonitor.Api.Services;
 
@@ -149,29 +150,36 @@ public sealed class AnalyticsService
 
         var samples = all.Skip(o.SkipFirst).ToList();
         var ts = samples.Select(s => s.Ts).ToList();
-        var cpu = samples.Select(s => s.Cpu).ToList();
-        var net = samples.Select(s => (double?)s.Net.Sum(n => (n.Rx ?? 0) + (n.Tx ?? 0))).ToList();
-
-        var cpuRuns = FindSustained(cpu, o.CpuSustainedThreshold, o.CpuSustainedMinSamples);
-        var netRuns = FindSustained(net, o.NetSustainedThresholdKbps, o.NetSustainedMinSamples);
-        var inSustained = new bool[cpu.Count];
-        foreach (var r in cpuRuns) Array.Fill(inSustained, true, r.Start, r.End - r.Start + 1);
-
-        Episode MakeEpisode(List<double?> values, (int Start, int End) r, string? cls)
+        // One dense array per series (NaN = no reading), so run and spike detection can scan them with the native engine.
+        var cpu = new double[samples.Count];
+        var net = new double[samples.Count];
+        for (int i = 0; i < samples.Count; i++)
         {
-            var chunk = values.Skip(r.Start).Take(r.End - r.Start + 1).Where(v => v.HasValue).Select(v => v!.Value).ToList();
+            cpu[i] = samples[i].Cpu ?? double.NaN;
+            var total = 0.0;
+            foreach (var n in samples[i].Net) total += (n.Rx ?? 0) + (n.Tx ?? 0);
+            net[i] = total;
+        }
+
+        var cpuRuns = SustainedRuns(cpu, o.CpuSustainedThreshold, o.CpuSustainedMinSamples);
+        var netRuns = SustainedRuns(net, o.NetSustainedThresholdKbps, o.NetSustainedMinSamples);
+        var inSustained = new byte[cpu.Length];
+        foreach (var r in cpuRuns) Array.Fill(inSustained, (byte)1, r.Start, r.End - r.Start + 1);
+
+        Episode MakeEpisode(double[] values, (int Start, int End) r, string? cls)
+        {
+            // Every value inside a run is at or above its threshold, so none is missing: the peak is simply the largest.
             return new Episode(
                 Iso(ts[r.Start]), Iso(ts[r.End]),
                 Math.Round((ts[r.End] - ts[r.Start]).TotalSeconds, 1),
-                chunk.Count > 0 ? Math.Round(chunk.Max(), 1) : null,
+                Math.Round(Peak(values.AsSpan(r.Start, r.End - r.Start + 1)), 1),
                 r.End - r.Start + 1, cls);
         }
         var cpuEpisodes = cpuRuns.Select(r => MakeEpisode(cpu, r, Classify(r, net, o.NetSustainedThresholdKbps))).ToList();
         var netEpisodes = netRuns.Select(r => MakeEpisode(net, r, null)).ToList();
         var spikes = new List<Spike>();
-        for (int i = 0; i < cpu.Count; i++)
-            if (cpu[i] is { } v && v >= o.CpuSpikeThreshold && !inSustained[i])
-                spikes.Add(new Spike(Iso(ts[i]), Math.Round(v, 1)));
+        foreach (var i in SpikeIndexes(cpu, o.CpuSpikeThreshold, inSustained))
+            spikes.Add(new Spike(Iso(ts[i]), Math.Round(cpu[i], 1)));
 
         return new BottlenecksResult(
             samples.Count, Iso(ts[0]), Iso(ts[^1]), null,
@@ -188,9 +196,38 @@ public sealed class AnalyticsService
     /// <summary>Least-squares slope of value vs. elapsed seconds; null if fewer than 2 valid points or zero time spread.</summary>
     public static double? LinearSlopePerSecond(IReadOnlyList<DateTime> timestamps, IReadOnlyList<double?> values)
     {
+        var n = Math.Min(values.Count, timestamps.Count);
+
+        // Long series go to the native engine: the valid points are gathered into pooled arrays and the engine does the sums.
+        if (SeriesEngine.Accepts(n))
+        {
+            var xs = System.Buffers.ArrayPool<double>.Shared.Rent(n);
+            var ys = System.Buffers.ArrayPool<double>.Shared.Rent(n);
+            try
+            {
+                int k = 0;
+                DateTime? origin = null;
+                for (int i = 0; i < n; i++)
+                {
+                    if (values[i] is not { } v || double.IsNaN(v) || double.IsInfinity(v)) continue;
+                    origin ??= timestamps[i];
+                    xs[k] = (timestamps[i] - origin.Value).TotalSeconds;
+                    ys[k] = v;
+                    k++;
+                }
+                if (k < 2) return null;
+                if (SeriesEngine.TrySlope(xs.AsSpan(0, k), ys.AsSpan(0, k), out var native)) return native;
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<double>.Shared.Return(xs);
+                System.Buffers.ArrayPool<double>.Shared.Return(ys);
+            }
+        }
+        SeriesEngine.CountManaged();
+
         // Two passes over the valid points (mean first, then the sums of products) with no temporary lists; the arithmetic and its
         // order are the same as when the points were collected into lists, so the result is identical.
-        var n = Math.Min(values.Count, timestamps.Count);
         DateTime? t0 = null;
         int count = 0;
         double sumX = 0, sumY = 0;
@@ -222,36 +259,59 @@ public sealed class AnalyticsService
         return new DirectionalTrend(dir, Math.Round(perMin, 2));
     }
 
-    /// <summary>Runs of &gt;= minSamples consecutive values &gt;= threshold, as inclusive index ranges.</summary>
+    /// <summary>Runs of &gt;= minSamples consecutive values &gt;= threshold, as inclusive index ranges. A missing value ends a run.</summary>
     public static List<(int Start, int End)> FindSustained(IReadOnlyList<double?> values, double threshold, int minSamples)
     {
-        var runs = new List<(int, int)>();
-        int? start = null;
-        for (int i = 0; i < values.Count; i++)
-        {
-            bool above = values[i] is { } v && v >= threshold;
-            if (above && start is null) start = i;
-            else if (!above && start is not null)
-            {
-                if (i - start.Value >= minSamples) runs.Add((start.Value, i - 1));
-                start = null;
-            }
-        }
-        if (start is not null && values.Count - start.Value >= minSamples) runs.Add((start.Value, values.Count - 1));
-        return runs;
+        var dense = new double[values.Count];
+        for (int i = 0; i < dense.Length; i++) dense[i] = values[i] ?? double.NaN;
+        return SustainedRuns(dense, threshold, minSamples);
     }
 
-    private static string Classify((int Start, int End) run, IReadOnlyList<double?> net, double netThreshold)
+    // Native engine for long series, the plain version for short ones or when the engine is not there. Same answers.
+    private static List<(int Start, int End)> SustainedRuns(double[] values, double threshold, int minSamples)
     {
-        var chunk = net.Skip(run.Start).Take(run.End - run.Start + 1).Where(v => v.HasValue).Select(v => v!.Value).ToList();
-        var fraction = chunk.Count == 0 ? 0 : chunk.Count(v => v >= netThreshold) / (double)chunk.Count;
+        if (SeriesEngine.TryFindRuns(values, threshold, minSamples, out var runs)) return runs;
+        SeriesEngine.CountManaged();
+        return SeriesEngine.Reference.FindRuns(values, threshold, minSamples);
+    }
+
+    private static List<int> SpikeIndexes(double[] values, double threshold, byte[] skip)
+    {
+        if (SeriesEngine.TryCollectGe(values, threshold, skip, out var indexes)) return indexes;
+        SeriesEngine.CountManaged();
+        return SeriesEngine.Reference.CollectGe(values, threshold, skip);
+    }
+
+    private static double Peak(ReadOnlySpan<double> values)
+    {
+        if (SeriesEngine.TryStats(values, out var s)) return s.Max;
+        SeriesEngine.CountManaged();
+        var max = values[0];
+        foreach (var v in values) if (v > max) max = v;
+        return max;
+    }
+
+    private static string Classify((int Start, int End) run, double[] net, double netThreshold)
+    {
+        var chunk = net.AsSpan(run.Start, run.End - run.Start + 1);
+        int above;
+        if (!SeriesEngine.TryCountGe(chunk, netThreshold, out above))
+        {
+            SeriesEngine.CountManaged();
+            above = SeriesEngine.Reference.CountGe(chunk, netThreshold);
+        }
+        var fraction = above / (double)chunk.Length;
         return fraction >= 0.5 ? "combined_load" : "cpu_bound";
     }
 
     private static StatSummary? Summarize(IEnumerable<double?> values)
     {
         var v = values.Where(x => x.HasValue && !double.IsNaN(x.Value)).Select(x => x!.Value).ToList();
-        return v.Count == 0 ? null : new StatSummary(Math.Round(v.Average(), 2), Math.Round(v.Min(), 2), Math.Round(v.Max(), 2), v.Count);
+        if (v.Count == 0) return null;
+        if (SeriesEngine.TryStats(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(v), out var s))
+            return new StatSummary(Math.Round(s.Sum / v.Count, 2), Math.Round(s.Min, 2), Math.Round(s.Max, 2), v.Count);
+        SeriesEngine.CountManaged();
+        return new StatSummary(Math.Round(v.Average(), 2), Math.Round(v.Min(), 2), Math.Round(v.Max(), 2), v.Count);
     }
 
     // ISO-8601 with a "+00:00" suffix (the shape the UI has always received) so existing
@@ -266,7 +326,17 @@ public sealed class AnalyticsService
     {
         var now = _utcNow();
         DateTime? since = minutes is > 0 ? now.AddMinutes(-minutes.Value) : null;
-        var rows = await _store.QueryAsync(since ?? DateTime.MinValue, now, ct);
+        var from = since ?? DateTime.MinValue;
+
+        // The native reader takes the raw day files and returns the samples directly. It hands the whole range back (null)
+        // whenever anything is not handled exactly, and then the managed reader below does what it always did.
+        if (_store is IRawSnapshotFiles raw && SeriesEngine.IsAvailable && !SeriesEngine.ForceManaged)
+        {
+            var fast = await Task.Run(() => TryLoadNative(raw, from, now, ct), ct);
+            if (fast is not null) return fast;
+        }
+
+        var rows = await _store.QueryAsync(from, now, ct);
 
         // Parsing thousands of lines is CPU work; keep it off the request thread.
         return await Task.Run(() =>
@@ -282,6 +352,45 @@ public sealed class AnalyticsService
             list.Sort((a, b) => a.Ts.CompareTo(b.Ts));
             return list;
         }, ct);
+    }
+
+    /// <summary>The parsed history as plain tuples, for tests that compare the native and managed readers.</summary>
+    internal async Task<List<(DateTime Ts, double? Cpu, List<(string Iface, double? Rx, double? Tx)> Net)>> LoadForTestAsync(double? minutes, CancellationToken ct = default)
+        => (await LoadAsync(minutes, ct)).Select(s => (s.Ts, s.Cpu, s.Net)).ToList();
+
+    // The whole history range through the native reader. Returns null (use the managed reader) when the engine declines any
+    // file, or when the timestamps are not strictly increasing: the managed path sorts with its own rules, so only an
+    // already ordered history, which is what the recorder writes, is taken here.
+    private static List<Sample>? TryLoadNative(IRawSnapshotFiles raw, DateTime from, DateTime to, CancellationToken ct)
+    {
+        var list = new List<Sample>();
+        var shared = new Dictionary<string, string>(StringComparer.Ordinal);
+        long malformed = 0, previous = long.MinValue;
+
+        foreach (var file in raw.ReadFilesInRange(from, to, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!SeriesEngine.TryParseSnapshots(file, from.Ticks, to.Ticks, out var p)) return null;
+            malformed += p.Malformed;
+
+            var names = new string[p.Names.Length];
+            for (int i = 0; i < names.Length; i++)
+                names[i] = shared.TryGetValue(p.Names[i], out var s) ? s : shared[p.Names[i]] = p.Names[i];
+
+            for (int r = 0; r < p.Rows; r++)
+            {
+                if (p.Ticks[r] <= previous) return null;
+                previous = p.Ticks[r];
+                var sample = new Sample { Ts = new DateTime(p.Ticks[r], DateTimeKind.Utc), Cpu = double.IsNaN(p.Cpu[r]) ? null : p.Cpu[r] };
+                for (int k = p.NetStart[r]; k < p.NetStart[r + 1]; k++)
+                    sample.Net.Add((names[p.NetIface[k]], double.IsNaN(p.Rx[k]) ? null : p.Rx[k], double.IsNaN(p.Tx[k]) ? null : p.Tx[k]));
+                list.Add(sample);
+            }
+        }
+
+        if (malformed > 0)
+            Console.Error.WriteLine($"[LocalJsonSnapshotStore] skipped {malformed} malformed line(s) while reading the history");
+        return list;
     }
 
     // Interface names repeat in every row; one string per distinct name is shared instead of one per row.
@@ -317,7 +426,7 @@ public sealed class AnalyticsService
                 if (reader.ValueTextEquals("cpuUsedPercent"u8))
                 {
                     reader.Read();
-                    if (reader.TokenType == JsonTokenType.Number) s.Cpu = reader.GetDouble();
+                    if (reader.TokenType == JsonTokenType.Number && reader.TryGetDouble(out var cpu) && double.IsFinite(cpu)) s.Cpu = cpu;
                     else reader.Skip();
                 }
                 else if (reader.ValueTextEquals("network"u8))
@@ -334,7 +443,9 @@ public sealed class AnalyticsService
             }
             return s;
         }
-        catch (JsonException) { return null; }
+        // JsonException: not valid JSON. InvalidOperationException: text that cannot be decoded (an interface name with a lone
+        // surrogate in an escape). Either way the line is unreadable and is left out, not allowed to fail the whole request.
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException) { return null; }
         finally
         {
             if (rented is not null) System.Buffers.ArrayPool<byte>.Shared.Return(rented);
@@ -367,7 +478,8 @@ public sealed class AnalyticsService
 
     private static double? NumberOrNull(ref Utf8JsonReader reader)
     {
-        if (reader.TokenType == JsonTokenType.Number) return reader.GetDouble();
+        // A number the double type cannot hold counts as missing, like a value that is not a number.
+        if (reader.TokenType == JsonTokenType.Number) return reader.TryGetDouble(out var d) && double.IsFinite(d) ? d : null;
         reader.Skip();
         return null;
     }

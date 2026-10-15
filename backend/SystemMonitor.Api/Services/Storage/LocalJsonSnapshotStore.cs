@@ -8,7 +8,7 @@ namespace SystemMonitor.Api.Services;
 
 // Local append-only JSON Lines storage:
 // data/snapshots/{yyyy}/{MM}/{dd}.jsonl
-public class LocalJsonSnapshotStore : ISnapshotStore
+public class LocalJsonSnapshotStore : ISnapshotStore, IRawSnapshotFiles
 {
     private const int MaxPendingChars = 1_000_000;
 
@@ -323,23 +323,8 @@ public class LocalJsonSnapshotStore : ISnapshotStore
         if (to < from)
             return Task.FromResult<IReadOnlyList<SystemSnapshot>>(results);
 
-        var earliest = EarliestDataDate();
-
-        var start = earliest is null
-            ? to.Date
-            : from.Date < earliest.Value
-                ? earliest.Value
-                : from.Date;
-
-        foreach (var date in EachDate(start, to.Date))
+        foreach (var file in FilesInRange(from, to, cancellationToken))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var file = FileFor(date);
-
-            if (!File.Exists(file))
-                continue;
-
             foreach (var line in File.ReadLines(file))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -368,6 +353,39 @@ public class LocalJsonSnapshotStore : ISnapshotStore
         }
 
         return Task.FromResult<IReadOnlyList<SystemSnapshot>>(results);
+    }
+
+    /// <summary>The day files that can hold lines of [from, to], oldest day first (nothing when the range is empty or no day file exists).</summary>
+    private IEnumerable<string> FilesInRange(DateTime from, DateTime to, CancellationToken cancellationToken)
+    {
+        if (to < from)
+            yield break;
+
+        var earliest = EarliestDataDate();
+
+        var start = earliest is null
+            ? to.Date
+            : from.Date < earliest.Value
+                ? earliest.Value
+                : from.Date;
+
+        foreach (var date in EachDate(start, to.Date))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var file = FileFor(date);
+
+            if (File.Exists(file))
+                yield return file;
+        }
+    }
+
+    public IEnumerable<byte[]> ReadFilesInRange(DateTime from, DateTime to, CancellationToken cancellationToken = default)
+    {
+        Flush();
+
+        foreach (var file in FilesInRange(from, to, cancellationToken))
+            yield return File.ReadAllBytes(file);
     }
 
     private DateTime? EarliestDataDate()

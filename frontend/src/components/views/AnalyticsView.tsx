@@ -8,6 +8,7 @@ import Skeleton from '../common/Skeleton';
 import { EmptyState } from '../common/States';
 import { ViewContainer } from '../common/Primitives';
 import BottleneckTimeline from './analytics/BottleneckTimeline';
+import EngineStatusNote from './analytics/EngineStatusNote';
 import StatsSummary from './analytics/StatsSummary';
 import TrendSummary from './analytics/TrendSummary';
 
@@ -82,6 +83,7 @@ function AnalyticsView({ findNearest }: { findNearest: (isoTime: string) => Proc
             {stats && <StatsSummary stats={stats} />}
           </div>
           {bottlenecks && <BottleneckTimeline bottlenecks={bottlenecks} findNearest={findNearest} />}
+          <EngineStatusNote key={minutes} active />
         </>
       )}
     </ViewContainer>

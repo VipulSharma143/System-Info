@@ -4,6 +4,7 @@ using SystemMonitor.Api.Services;
 
 // Minimal assertion runner: prints each failure, exits 1 if any.
 int failures = 0, checks = 0;
+NativeTests.Prepare();   // register the native library before anything that can reach it (the analytics maths uses the series engine)
 void Check(bool ok, string what) { checks++; if (!ok) { failures++; Console.WriteLine($"FAIL: {what}"); } }
 void Near(double? actual, double expected, double tol, string what) =>
     Check(actual is { } a && Math.Abs(a - expected) <= tol, $"{what} (expected {expected}, got {actual?.ToString() ?? "null"})");
@@ -198,6 +199,14 @@ finally { try { Directory.Delete(dir, true); } catch { } }
 }
 {
     var (nf, nc) = StorageParsingTests.Run();
+    failures += nf; checks += nc;
+}
+{
+    var (nf, nc) = SeriesEngineTests.Run();
+    failures += nf; checks += nc;
+}
+{
+    var (nf, nc) = NativeReaderTests.Run();
     failures += nf; checks += nc;
 }
 {

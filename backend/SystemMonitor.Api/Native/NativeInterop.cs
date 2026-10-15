@@ -96,6 +96,10 @@ public static class NativeInterop
     [DllImport("systemmonitor_native", EntryPoint = "si_active_isa")]
     public static extern int GetActiveIsa();
 
+    // Tiers the startup selftest rejected (0 on a healthy machine).
+    [DllImport("systemmonitor_native", EntryPoint = "si_asm_demotions")]
+    public static extern int AsmDemotions();
+
     [DllImport("systemmonitor_native", EntryPoint = "si_kernel_selftest")]
     public static extern int KernelSelfTest();
 
@@ -121,6 +125,41 @@ public static class NativeInterop
 
     [DllImport("systemmonitor_native", EntryPoint = "si_xor_u64")]
     internal static extern ulong XorU64(in ulong a, long nwords);
+
+    // ---- series engine (Engine/Cpp/src/series_engine.cpp over Engine/Assembly/analytics/): maths behind the Analytics page ----
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SiSeriesStats { public double Sum; public double Min; public double Max; }
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_series_stats")]
+    internal static extern int SeriesStats(in double a, long n, out SiSeriesStats result);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_series_slope")]
+    internal static extern int SeriesSlope(in double x, in double y, long n, out double slope);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_series_count_ge")]
+    internal static extern long SeriesCountGe(in double a, long n, double threshold);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_series_find_runs")]
+    internal static extern long SeriesFindRuns(in double a, long n, double threshold, long minLen, ref long pairs, long capPairs);
+
+    // One entry point, two shapes: with a skip mask (one byte per value; non-zero = leave out) and without one.
+    [DllImport("systemmonitor_native", EntryPoint = "si_series_collect_ge")]
+    internal static extern long SeriesCollectGe(in double a, long n, double threshold, in byte skip, ref long indexes, long cap);
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_series_collect_ge")]
+    internal static extern long SeriesCollectGeNoSkip(in double a, long n, double threshold, IntPtr noSkip, ref long indexes, long cap);
+
+    // Layout shared with SiSeriesBatch in native_engine.h: seven buffers supplied by the caller, three capacities, five results.
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SiSeriesBatch
+    {
+        public IntPtr Ticks, Cpu, NetStart, NetIface, Rx, Tx, Names;
+        public long RowCap, NetCap, NamesCap;
+        public long Rows, NetEntries, NameCount, NamesBytes, Malformed;
+    }
+
+    [DllImport("systemmonitor_native", EntryPoint = "si_series_parse_lines")]
+    internal static extern int SeriesParseLines(IntPtr data, long length, long fromTicks, long toTicks, ref SiSeriesBatch batch);
 
     [DllImport("systemmonitor_native", EntryPoint = "si_memory_bandwidth")]
     public static extern int MemoryBandwidth(long bytes, int repeats, out double copyGBps, out double readGBps);

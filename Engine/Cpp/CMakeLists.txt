@@ -45,6 +45,8 @@ endif()
 add_library(systemmonitor_objects OBJECT
     src/common.cpp
     src/simd_dispatch.cpp
+    src/series_engine.cpp
+    src/series_parse.cpp
     src/cpu_temperature.cpp
     src/host_snapshot.cpp
     src/cpu_detail.cpp
@@ -61,6 +63,8 @@ add_library(systemmonitor_objects OBJECT
     ${ASM_DIR}/cpu/simd_loop.asm
     ${ASM_DIR}/math/vector_math.asm
     ${ASM_DIR}/math/stats_kernels.asm
+    ${ASM_DIR}/analytics/series_stats.asm
+    ${ASM_DIR}/analytics/series_scan.asm
     ${ASM_DIR}/memory/memory_kernels.asm
 )
 
@@ -145,6 +149,20 @@ if(BUILD_NATIVE_TESTS)
     target_link_libraries(battery_json_test systemmonitor_native)
     add_test(NAME battery_json_test COMMAND battery_json_test)
     set_tests_properties(battery_json_test PROPERTIES TIMEOUT 30)
+
+    # Series engine: the analytics kernels (assembly + portable) against naive reference code, on every tier.
+    add_executable(series_engine_test tests/series_engine_test.cpp)
+    target_link_libraries(series_engine_test systemmonitor_native)
+    add_test(NAME series_engine_test COMMAND series_engine_test)
+    add_test(NAME series_engine_test_no_asm COMMAND series_engine_test)
+    set_tests_properties(series_engine_test_no_asm PROPERTIES ENVIRONMENT "SYSTEMINFO_NO_ASM=1")
+    set_tests_properties(series_engine_test series_engine_test_no_asm PROPERTIES TIMEOUT 60)
+
+    # Saved-history reader: exact ticks, skip rules, line endings, "do not guess" cases.
+    add_executable(series_parse_test tests/series_parse_test.cpp)
+    target_link_libraries(series_parse_test systemmonitor_native)
+    add_test(NAME series_parse_test COMMAND series_parse_test)
+    set_tests_properties(series_parse_test PROPERTIES TIMEOUT 60)
 
     # Storage listing: one consistent scan per listing, same answer on a repeat.
     add_executable(storage_volume_test tests/storage_volume_test.cpp)

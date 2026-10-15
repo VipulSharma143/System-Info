@@ -84,6 +84,68 @@ struct SiStatsF32 { float sum; float max; float threshold; int count; };
 // Assembly (AVX2 / SSE2) with the same demotion rules as the other kernels. Returns 1 on success.
 NATIVE_API int si_stats_f32(const float* a, long long n, float threshold, double* sumOut, double* maxOut, long long* countOut);
 // ---------------------------------------------------------------------
+// Series engine (src/series_engine.cpp over Engine/Assembly/analytics/): statistics, trend and threshold scans over
+// double-precision series, the maths behind the Analytics page. Every function runs on the assembly tier selected for the
+// other kernels (AVX2 -> SSE2 -> portable C++, same selftest and demotion rules, same kill switch) and gives the same
+// answers on every tier. No function allocates, and none reads outside [a, a + n).
+// ---------------------------------------------------------------------
+// Layout shared with Engine/Assembly/analytics/series_stats.asm.
+struct SiSeriesStats { double sum; double min; double max; };
+
+// Sum, smallest and largest of n doubles. The values must not contain NaN (filter missing samples first).
+// Returns 1 on success, 0 for n <= 0 or a null pointer. The sum is reassociated (SIMD lanes): it can differ from a
+// left-to-right sum in the last bits.
+NATIVE_API int si_series_stats(const double* a, long long n, SiSeriesStats* out);
+
+// Least-squares slope of y against x (change of y per unit of x) over n points; neither array may contain NaN.
+// The points are shifted by the first one internally, so a large offset in x or y does not cost accuracy.
+// Returns 1 and *slopeOut, or 0 when there is no slope (n < 2, all x equal, or non-finite sums).
+NATIVE_API int si_series_slope(const double* x, const double* y, long long n, double* slopeOut);
+
+// Number of values >= threshold. A NaN is never >= threshold.
+NATIVE_API long long si_series_count_ge(const double* a, long long n, double threshold);
+
+// Runs of at least minLen consecutive values >= threshold (a NaN ends a run), as inclusive [start, end] index pairs written
+// to out[2*k], out[2*k+1] for k < capPairs. Returns the number of runs found, which can exceed capPairs: allocate that many
+// pairs and call again.
+NATIVE_API long long si_series_find_runs(const double* a, long long n, double threshold, long long minLen,
+                                         long long* out, long long capPairs);
+
+// Indexes i (ascending) with a[i] >= threshold and, when skip is not null, skip[i] == 0. Returns how many there are; only
+// the first cap are written.
+NATIVE_API long long si_series_collect_ge(const double* a, long long n, double threshold, const unsigned char* skip,
+                                          long long* outIdx, long long cap);
+
+// ---------------------------------------------------------------------
+// Saved-history reader (src/series_parse.cpp): turns the text of a day's snapshot file (one JSON object per line, as the
+// backend writes them) into dense arrays, so the Analytics page does not have to parse hundreds of thousands of lines in
+// managed code. It reads exactly what the managed reader reads: every line must be complete, valid JSON (anything else is
+// counted in `malformed` and left out), the first top-level "timestamp" is the line's time, the last numeric
+// "cpuUsedPercent" is its CPU load, and every object in "network" is one interface entry. Lines outside
+// [fromTicks, toTicks] are left out. It never guesses: anything it does not handle exactly (an unusual timestamp format,
+// text that is not valid UTF-8, a number outside the double range, UTF-16 files, too many distinct interface names) returns 0
+// and the caller reads the file the managed way instead.
+// ---------------------------------------------------------------------
+struct SiSeriesBatch {
+    // Buffers supplied by the caller. netStart needs rowCap + 1 entries.
+    long long* ticks;        // UTC ticks (100 ns since 0001-01-01), one per accepted row
+    double*    cpu;          // CPU percent per row, NaN when the line has no numeric "cpuUsedPercent"
+    int*       netStart;     // row r owns entries [netStart[r], netStart[r + 1])
+    int*       netIface;     // index into the name table, per network entry
+    double*    rx;           // NaN when missing or not a number
+    double*    tx;
+    char*      names;        // interface names, UTF-8, each followed by a NUL, in order of first appearance
+    long long  rowCap, netCap, namesCap;
+    // Results.
+    long long  rows, netEntries, nameCount, namesBytes, malformed;
+};
+
+// 1 = ok. 0 = not handled exactly: read the file the managed way. -1 = a buffer was too small: rows / netEntries /
+// namesBytes hold the sizes needed, call again with at least those. Lines are separated by \n, \r or \r\n and blank lines are
+// ignored, like the managed reader. The data pointer must stay valid for the call; nothing is retained.
+NATIVE_API int si_series_parse_lines(const unsigned char* data, long long len, long long fromTicks, long long toTicks, SiSeriesBatch* batch);
+
+// ---------------------------------------------------------------------
 // Overlay engine (src/overlay/): one background thread samples CPU, every GPU and RAM and publishes a single JSON
 // snapshot with a short history per series. See overlay_engine.cpp for the schema.
 // ---------------------------------------------------------------------

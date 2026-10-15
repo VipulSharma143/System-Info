@@ -86,12 +86,12 @@ backend/SystemMonitor.Api/
                          API: /api/system/cpu/detail (Endpoints/CpuEndpoints). Frontend: CpuView (components/views/cpu/: hero, tiles, per-core grid, temperature,
                          clock/power, specs, activity) and OverlayView (compact tiles: CPU, memory, each GPU — no clock/fan/power sections, by decision)
   Contracts/             ISystemInfoProvider (and the records it returns), ISnapshotStore, MemoryModels
-  Native/                 NativeInterop.cs (P/Invoke bridge), NativeKernels.cs (safe span wrappers + C# reference implementations)
+  Native/                 NativeInterop.cs (P/Invoke bridge), NativeKernels.cs (safe span wrappers + C# reference implementations), SeriesEngine.cs (series statistics/slope/run scans for AnalyticsService: native engine for series of 256+ samples, plain C# below that or when the library is missing; SeriesEngine.Reference = the plain versions the tests compare with; TryParseSnapshots = the native reader of the saved day files, which returns false whenever it cannot match the managed reader exactly and AnalyticsService then reads the managed way)
 backend/SystemMonitor.Tests/  dependency-free test runner (analytics, storage, native wrappers); links sources instead of referencing the Api project
-Engine/Cpp/              C++ engine: include/native_engine.h (C ABI), src/common.cpp, src/simd_dispatch.cpp (CPUID + dispatch + self-test),
+Engine/Cpp/              C++ engine: include/native_engine.h (C ABI), src/common.cpp, src/simd_dispatch.cpp (CPUID + dispatch + self-test), src/series_engine.cpp (series maths over the analytics kernels), src/series_parse.cpp (validating reader of the saved snapshot lines: follows the managed reader exactly or returns 0 so the caller reads the managed way),
                          src/smbios/ (platform-neutral table parsing), platform/{linux,windows}/ (cpu, cpu_detail, storage, fan, memory, smbios_source, provider), build.sh,
                          src/cpu_detail.cpp (CPUID identity/features + the one JSON document behind the CPU tab, si_cpu_detail_json; null = not readable, never 0)
-Engine/Assembly/         NASM: cpu/ (benchmark_loop, simd_loop, get_constant), math/vector_math.asm, memory/memory_kernels.asm (SSE2/AVX2), abi.inc
+Engine/Assembly/         NASM: cpu/ (benchmark_loop, simd_loop, get_constant), math/vector_math.asm + stats_kernels.asm, memory/memory_kernels.asm, analytics/series_stats.asm + series_scan.asm (float64 series; SSE2/AVX2; no SSE2 count kernel because it measured slower than portable), abi.inc. Kernels use volatile registers only (RAX, R10, R11, XMM/YMM0-5), no stack, pointer/integer arguments only (a double argument would sit in different registers on Windows and System V), and are covered by si_kernel_selftest (tier demotion) and tests/series_engine_test.cpp (incl. a guard-page over-read check)
 scripts/                 sync-version.mjs, check-version.mjs, archive-changelog.mjs, make-update-manifest.mjs
 Engine/Cpp/tests/       C++/Assembly tests (ctest)
 packaging/linux/         systeminfo.png (icon source) + install-smbios-snapshot.sh (one-time Linux RAM-module setup).

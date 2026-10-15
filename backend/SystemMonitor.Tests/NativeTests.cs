@@ -7,18 +7,17 @@ static class NativeTests
     /// <summary>Path of the native library the tests loaded, or null when it could not be found. Other test files use it to skip native contract checks.</summary>
     public static string? LoadedLibrary { get; private set; }
 
-    public static (int Failures, int Checks) Run()
-    {
-        int failures = 0, checks = 0;
-        void Check(bool ok, string what) { checks++; if (!ok) { failures++; Console.WriteLine($"FAIL: {what}"); } }
-        void Near(double? actual, double expected, double tol, string what) =>
-            Check(actual is { } a && Math.Abs(a - expected) <= tol, $"{what} (expected {expected}, got {actual?.ToString() ?? "null"})");
+    private static bool _prepared;
 
-        // =====================================================================
-        // Native kernels through the managed wrappers, vs plain C# references.
-        // Needs the built native library: set SYSTEMINFO_NATIVE_DIR, or build it
-        // under Engine/Cpp/build*/. Skipped (loudly) if it cannot be found; CI builds it first.
-        // =====================================================================
+    /// <summary>
+    /// Finds the built native library (SYSTEMINFO_NATIVE_DIR, or Engine/Cpp/build*/ above the test binary) and registers it
+    /// for the P/Invoke calls. Idempotent; call it before any test that reaches native code. Returns null when there is none.
+    /// </summary>
+    public static string? Prepare()
+    {
+        if (_prepared) return LoadedLibrary;
+        _prepared = true;
+
         static string? FindLibrary(string dir) =>
             !Directory.Exists(dir) ? null : Directory.EnumerateFiles(dir, "*systemmonitor_native*", SearchOption.AllDirectories)
                 .FirstOrDefault(f => f.EndsWith(".so") || f.EndsWith(".dll") || f.EndsWith(".dylib"));   // not the .lib/.a import/static libs
@@ -34,6 +33,25 @@ static class NativeTests
                 libraryPath ??= FindLibrary(b.FullName);
         }
         LoadedLibrary = libraryPath;
+        if (libraryPath is not null)
+            NativeLibrary.SetDllImportResolver(typeof(NativeInterop).Assembly, (name, asm, path) =>
+                name == "systemmonitor_native" ? NativeLibrary.Load(libraryPath) : IntPtr.Zero);
+        return libraryPath;
+    }
+
+    public static (int Failures, int Checks) Run()
+    {
+        int failures = 0, checks = 0;
+        void Check(bool ok, string what) { checks++; if (!ok) { failures++; Console.WriteLine($"FAIL: {what}"); } }
+        void Near(double? actual, double expected, double tol, string what) =>
+            Check(actual is { } a && Math.Abs(a - expected) <= tol, $"{what} (expected {expected}, got {actual?.ToString() ?? "null"})");
+
+        // =====================================================================
+        // Native kernels through the managed wrappers, vs plain C# references.
+        // Needs the built native library: set SYSTEMINFO_NATIVE_DIR, or build it
+        // under Engine/Cpp/build*/. Skipped (loudly) if it cannot be found; CI builds it first.
+        // =====================================================================
+        var libraryPath = Prepare();
         if (libraryPath is null)
         {
             Console.WriteLine("SKIPPED native tests: native library not found (build Engine/Cpp/ or set SYSTEMINFO_NATIVE_DIR).");
@@ -41,9 +59,6 @@ static class NativeTests
         }
         else
         {
-            NativeLibrary.SetDllImportResolver(typeof(NativeInterop).Assembly, (name, asm, path) =>
-            name == "systemmonitor_native" ? NativeLibrary.Load(libraryPath) : IntPtr.Zero);
-
         var rng = new Random(20260929);
             int[] ints = Enumerable.Range(0, 5000).Select(_ => rng.Next(int.MinValue, int.MaxValue)).ToArray();
             float[] fa = Enumerable.Range(0, 5000).Select(_ => (float)(rng.Next(-1000, 1000) / 8.0)).ToArray();

@@ -141,21 +141,26 @@ System Info/
 │   │   │   ├── Sensors/             # HardwareSensorService and the drive / board / memory-module sensor sources
 │   │   │   └── DataLifecycle/       # retention, reset and size readout of the saved history
 │   │   ├── Contracts/               # ISystemInfoProvider (+ the data records it returns), ISnapshotStore, MemoryModels
-│   │   └── Native/                  # NativeInterop.cs (P/Invoke), NativeKernels.cs (safe span wrappers)
+│   │   └── Native/                  # NativeInterop.cs (P/Invoke), NativeKernels.cs (safe span wrappers),
+│   │                                #   SeriesEngine.cs (analytics maths and the history reader on the engine, with plain-C# fallbacks)
 │   └── SystemMonitor.Tests/         # dependency-free test runner: analytics, storage, startup cache, memory, GPU and CPU (fake sysfs/proc/NVML), native wrappers
 │
 ├── Engine/                          # The native engine (everything that is not C#, TypeScript or Rust)
 │   ├── Cpp/                         # C++17 native engine (CMake)
 │   │   ├── include/native_engine.h  # Cross-platform C ABI (extern "C")
-│   │   ├── src/                     # common.cpp, simd_dispatch.cpp (CPUID + kernel dispatch, self-test), internal.h
+│   │   ├── src/                     # common.cpp, simd_dispatch.cpp (CPUID + kernel dispatch, self-test), series_engine.cpp
+│   │   │                            #   (series statistics / slope / run detection over the analytics kernels), series_parse.cpp
+│   │   │                            #   (reads the saved snapshot files into arrays for the Analytics page), internal.h
 │   │   │   └── smbios/              # platform-neutral SMBIOS memory-table parsing + DIMM API
 │   │   ├── platform/{linux,windows}/ # per-OS cpu, storage, fan, memory, smbios_source, snapshot_writer, provider
 │   │   ├── tests/                   # C++/Assembly tests (ctest): kernel_selftest, asm_tiers, memory_info/hardware,
-│   │   │                            # smbios_parse/loader, battery_json, storage_volume, cpu_*, overlay_engine, host_snapshot
+│   │   │                            # smbios_parse/loader, battery_json, storage_volume, series_engine, series_parse, cpu_*, overlay_engine, host_snapshot
 │   │   ├── tools/                   # smbios_snapshot.cpp (Linux helper that saves the memory-only SMBIOS records)
 │   │   └── build.sh                 # Standalone native build used by ./build.sh
-│   └── Assembly/                    # x86-64 NASM: cpu/ (benchmark loops), math/ (vector add, dot, sum,
-│                                    # min/max), memory/ (memcpy, XOR checksum); abi.inc = arg registers
+│   └── Assembly/                    # x86-64 NASM (SSE2 + AVX2 tiers, System V and Windows x64): cpu/ (benchmark loops),
+│                                    # math/ (float32 vector add, dot, sum, min/max; stats for the overlay), memory/ (XOR
+│                                    # checksum), analytics/ (float64 series: statistics, regression sums, threshold scans
+│                                    # for the Analytics page); abi.inc = arg registers
 │
 ├── packaging/linux/                 # systeminfo.png (icon source), install-smbios-snapshot.sh (one-time RAM-module setup)
 ├── scripts/                         # sync-version.mjs, check-version.mjs,
@@ -229,6 +234,7 @@ All endpoints are served by the .NET backend on `:5132` (or the port the fronten
 | `GET` | `/api/native/cpuinfo`, `/cpu`, `/cputemp`, `/gpu`, `/battery`, `/fan` | Diagnostic reads through the native C++ engine |
 | `GET` | `/api/native/test`, `/benchmark`, `/asmtest`, `/simd-benchmark` | Native engine self-tests and the scalar/SIMD CPU benchmark |
 | `GET` | `/api/native/cpufeatures` | Vendor and the SSE/SSE2/SSE3/SSSE3/SSE4.1/SSE4.2/AVX/AVX2/FMA features the CPU *and the OS* actually support, plus which kernel set is active |
+| `GET` | `/api/native/engine` | Which instruction tier the Assembly kernels run on, tiers the self-test demoted, and how many analytics operations (maths and history reads) ran on the engine vs plain C# (cheap; shown on the Analytics page) |
 | `GET` | `/api/native/kernels` | Runs the Assembly self-test against the C++ reference on this CPU and reports kernel throughput (GB/s) |
 | `GET` | `/api/native/topology`, `/storage`, `/fans` | Physical/logical cores and packages (`null` when the OS doesn't expose them), real storage volumes with 64-bit sizes, fan tachometers (empty list when none exist) |
 | `GET` | `/api/native/memory-bandwidth` | Sustained copy and read bandwidth through the Assembly kernels (128 MB buffer, about a second of work — deliberately not polled) |

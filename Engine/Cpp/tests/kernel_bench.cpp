@@ -24,6 +24,15 @@ unsigned long long si_xor_u64_sse2(const unsigned long long*, size_t);
 unsigned long long si_xor_u64_avx2(const unsigned long long*, size_t);
 void si_stats_f32_sse2(const float*, size_t, SiStatsF32*);
 void si_stats_f32_avx2(const float*, size_t, SiStatsF32*);
+// Series (analytics) kernels, double precision.
+struct SiSeriesRegress { double sx, sy, sxy, sxx; };
+void   si_series_stats_f64_sse2(const double*, size_t, SiSeriesStats*);
+void   si_series_stats_f64_avx2(const double*, size_t, SiSeriesStats*);
+void   si_series_regress_f64_sse2(const double*, const double*, size_t, SiSeriesRegress*);
+void   si_series_regress_f64_avx2(const double*, const double*, size_t, SiSeriesRegress*);
+size_t si_series_count_ge_f64_avx2(const double*, size_t, const double*);
+size_t si_series_find_ge_f64_sse2(const double*, size_t, size_t, const double*);
+size_t si_series_find_ge_f64_avx2(const double*, size_t, size_t, const double*);
 }
 
 // Portable fallbacks, identical to the ones in simd_dispatch.cpp.
@@ -42,6 +51,11 @@ NOINL static void port_stats(const float* a, size_t n, SiStatsF32* s) {
     for (size_t i = 0; i < n; i++) { sum += a[i]; if (a[i] > mx) mx = a[i]; if (a[i] >= s->threshold) cnt++; }
     s->sum = sum; s->max = mx; s->count = cnt;
 }
+
+NOINL static void port_sstats(const double* a, size_t n, SiSeriesStats* o) { double sum = 0, lo = a[0], hi = a[0]; for (size_t i = 0; i < n; i++) { sum += a[i]; lo = std::min(lo, a[i]); hi = std::max(hi, a[i]); } o->sum = sum; o->min = lo; o->max = hi; }
+NOINL static void port_sregress(const double* x, const double* y, size_t n, SiSeriesRegress* o) { double sx = 0, sy = 0, sxy = 0, sxx = 0; for (size_t i = 0; i < n; i++) { sx += x[i]; sy += y[i]; sxy += y[i] * x[i]; sxx += x[i] * x[i]; } o->sx = sx; o->sy = sy; o->sxy = sxy; o->sxx = sxx; }
+NOINL static size_t port_scount(const double* a, size_t n, const double* t) { size_t c = 0; for (size_t i = 0; i < n; i++) c += (a[i] >= *t); return c; }
+NOINL static size_t port_sfind(const double* a, size_t n, size_t s, const double* t) { for (size_t i = s; i < n; i++) if (a[i] >= *t) return i; return n; }
 
 using clk = std::chrono::steady_clock;
 static volatile double g_sink;
@@ -91,6 +105,18 @@ int main(int argc, char** argv) {
         row("minmax", fb,     [&] { port_minmax(ia.data(), n, &mn, &mx); g_sink = mn + mx; }, [&] { si_minmax_i32_sse2(ia.data(), n, &mn, &mx); g_sink = mn + mx; }, [&] { si_minmax_i32_avx2(ia.data(), n, &mn, &mx); g_sink = mn + mx; });
         row("xor",    fb,     [&] { g_sink = (double)port_xor(w, words); }, [&] { g_sink = (double)si_xor_u64_sse2(w, words); }, [&] { g_sink = (double)si_xor_u64_avx2(w, words); });
         row("stats",  fb,     [&] { port_stats(a.data(), n, &st); g_sink = st.sum; }, [&] { si_stats_f32_sse2(a.data(), n, &st); g_sink = st.sum; }, [&] { si_stats_f32_avx2(a.data(), n, &st); g_sink = st.sum; });
+
+        if (n <= (16LL << 20)) {   // series kernels work on doubles (8 bytes per element); skipped at the 512 MB size
+            std::vector<double> da((size_t)n), db((size_t)n);
+            for (long long i = 0; i < n; i++) { da[i] = (double)(i % 100); db[i] = (double)((i * 7) % 1000) / 3.0; }
+            SiSeriesStats ss{}; SiSeriesRegress sr{};
+            const double never = 1e9;   // a quiet series: the scans read all of it
+            const double db8 = (double)n * 8;
+            row("s_stats",   db8,     [&] { port_sstats(da.data(), n, &ss); g_sink = ss.sum; }, [&] { si_series_stats_f64_sse2(da.data(), n, &ss); g_sink = ss.sum; }, [&] { si_series_stats_f64_avx2(da.data(), n, &ss); g_sink = ss.sum; });
+            row("s_regress", db8 * 2, [&] { port_sregress(da.data(), db.data(), n, &sr); g_sink = sr.sxy; }, [&] { si_series_regress_f64_sse2(da.data(), db.data(), n, &sr); g_sink = sr.sxy; }, [&] { si_series_regress_f64_avx2(da.data(), db.data(), n, &sr); g_sink = sr.sxy; });
+            row("s_count",   db8,     [&] { g_sink = (double)port_scount(da.data(), n, &never); }, [&] { g_sink = (double)port_scount(da.data(), n, &never); }, [&] { g_sink = (double)si_series_count_ge_f64_avx2(da.data(), n, &never); });
+            row("s_find",    db8,     [&] { g_sink = (double)port_sfind(da.data(), n, 0, &never); }, [&] { g_sink = (double)si_series_find_ge_f64_sse2(da.data(), n, 0, &never); }, [&] { g_sink = (double)si_series_find_ge_f64_avx2(da.data(), n, 0, &never); });
+        }
     }
     return 0;
 }

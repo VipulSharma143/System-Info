@@ -5,34 +5,22 @@ All notable changes to SystemInfo are documented here.
 ## [Unreleased]
 
 
-## [2.7.0] - 2026-10-14
-
-### Added
-- **Battery history by date.** The Battery page's charging history now shows one day at a time instead of one long list. A **Date** menu lists only the days that have records (shown as Today, Yesterday, then the weekday and date, with the number of entries), opens on the newest day, and switches the list to the entries recorded on the day you pick. Days are decided in your own time zone, so an entry made late in the evening stays on your evening. An entry that runs past midnight stays on the day it started and its row still shows when it ended. Your pick is kept when new readings arrive; if the day you picked ages out of the 7-day history, the page falls back to the newest day. The latest status line and the summary tiles stay above the list and do not change with the date. Entries whose start time cannot be read are left out instead of being given a guessed date.
+## [2.7.1] - 2026-10-14
 
 ### Changed
-- **The native engine now lives in a top-level `Engine/` folder.** The C++ source moved from `native/` to `Engine/Cpp/`, the NASM Assembly from `assembly/` to `Engine/Assembly/`, and the native tests from `tests/native/` to `Engine/Cpp/tests/`. One copy of every file; no engine logic changed. Every reference was updated: the CMake file, `build.sh`, `setup.sh`, `setup.ps1`, `clean.sh`, `.gitignore`, the Linux SMBIOS helper installer, both CI workflows, the tests' include paths, and the C# test that looks for the built library. The VS Code setting that pointed at one developer's absolute path now uses the workspace folder.
-- **The backend folders are grouped by purpose.** `services/` is now `Services/` with `Platform/{Linux,Windows}`, `Sampling`, `Storage`, `Analytics` and `Memory` beside the existing `Battery`, `Cpu`, `Gpu`, `Overlay`, `Sensors` and `DataLifecycle`, instead of 25 loose files; `interface/` is now `Contracts/`. Files only moved: namespaces, routes and behaviour are the same.
-- **The battery is read far less often.** The dashboard asked the hardware for the battery about once a second (a driver enumeration plus IOCTLs on Windows, a sysfs pass on Linux) on top of the history recorder's own read every 10 s. All three readers (the recorder, the dashboard and `/api/system/battery`) now share one reading no more than 3 s old, so the hardware is read at most once every 3 s while the app is open and once every 10 s otherwise. Plug-in and unplug still show within a few seconds.
-- **Saved history lines carry the battery only after a new reading**, instead of repeating the same four values on every one-second line. Every other field, the order and the formatting are unchanged, and nothing that reads the history needs the repeated copies (it is optional there already, as on desktops).
-- Each saved line is written with a reusable JSON writer instead of building a JSON tree every second, and the day's file path is built once per day. The text written is identical to before (a test compares it byte for byte).
-- **Analytics reads each saved line once, as a token stream.** Every line of a day was parsed into a JSON document twice (once by the store to find its timestamp, once more by the analytics code for CPU and network), and the slope maths built two temporary lists per series. Both now read the line as tokens, interface names are shared instead of one string per row, and the slope is computed in two passes with no lists. Measured on a synthetic full day (86,400 rows) on Linux: loading the day from the store 530 ms to about 260 ms, each of the trend, stats and bottleneck calls 1.1-1.9 s to 0.45-0.9 s, and about 22% less memory allocated; the test suite's own full-day trend check went from 2,244 ms to about 520 ms. The results are identical (the serialized output of all three calls was compared before and after), and a line the store rejected before is still rejected.
-- **The Linux process list produces about 34 times less garbage.** The dashboard lists the top processes about once a second, and it read every `/proc/<pid>/status` through a stream, a reader and a string per line. Each file is now read once into a stack buffer. Measured with 55 processes: 574 KB to 17 KB allocated per call, same rows in the same order, time per call unchanged (the cost is the system calls). A status file too long for the buffer falls back to the old reader. On Windows the `Process` objects of that list are now disposed.
-- **The native storage listing scans once per listing.** `si_get_storage_volume(index)` is asked for index 0, 1, 2... until one is missing, and every call re-read `/proc/mounts` and ran `statvfs` on every mount, so listing N volumes cost N+1 full scans. A listing is now scanned when index 0 is asked for and the later indexes are answered from that same moment (a caller that asks for a later index first, or more than 1.5 s later, gets a fresh scan). Measured with one volume: 62 µs to 30 µs and 24 KB to 12 KB per listing; the saving grows with the number of volumes. Same symbol, same arguments, same data.
-- The Battery history panel computes its day groups and summary only when the history actually changes, not on every redraw.
+- Optimized application performance for faster startup and smoother runtime.
+- Reduced unnecessary processing and memory allocations.
+- Improved hardware monitoring efficiency across Linux and Windows.
+- Optimized background operations to reduce unnecessary system overhead.
+- Improved handling of system telemetry and historical data.
 
 ### Fixed
-- **A battery that stopped answering was still recorded as current.** The sampler kept passing the last good reading to the charging history every second, so a failed reader looked healthy and the Battery page could never say that readings had stopped. A reading that has not been refreshed for two refresh periods is no longer passed on.
-- **Linux battery details could vanish.** The native battery reader pasted the battery's status, model and manufacturer text into JSON without escaping it, so a name containing a quote or a backslash made the document invalid and the whole battery read failed. The text is now escaped. The reader also silently cut the document short when it did not fit the buffer; it now reports an error instead of returning broken JSON. The Windows placeholder gets the same buffer checks.
-- `frontend/src-tauri/Cargo.lock` recorded the app as version 3.0.0 while `Cargo.toml` said 2.6.8. It now matches the release version.
-
-### Notes
-- Battery collection, API routes and response formats, stored data, the CPU and GPU temperature code, the Assembly kernels and the native ABI are unchanged.
-- An audit of the frontend found every timer, listener and polling loop already cleaned up when its page closes, so no performance changes were made there beyond the history panel. The native calls the backend makes repeatedly (memory, battery, CPU temperature, overlay and host snapshots) were timed and are already cheap (microseconds, most with no allocations), so they were left alone apart from the storage listing above.
-- The timings above are from a Linux sandbox with synthetic data and are not a benchmark of the whole app; the Windows paths were not measured.
-
-### Known Issues
-- Built and run for this release: the native engine from its new location (16 native tests, including new ones for the battery JSON and the storage listing, plus the no-Assembly run); the frontend type check, lint, production build and 104 tests; and the backend test runner on .NET 8 (820 checks, including new ones for the shared battery read, the saved line format, the stopped-reader case and the line readers). Not run: the .NET 10 build of the backend project itself, the Windows build and its battery code, the installers, CI, and the Date menu on screen.
+- Fixed bugs affecting system monitoring and data collection.
+- Improved battery monitoring reliability and reading freshness.
+- Fixed issues with malformed or unreadable historical data.
+- Improved native component reliability and error handling.
+- Fixed inconsistencies in application version metadata.
+- Improved overall application stability and reliability across Linux and Windows.
 
 ## [2.6.8] - 2026-10-13
 

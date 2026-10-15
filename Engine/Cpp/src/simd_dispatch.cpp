@@ -45,6 +45,7 @@ void si_stats_f32_avx2(const float*, size_t, SiStatsF32*);
 }
 
 extern "C" int si_kernel_selftest_impl(int onlyTier);
+extern "C" int si_series_selftest_impl(int isa);   // series_engine.cpp: the analytics kernels, same demotion rules
 
 namespace {
 struct Features { long long mask = 0; char vendor[13] = {0}; };
@@ -204,7 +205,8 @@ unsigned long long si_xor_u64(const unsigned long long* a, long long nwords) {
 // Verifies every kernel that this CPU can run against the C++ reference,
 // across boundary lengths and deliberately misaligned pointers.
 // Returns 0 on success; otherwise a bitmask: 1=add, 2=dot, 4=sum, 16=minmax,
-// 32=memcpy, 64=xor checksum, 128=stats (bit 8 set additionally if the AVX2 path failed).
+// 32=memcpy, 64=xor checksum, 128=stats, 256=series stats/regression, 512=series scans (bit 8 set additionally if the AVX2
+// path failed).
 int si_kernel_selftest_impl(int onlyTier);
 int si_kernel_selftest() { return si_kernel_selftest_impl(0); }
 
@@ -282,6 +284,12 @@ int si_kernel_selftest_impl(int onlyTier) {
                     if (g != ref_xor(w, words)) fail |= 64 | (isa == 2 ? 8 : 0);
                 }
             }
+        }
+        // Series (analytics) kernels: their own boundary lengths and misalignments, reported as bits 256 (stats / regression
+        // sums) and 512 (threshold scans), plus 8 for the AVX2 tier like every other kernel.
+        if (const int series = si_series_selftest_impl(isa)) {
+            if (series & (1 | 2)) fail |= 256 | (isa == 2 ? 8 : 0);
+            if (series & (4 | 8 | 16)) fail |= 512 | (isa == 2 ? 8 : 0);
         }
     }
     return fail;

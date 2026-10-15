@@ -247,6 +247,48 @@ public static class NativeEndpoints
         })
         .WithName("RunNativeKernels");
 
+        // What the native engine is doing right now, cheap enough for a status line (no benchmark, no selftest rerun): which
+        // instruction tier the Assembly kernels run on, whether the startup selftest demoted any, and how many of the
+        // analytics operations the engine has handled versus plain C#. Always 200: "not loaded" is an answer, not an error.
+        app.MapGet("/api/native/engine", () =>
+        {
+            var calls = SeriesEngine.Calls;
+            try
+            {
+                var tier = NativeInterop.GetActiveIsa();
+                return Results.Ok(new
+                {
+                    available = true,
+                    isa = tier == 2 ? "AVX2" : tier == 1 ? "SSE2" : "Portable C++",
+                    assembly = tier > 0,
+                    demotedTiers = NativeInterop.AsmDemotions(),
+                    series = new
+                    {
+                        active = SeriesEngine.IsAvailable && !SeriesEngine.ForceManaged,
+                        nativeCalls = calls.Native,
+                        managedCalls = calls.Managed,
+                        minLength = SeriesEngine.MinNativeLength,
+                    },
+                    sections = new[]
+                    {
+                        new { name = "Vector math", kernels = "add, dot product, sum, min/max", usedBy = "benchmarks and self-test" },
+                        new { name = "Overlay statistics", kernels = "per-core load: sum, busiest, active count", usedBy = "overlay engine" },
+                        new { name = "Memory", kernels = "XOR checksum, bandwidth", usedBy = "memory bandwidth test" },
+                        new { name = "Series analytics", kernels = "statistics, trend sums, run and spike scans", usedBy = "Analytics page" },
+                        new { name = "History reader", kernels = "reads the saved snapshot files (C++, validated line by line)", usedBy = "Analytics page" },
+                    },
+                });
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+            {
+                app.Logger.LogWarning(ex, "Native engine is not loaded.");
+                return Results.Ok(new { available = false, isa = "Unavailable", assembly = false, demotedTiers = 0,
+                    series = new { active = false, nativeCalls = calls.Native, managedCalls = calls.Managed, minLength = SeriesEngine.MinNativeLength },
+                    sections = Array.Empty<object>() });
+            }
+        })
+        .WithName("GetNativeEngineStatus");
+
         // CPU topology from the OS scheduler/sysfs. physicalCores/packages are null (not 0) when the OS
         // does not expose them, e.g. some VMs and containers.
         app.MapGet("/api/native/topology", () => NativeCall(app, "CPU topology", () =>
