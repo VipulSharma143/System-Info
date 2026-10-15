@@ -72,6 +72,10 @@ target_include_directories(systemmonitor_objects PRIVATE ${ASM_DIR})
 
 add_library(systemmonitor_native SHARED $<TARGET_OBJECTS:systemmonitor_objects>)
 
+if(WIN32)
+    target_sources(systemmonitor_native PRIVATE series_kernels.def)
+endif()
+
 if(NOT WIN32)
     target_link_libraries(systemmonitor_native stdc++fs ${CMAKE_DL_LIBS})
 else()

@@ -1,0 +1,6 @@
+LIBRARY systemmonitor_native
+EXPORTS
+    si_series_stats_f64_sse2
+    si_series_stats_f64_avx2
+    si_series_regress_f64_sse2
+    si_series_regress_f64_avx2
