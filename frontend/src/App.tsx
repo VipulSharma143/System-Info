@@ -19,6 +19,7 @@ import ServiceControls from './components/layout/ServiceControls';
 import StartupScreen from './components/layout/StartupScreen';
 import { buildStartupSteps } from './lib/startupSteps';
 import UpdateBanner from './components/layout/UpdateBanner';
+import FirstRunDialog from './components/layout/FirstRunDialog';
 import StatusIndicator from './components/common/StatusIndicator';
 import { LoadingState, OfflineBanner } from './components/common/States';
 import OverviewView from './components/views/OverviewView';
@@ -186,6 +187,8 @@ function AppContent({ onRetryStartup }: { onRetryStartup: () => void }) {
         <SystemView info={info} infoError={infoError} onRetryInfo={retryInfo} data={data} gpus={gpus} gpuError={gpuError} active={activeSection === 'system'} />
       )}
       {show('updates', <UpdatesView updater={updater} />)}
+
+      {isTauri() && <FirstRunDialog />}
 
       {updater.phase === 'installing' && (
         <Suspense fallback={null}>

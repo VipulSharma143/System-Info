@@ -1,6 +1,6 @@
 import { API_BASE } from './apiConfig';
 import { interpretResponse, type ResetOutcome, type ResetRequest } from './dataReset';
-import { isTauri } from './tauri';
+import { isTauri, relaunchApp } from './tauri';
 
 /** Sends the request. The custom header makes the browser ask the backend's permission first, so no other web page can trigger a delete. */
 export async function resetData(request: ResetRequest, fetchImpl: typeof fetch = fetch): Promise<ResetOutcome> {
@@ -21,8 +21,7 @@ export async function resetData(request: ResetRequest, fetchImpl: typeof fetch =
 export async function restartApp(): Promise<void> {
   if (isTauri()) {
     try {
-      const { relaunch } = await import('@tauri-apps/plugin-process');
-      await relaunch();
+      await relaunchApp();
       return;
     } catch {
       /* fall through to a reload */

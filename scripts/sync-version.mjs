@@ -46,8 +46,27 @@ function main() {
   patchJsonField(join(ROOT, 'frontend/src-tauri/tauri.conf.json'), version);
   patchCargoToml(join(ROOT, 'frontend/src-tauri/Cargo.toml'), version);
   patchDirectoryBuildProps(join(ROOT, 'Directory.Build.props'), version, fourPart);
+  patchPackageLock(join(ROOT, 'frontend/package-lock.json'), version);
+  patchCargoLock(join(ROOT, 'frontend/src-tauri/Cargo.lock'), version);
 
-  console.log(`Synced version ${version} to package.json, tauri.conf.json, Cargo.toml, Directory.Build.props.`);
+  console.log(`Synced version ${version} to package.json, package-lock.json, tauri.conf.json, Cargo.toml, Cargo.lock, Directory.Build.props.`);
+}
+
+// The lockfiles repeat the app's own version; left alone they drift (npm and cargo rewrite them on the next install
+// or build, producing a surprise diff). Only the app's own entries are touched, never a dependency.
+function patchPackageLock(path, version) {
+  const original = readFileSync(path, 'utf-8');
+  const data = JSON.parse(original);
+  data.version = version;
+  if (data.packages?.['']) data.packages[''].version = version;
+  writeFileSync(path, JSON.stringify(data, null, 2) + (original.endsWith('\n') ? '\n' : ''));
+}
+
+function patchCargoLock(path, version) {
+  const original = readFileSync(path, 'utf-8');
+  const pattern = /(name = "system-info"\nversion = ")[^"]*(")/;
+  if (!pattern.test(original)) throw new Error(`Could not find the system-info package in ${path}`);
+  writeFileSync(path, original.replace(pattern, `$1${version}$2`));
 }
 
 function patchJsonField(path, version) {

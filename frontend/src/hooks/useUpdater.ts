@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Update } from '@tauri-apps/plugin-updater';
-import { isTauri } from '../lib/tauri';
+import { isTauri, relaunchApp } from '../lib/tauri';
 import { inlineMessage, reportDiagnostic, type AlertKind } from '../lib/errors';
 import { showAlert } from '../lib/alerts';
 import { classifyUpdateError, describeError, downloadComplete, prepareForInstall, retryTransient, type PrepareResult } from '../lib/updateFlow';
@@ -180,8 +180,7 @@ export function useUpdater(enabled: boolean) {
         if (!released.released) throw new Error(`files are still locked: ${released.detail}`);
         await update.install();
         // Only reached on Linux — on Windows the installer has already terminated this process from inside install().
-        const { relaunch } = await import('@tauri-apps/plugin-process');
-        await relaunch();
+        await relaunchApp();
         return;
       } catch (err) {
         lastError = err;

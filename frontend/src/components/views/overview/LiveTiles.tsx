@@ -1,96 +1,63 @@
 import { memo } from 'react';
 import type { SystemSnapshot } from '../../../types/system';
 import type { DashboardHistory } from '../../../hooks/useDashboardHistory';
-import { severity, severityWord, formatGB } from '../../../lib/format';
-import type { BadgeTone } from '../../common/Primitives';
-import UsageBar from '../../common/UsageBar';
-import LiveTile from './LiveTile';
+import { formatRate, severity, severityWord } from '../../../lib/format';
+import { hueStyle, usageColor, type Hue } from '../../../lib/hues';
+import Figure from '../../common/Figure';
+import Sparkline from '../../common/Sparkline';
+import UsageRing from '../../common/UsageRing';
+import { Badge, type BadgeTone } from '../../common/Primitives';
 
 const usageTone = (percent: number): BadgeTone => ({ ok: 'ok', warn: 'warn', critical: 'critical' } as const)[severity(percent)];
 
-function batteryTone(b: SystemSnapshot['battery']): BadgeTone {
-  if (!b.available) return 'muted';
-  if (b.status === 'Charging') return 'ok';
-  return b.capacityPercent !== null && b.capacityPercent <= 20 ? 'critical' : 'info';
+function Card({ label, hue, badge, tone, children }: { label: string; hue: Hue; badge: string; tone: BadgeTone; children: React.ReactNode }) {
+  return (
+    <section className="panel flex min-w-0 flex-col gap-4 p-5" style={hueStyle(hue)}>
+      <header className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-[13px] font-medium text-ink"><span className="h-2 w-2 rounded-full bg-[var(--h)]" />{label}</span>
+        <Badge tone={tone} dot={false}>{badge}</Badge>
+      </header>
+      {children}
+    </section>
+  );
 }
 
 interface Props {
   cpu: SystemSnapshot['cpu'];
   ram: SystemSnapshot['ram'];
-  disks: SystemSnapshot['disks'];
   network: SystemSnapshot['network'];
-  battery: SystemSnapshot['battery'];
   history: DashboardHistory;
 }
 
 /*
-  The five headline metrics, answered at a glance: CPU and memory are wide tiles (they have the
-  most to say), disk / network / battery are compact. Only the props each tile reads are passed,
-  so a poll that changes just the network does not re-render the others.
+  The three live metrics that change second to second: processor and memory as dials with their recent trend,
+  network as two figures with one trend. Only the props each card reads are passed, so a poll that changes just the
+  network does not redraw the dials.
 */
-function LiveTiles({ cpu, ram, disks, network, battery, history }: Props) {
-  const rx = network.reduce((sum, n) => sum + n.rxKBps, 0);
-  const tx = network.reduce((sum, n) => sum + n.txKBps, 0);
-  const busiest = disks.length > 0 ? disks.reduce((a, b) => (b.usedPercent > a.usedPercent ? b : a)) : null;
-  const hasCharge = battery.available && battery.capacityPercent !== null;
-
+function LiveTiles({ cpu, ram, network, history }: Props) {
+  const rx = network.reduce((s, n) => s + n.rxKBps, 0);
+  const tx = network.reduce((s, n) => s + n.txKBps, 0);
   return (
-    <div className="bento">
-      <LiveTile
-        className="col-span-12 md:col-span-6 xl:col-span-4"
-        label="Processor"
-        hue="cpu"
-        value={cpu.usedPercent.toFixed(1)}
-        unit="%"
-        status={severityWord(cpu.usedPercent)}
-        tone={usageTone(cpu.usedPercent)}
-        history={history.cpu}
-        percentForColor={cpu.usedPercent}
-      />
-      <LiveTile
-        className="col-span-12 md:col-span-6 xl:col-span-4"
-        label="Memory"
-        hue="ram"
-        value={ram.usedPercent.toFixed(1)}
-        unit="%"
-        status={`${(ram.usedMB / 1024).toFixed(1)} of ${(ram.totalMB / 1024).toFixed(1)} GB`}
-        tone={usageTone(ram.usedPercent)}
-        history={history.ram}
-        percentForColor={ram.usedPercent}
-      />
-      <LiveTile
-        className="col-span-12 md:col-span-6 xl:col-span-4"
-        label="Network"
-        hue="net"
-        value={rx.toFixed(0)}
-        unit="KB/s down"
-        status={`${tx.toFixed(0)} KB/s up`}
-        tone="info"
-        history={history.rx}
-        historyMax="auto"
-      />
-      <LiveTile
-        className="col-span-12 md:col-span-6 xl:col-span-6"
-        label="Fullest drive"
-        hue="disk"
-        value={busiest ? busiest.usedPercent.toFixed(0) : '—'}
-        unit={busiest ? '%' : undefined}
-        status={busiest ? `${busiest.name} · ${formatGB(busiest.freeGB)} free` : 'No drives'}
-        tone={busiest ? usageTone(busiest.usedPercent) : 'muted'}
-        percentForColor={busiest?.usedPercent}
-        footer={busiest ? <UsageBar percent={busiest.usedPercent} hue="disk" hideValue /> : undefined}
-      />
-      <LiveTile
-        className="col-span-12 md:col-span-12 xl:col-span-6"
-        label="Battery"
-        hue="power"
-        value={hasCharge ? battery.capacityPercent!.toFixed(0) : '—'}
-        unit={hasCharge ? '%' : undefined}
-        status={battery.available ? (battery.status ?? 'Unknown') : 'No battery'}
-        tone={batteryTone(battery)}
-        history={history.charge}
-        percentForColor={hasCharge ? 100 - battery.capacityPercent! : undefined}
-      />
+    <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 xl:grid-cols-3">
+      <Card label="Processor" hue="cpu" badge={severityWord(cpu.usedPercent)} tone={usageTone(cpu.usedPercent)}>
+        <div className="flex items-center gap-5">
+          <UsageRing percent={cpu.usedPercent} hue="cpu" size={112} label="busy" />
+          <div className="min-w-0 flex-1"><Sparkline points={history.cpu} color={usageColor(cpu.usedPercent, 'cpu')} height={64} dot /><p className="mt-1 text-[11px] text-faint">Recent load</p></div>
+        </div>
+      </Card>
+      <Card label="Memory" hue="ram" badge={`${(ram.usedMB / 1024).toFixed(1)} of ${(ram.totalMB / 1024).toFixed(1)} GB`} tone={usageTone(ram.usedPercent)}>
+        <div className="flex items-center gap-5">
+          <UsageRing percent={ram.usedPercent} hue="ram" size={112} label="used" />
+          <div className="min-w-0 flex-1"><Sparkline points={history.ram} color={usageColor(ram.usedPercent, 'ram')} height={64} dot /><p className="mt-1 text-[11px] text-faint">Recent usage</p></div>
+        </div>
+      </Card>
+      <Card label="Network" hue="net" badge="Live" tone="info">
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-2">
+          <div><div className="mb-1 text-[11px] text-muted">Download</div><Figure size="md" value={formatRate(rx)} /></div>
+          <div><div className="mb-1 text-[11px] text-muted">Upload</div><Figure size="md" value={formatRate(tx)} /></div>
+        </div>
+        <div><Sparkline points={history.rx} color="var(--hue-net)" max="auto" height={48} dot /><p className="mt-1 text-[11px] text-faint">Recent download</p></div>
+      </Card>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { EmptyState, LoadingState } from '../common/States';
 import { ViewContainer } from '../common/Primitives';
 
 import StatusBar from './overlay/StatusBar';
+import DrivesTile from './overlay/DrivesTile';
 import Tile from './overlay/Tile';
 import { buildTiles } from './overlay/model';
 
@@ -39,6 +40,7 @@ function OverlayView({ active }: { active: boolean }) {
       <StatusBar snapshot={snapshot} now={now} compact={compact} onCompact={setCompact} />
       <div className={`grid gap-4 ${compact ? 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-4' : 'grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3'}`}>
         {tiles.map((t) => <Tile key={t.id} tile={t} compact={compact} />)}
+        <DrivesTile active={active} compact={compact} />
       </div>
     </ViewContainer>
   );

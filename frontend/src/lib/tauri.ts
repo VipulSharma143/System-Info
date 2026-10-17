@@ -10,3 +10,14 @@
 export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
+
+/**
+ * Restarts the desktop app. The shell is told first, so the new process waits for this one to finish instead of
+ * being turned away as a "second launch" (the app allows one running instance; see src-tauri/src/instance.rs).
+ */
+export async function relaunchApp(): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const { relaunch } = await import('@tauri-apps/plugin-process');
+  await invoke('begin_restart');
+  await relaunch();
+}

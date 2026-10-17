@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SystemInfo",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "identifier": "dev.vipulsharma.systeminfo",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -23,6 +23,7 @@
         "minimizable": true,
         "closable": true,
         "center": true,
+        "visible": false,
         "decorations": true,
         "dragDropEnabled": false
       }
@@ -57,7 +58,8 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installerHooks": "installer-hooks.nsh"
       },
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
@@ -65,7 +67,9 @@
     },
     "linux": {
       "deb": {
-        "depends": []
+        "depends": [
+          "libayatana-appindicator3-1 | libappindicator3-1"
+        ]
       }
     }
   },

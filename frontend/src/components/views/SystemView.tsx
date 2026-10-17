@@ -6,6 +6,7 @@ import Button from '../common/Button';
 import Panel from '../common/Panel';
 import { EmptyState, LoadingState } from '../common/States';
 import { ViewContainer } from '../common/Primitives';
+import BehaviorPanel from './system/BehaviorPanel';
 import DataPanel from './system/DataPanel';
 import { BoardSensorsPanel } from './sensors/SensorPanels';
 import GpuPanels from './system/GpuPanels';
@@ -59,6 +60,7 @@ function SystemView({ info, infoError, onRetryInfo, data, gpus, gpuError, active
       <GpuPanels gpus={gpus} error={gpuError} />
       <BoardSensorsPanel active={active} />
       <ApplicationPanel info={info} drives={data.disks.length} interfaces={data.network.length} />
+      <BehaviorPanel />
       <DataPanel active={active} />
     </ViewContainer>
   );

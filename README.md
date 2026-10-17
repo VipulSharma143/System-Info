@@ -32,13 +32,14 @@ There is no backend cloud service, no account, and no external database. Everyth
 - **Live dashboard** — CPU, RAM, disk, network, and process metrics, polled and cached server-side, with a connection indicator that degrades from `Live` through `Reconnecting` to `Offline`, so a stale reading is never mistaken for a current one.
 - **Fast startup from cache** — the backend keeps a small versioned cache of slow-to-read system details (`<data>/cache`), and the UI remembers the last dashboard readings, so the window shows data immediately on later launches while fresh values load in the background. A missing, corrupt, outdated or unwritable cache is silently rebuilt.
 - **GPU page** — one card per adapter (any number), with hardware details and live usage, VRAM, temperature, power, clocks and fan where the platform reports them. Linux reads DRM/sysfs plus NVML for NVIDIA; Windows uses WMI/DXGI, performance counters and NVML, and takes an integrated Intel or AMD GPU's temperature from LibreHardwareMonitor's `GPU Core` sensor when its driver reports one. Adapter details are cached between launches.
-- **Overlay tab** — a compact row of live tiles for gaming or heavy work: CPU (usage, temperature), memory, and every GPU (usage, video memory, temperature). Values a platform cannot report show as an em dash with the reason on hover, never as a made-up zero.
+- **Overlay tab** — a compact row of live tiles for gaming or heavy work: CPU (usage, temperature), memory, every GPU (usage, video memory, temperature), and a Drives tile with every SSD, NVMe and SATA drive's temperature, each sensor it reports and the drive's own limits. Values a platform cannot report show as an em dash with the reason on hover, never as a made-up zero.
 - **System identity** — computer name, manufacturer, model, BIOS version, Windows edition/build, architecture, and uptime — read from `Win32_ComputerSystem`/`Win32_BIOS`/`Win32_OperatingSystem` on Windows, DMI sysfs + `/etc/os-release` on Linux.
 - **GPU detection** — every display adapter detected (multi-GPU laptops included), with driver info, resolution/refresh rate, and live per-engine utilization (3D, Copy, VideoDecode, …) rather than one fabricated "GPU usage" number.
 - **Real battery telemetry on Windows** — charge, charging state, voltage, remaining/full capacity, and cycle count read via the battery class driver's IOCTL interface (`IOCTL_BATTERY_QUERY_TAG`/`_INFORMATION`/`_STATUS`) — the same interface `powercfg /batteryreport` uses.
 - **Historical analytics** — CPU/network trend charts, bottleneck-episode detection, and summary stats over selectable windows (1h / 6h / 24h / 7d), computed in-process by the .NET backend from the local snapshot files (no separate service).
 - **Network speed test** — client-side download/upload/ping test against Cloudflare's public speed-test endpoints.
 - **Local, file-based storage** — append-only JSON Lines snapshots, no database to install, configure, or lose connectivity to.
+- **Background and startup choice** — pick *always run in the background* (closing the window keeps System Info running in the notification area), *do not run in the background* (closing quits; the behaviour of every earlier version) or *run automatically at system startup*. It is asked once on a fresh installation only, never during an update, and can be changed later on the System page.
 - **Native desktop app on Windows and Linux** — a real window (not a browser tab) that owns the backend process lifecycle, with Start / Stop / Exit controls, immediate crash detection, and orphan-process hardening (Windows Job Objects; a pid file on Linux).
 - **No hardware values are ever fabricated.** Anything the OS doesn't expose is reported as `Unavailable`, never guessed, defaulted to `0`, or silently omitted — enforced consistently across every metric, on both platforms.
 
@@ -80,7 +81,7 @@ flowchart TB
 
 | Layer | Technology | Responsibility | Why this choice |
 |---|---|---|---|
-| **Frontend** | React 19, TypeScript, Vite 8 | Dashboard UI, metric polling, visualization | Fast dev loop (Vite), type-safe data contracts across seven views |
+| **Frontend** | React 19, TypeScript, Vite 8 | Dashboard UI, metric polling, visualization | Fast dev loop (Vite), type-safe data contracts across twelve views |
 | **Styling** | Tailwind CSS 4 | Utility-first styling, shared design tokens | One spacing/type/color scale reused across every panel (`Primitives.tsx`) instead of per-component CSS |
 | **Desktop Shell** | Tauri 2, Rust, `win32job` (Windows) | Native window, backend process lifecycle, orphan-process prevention | Real OS window instead of a browser tab; Rust gives safe, low-overhead process management with no Electron-sized runtime |
 | **Backend** | C#, .NET 10 Web API (Minimal APIs) | REST endpoints, platform-provider dispatch, snapshot writes, in-process analytics | Strong typing and WMI/`PerformanceCounter` access on Windows without native interop for most metrics |
@@ -119,7 +120,9 @@ System Info/
 │   └── src-tauri/                   # Tauri 2 desktop shell (Rust)
 │       ├── src/                     # main.rs, lib.rs, supervisor.rs (lifecycle core),
 │       │                            # process.rs (resource lookup, command building), commands.rs
-│       └── supervisor-tests/        # std-only test crate for supervisor.rs (no Tauri toolchain needed)
+│       │                            # shell.rs (tray, close handling), settings.rs, autostart.rs, instance.rs,
+│       │                            # plus installer-hooks.nsh one level up (Windows installer page)
+│       └── supervisor-tests/        # std-only test crate for supervisor.rs, settings.rs, autostart.rs, instance.rs (no Tauri toolchain needed)
 │
 ├── backend/
 │   ├── SystemMonitor.Api/           # .NET 10 Minimal API
@@ -263,10 +266,18 @@ CORS is restricted to `http://localhost:5173` (Vite dev), `http://tauri.localhos
 On both Windows and Linux, `frontend/src-tauri/` wraps the React frontend in a real, resizable desktop window (1280×820 default, 980×650 minimum) instead of opening a browser tab.
 
 - **`supervisor.rs` / `process.rs`** — `supervisor.rs` is the Tauri-independent lifecycle core (spawn, readiness, exit detection, stale-process cleanup, cancellation) and has its own integration tests; `process.rs` resolves the packaged backend executable from the app's resource directory, builds the child command (`CREATE_NO_WINDOW` on Windows, log redirection, environment) and exposes the manager. The supervisor manages a list of services and starts them **concurrently**; today that list is the backend (`:5132`), polled on `/health` every 100 ms, a child that exits during startup is reported immediately (not after a timeout), a port already held by another program is detected before spawning, and a pid file lets the next launch reap a process left by an uncleanly terminated run. `get_service_status` never blocks and never does network I/O — the old implementation held a lock during the readiness wait, which froze the window on slow cold starts. The 45 s timeout is an upper bound only. Timing per stage is written to `logs/startup.log` under the data directory.
-- **`commands.rs`** — the *only* surface the frontend has onto process control: `start_services`, `stop_services`, `get_service_status`, `exit_app`. There is no generic "run this command" entry point, and the app deliberately does not use `tauri-plugin-shell` — the frontend has no shell/command-execution capability at all.
+- **`commands.rs`** — the *only* surface the frontend has onto process control: `start_services`, `stop_services`, `get_service_status`, `exit_app`, the updater helpers (`prepare_for_update`, `log_update_event`, `diagnose_update_check`) and the background/startup preference (`get_startup_behavior`, `set_startup_behavior`, `begin_restart`). There is no generic "run this command" entry point, and the app deliberately does not use `tauri-plugin-shell` — the frontend has no shell/command-execution capability at all.
 - **Orphan-process hardening** — on Windows, each child process is assigned to its own Windows Job Object (`win32job` crate, `KILL_ON_JOB_CLOSE`), so the backend and anything it spawns is guaranteed to die with the app, including on an unexpected crash of the app itself. On Linux a pid file lets the next launch reap a leftover backend (verified by checking `/proc/<pid>/exe`, so a reused pid is never killed).
-- **Service controls** — `ServiceControls.tsx` (rendered only inside the Tauri shell) exposes **Stop** (halts services, keeps the window open), **Exit** (stops services and closes the app), and the native window's `X` button performs the same full shutdown as Exit.
+- **Service controls** — `ServiceControls.tsx` (rendered only inside the Tauri shell) exposes **Stop** (halts services, keeps the window open), **Exit** (stops services and closes the app), and the native window's `X` button performs the same full shutdown as Exit — unless a background mode is chosen (see below), in which case it hides the window and everything keeps running.
 
+- **Background and startup behaviour** — three choices, stored in `settings.json` in the app's data folder (`%LOCALAPPDATA%\SystemInfo` on Windows, `~/.local/share/SystemInfo` on Linux; Reset data does not delete it):
+  - *Always run in the background* — closing the window hides it; System Info keeps running (and recording history) with a tray icon offering Show and Quit.
+  - *Do not run in the background* — closing the window quits, as in every release before 2.8.0. This is what an existing installation keeps after updating.
+  - *Run automatically at system startup* — registered at sign-in (Windows: the per-user Run key; Linux: `~/.config/autostart/systeminfo.desktop`), starts hidden in the tray, and keeps running there when the window is closed.
+
+  **Fresh installation vs. update.** The Windows installer shows the three choices as its first page, only for a fresh installation: the page is skipped for updates (`/UPDATE`, `/P`), silent installs, and a machine that already has System Info or a saved choice. On Linux (`.deb`, AppImage) and after a silent Windows install, the app asks once on its first launch instead. An update never asks and never changes the saved choice. The page's logic is in `frontend/src-tauri/installer-hooks.nsh`; the decision on first launch is in `settings.rs`.
+
+  **Safety rules.** The tray exists only while a background mode is chosen. If the desktop has no notification area (or the AppIndicator library is missing on Linux), closing the window still quits, so the window can never be lost. Only one System Info runs per user: opening it again brings the running window forward (`instance.rs`, a loopback handshake, deliberately not a plugin so the app's own restart is not mistaken for a second launch). Exit in the top bar and Quit in the tray always close the app completely.
 - **Administrator launch (Windows)** — release builds embed a `requireAdministrator` manifest (`frontend/src-tauri/windows-app-manifest.xml`, applied by `build.rs`), so Windows shows one standard UAC prompt at launch. The backend is a child of the app and inherits the elevated token, so nothing prompts again. This is needed for the hardware-sensor driver that reads CPU temperatures; **administrator rights alone do not guarantee a reading** (the Windows installer bundles the official signed PawnIO driver installer; the first elevated launch installs it once, silently — see [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) for its GPL terms and how to opt out with `SYSTEMINFO_NO_DRIVER_INSTALL=1`; the CPU tab keeps a retry button) — the PC must also expose a sensor (and, with the current sensor library, have the PawnIO driver installed). Debug builds (`tauri dev`) are not elevated. The in-app updater starts the per-user installer from the elevated app; approve the prompt with the same account you normally use.
 
 Linux distribution: the production `.deb`/`.AppImage` install the Tauri-bundled app directly — no `sudo`, no Python or other runtime, no browser, and no manual `localhost:5173` step. The pre-Tauri `AppRun`/`systeminfo.desktop` were deleted; the AppImage's `AppRun` is generated inline by `release.yml`. `start-all.sh` remains the Linux **dev-only** equivalent of `start-all.ps1` (see [Platform-Specific Behavior](#-platform-specific-behavior--limitations)).
@@ -405,15 +416,15 @@ The pre-Tauri artifacts (`launcher/`, `SystemInfo.iss`, `SystemInfo.ico`, `READM
 
 ## 🔢 Version Management
 
-Four version-bearing files are kept in lockstep from a single source — `CHANGELOG.md`'s top entry:
+Six version-bearing files are kept in lockstep from a single source — `CHANGELOG.md`'s top entry:
 
 ```
-frontend/package.json · frontend/src-tauri/tauri.conf.json · frontend/src-tauri/Cargo.toml
-Directory.Build.props (.NET)
+frontend/package.json · frontend/package-lock.json · frontend/src-tauri/tauri.conf.json
+frontend/src-tauri/Cargo.toml · frontend/src-tauri/Cargo.lock (the system-info package) · Directory.Build.props (.NET)
 ```
 
 ```bash
-node scripts/sync-version.mjs      # propagates CHANGELOG.md's top version to all four files
+node scripts/sync-version.mjs      # propagates CHANGELOG.md's top version to all six files
 node scripts/check-version.mjs     # fails loudly if any of them drift — this is what CI runs
 ```
 
@@ -453,9 +464,10 @@ Nothing needs Python or a scripting runtime — only the toolchains you already 
 |---|---|---|
 | **Native + Assembly** (`Engine/Cpp/tests/`, ctest) | Every SSE2/AVX2 kernel against a C++ reference at lengths 0–4099 with misaligned pointers; `memcpy` guard bytes; overlap handling; CPUID/OS feature consistency; topology, storage and fan enumeration; argument validation; the regression for the SIMD loop that hung on fewer than 4 iterations; the SMBIOS memory parser (Type 16/17: DDR3/4/5 mapping, capacities, empty slots, ranks, speeds, ECC, truncated/corrupt tables) against hand-built tables, and the Windows `RawSMBIOSData` header handling | `cmake -S native -B native/build-tests -DBUILD_NATIVE_TESTS=ON && cmake --build native/build-tests && ctest --test-dir native/build-tests --output-on-failure` |
 | **C#** (`backend/SystemMonitor.Tests`) | Analytics maths and JSON shape, torn/malformed snapshot lines, empty history, a full 86,400-row day, cancellation, the bounded "all time" query, and the managed native wrappers against plain C# reference implementations | `SYSTEMINFO_NATIVE_DIR=native/build-tests dotnet run --project backend/SystemMonitor.Tests` |
-| **Process supervisor** (`frontend/src-tauri/supervisor-tests`) | Starting services concurrently, `status()` never blocking during startup (the original window-freeze bug), a crashed child reported immediately, a busy port not mistaken for a healthy service, stale-process cleanup, cancellation, no leaked children | `cd frontend/src-tauri/supervisor-tests && cargo test` |
+| **Frontend** (`frontend/tests`, `npm test`) | View-models and helpers behind the pages: formatting, sensors, drive tile, process grouping and totals, overview verdict, interface ranking, startup-behaviour parsing, updater flow, persisted cache | `cd frontend && npm test` |
+| **Process supervisor and shell logic** (`frontend/src-tauri/supervisor-tests`) | Settings and the fresh-install-vs-update decision, autostart entry formatting, and the one-instance handshake on real sockets; starting services concurrently, `status()` never blocking during startup (the original window-freeze bug), a crashed child reported immediately, a busy port not mistaken for a healthy service, stale-process cleanup, cancellation, no leaked children | `cd frontend/src-tauri/supervisor-tests && cargo test` |
 
-CI runs all three through the reusable `tests.yml` workflow (Linux, plus Windows/MSVC for the native and C# suites) on every pull request and branch push, and `release.yml` will not build an installer until it passes. `./build.sh` runs the native and C# suites locally.
+CI runs the native, C#, Rust and frontend suites through the reusable `tests.yml` workflow (Linux, plus Windows/MSVC for the native and C# suites) on every pull request and branch push, and `release.yml` will not build an installer until it passes. `./build.sh` runs the native and C# suites locally.
 
 ---
 
@@ -467,7 +479,7 @@ CI runs all three through the reusable `tests.yml` workflow (Linux, plus Windows
 - **Windows CPU temperature:** read through LibreHardwareMonitor and only when the app runs as administrator; when no sensor value is available the CPU and Overlay tabs show "Unavailable" and say why (not elevated / driver missing / no sensor). It has **not been run on a real Windows PC** yet — check it on an Intel Core i7-12700H and an AMD machine. Linux reads `coretemp`/`k10temp` from sysfs and is unchanged.
 - **Windows integrated GPU temperature (2.6.6):** read through LibreHardwareMonitor for Intel and AMD integrated GPUs only, and only where the native engine has no value. It is covered by fixture tests (pairing, never-replace, no-value reasons, gating) and compiles against the real library, but it has **not been run on a real Windows PC** yet — check an Intel integrated GPU, an AMD APU, and a laptop with an integrated plus a dedicated GPU (the dedicated GPU's temperature must look exactly as before). It runs in its own library instance that is opened once and closed only at shutdown; see `AGENT.md` before changing that.
 - **Storage health:** disk capacity/usage only — full SMART health needs root and is not implemented on either platform.
-- **Testing:** the native/Assembly layer, the C# analytics and native wrappers, and the Rust process supervisor have automated tests (see [Tests](#-tests)). There are no frontend tests, and nothing exercises an installed build automatically.
+- **Testing:** the native/Assembly layer, the C# analytics and native wrappers, and the Rust process supervisor have automated tests (see [Tests](#-tests)). Nothing exercises an installed build automatically, and the Windows installer page, the tray and start-at-sign-in have not been run on real hardware (see [`PROJECT_STATUS.md`](./PROJECT_STATUS.md)).
 
 See [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) for the full, itemized list of what has and hasn't been hardware-verified.
 

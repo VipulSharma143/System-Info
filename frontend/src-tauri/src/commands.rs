@@ -66,10 +66,29 @@ pub fn get_service_status(manager: State<'_, ServiceManager>) -> ServiceStatus {
 /// Shutdown runs on a worker thread; the app exits when it completes.
 #[tauri::command]
 pub fn exit_app(app: AppHandle) {
-    std::thread::spawn(move || {
-        crate::process::shutdown(&app.state::<ServiceManager>());
-        app.exit(0);
-    });
+    crate::shell::quit(&app);
+}
+
+/// What the app does when its window is closed and at sign-in, plus whether this is a fresh installation that still
+/// has to be asked (never true after an update).
+#[tauri::command]
+pub fn get_startup_behavior(shell: State<'_, crate::shell::Shell>) -> crate::shell::BehaviorReply {
+    shell.reply()
+}
+
+#[tauri::command]
+pub async fn set_startup_behavior(app: AppHandle, behavior: String) -> Result<crate::shell::BehaviorReply, String> {
+    let parsed = crate::settings::Behavior::parse(&behavior).ok_or_else(|| format!("unknown behaviour \"{behavior}\""))?;
+    tauri::async_runtime::spawn_blocking(move || crate::shell::set_behavior(&app, parsed))
+        .await
+        .map_err(|e| format!("setting task failed: {e}"))?
+}
+
+/// Called right before the app restarts itself (update, reset data), so the new process waits for this one to
+/// finish instead of mistaking it for a second launch.
+#[tauri::command]
+pub fn begin_restart(shell: State<'_, crate::shell::Shell>) {
+    shell.mark_closing();
 }
 
 /// Runs the same update check the Updates tab runs, but returns the FULL

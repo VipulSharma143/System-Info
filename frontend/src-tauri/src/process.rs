@@ -196,7 +196,7 @@ fn prepare(cmd: &mut Command, exe: &Path) {
 /// `~/.local/share/SystemInfo` on Linux — the same location AppDataPath.cs
 /// falls back to, so the app and the backend agree.
 /// Runtime user data is never written under the install directory.
-fn data_root() -> PathBuf {
+pub(crate) fn data_root() -> PathBuf {
     #[cfg(windows)]
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
         return PathBuf::from(local).join("SystemInfo");

@@ -40,6 +40,8 @@ function main() {
     ['frontend/src-tauri/tauri.conf.json', readJsonField('frontend/src-tauri/tauri.conf.json', 'version')],
     ['frontend/src-tauri/Cargo.toml', readByRegex('frontend/src-tauri/Cargo.toml', /^version = "([^"]*)"/m, 'version =')],
     ['Directory.Build.props', readByRegex('Directory.Build.props', /<Version>([^<]*)<\/Version>/, '<Version>')],
+    ['frontend/package-lock.json', readJsonField('frontend/package-lock.json', 'version')],
+    ['frontend/src-tauri/Cargo.lock', readByRegex('frontend/src-tauri/Cargo.lock', /name = "system-info"\nversion = "([^"]*)"/, 'the system-info package')],
   ];
 
   const mismatches = checks.filter(([, actual]) => actual !== expected);
