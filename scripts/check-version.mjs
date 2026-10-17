@@ -1,12 +1,3 @@
-#!/usr/bin/env node
-// Build-time guardrail (migration spec section 40): fail the build clearly
-// if any version-bearing file has drifted from CHANGELOG.md's current
-// release, instead of silently shipping a mismatched build the way the
-// pre-Tauri app shipped v1.0.0 in the UI against a v2.0.0 release.
-//
-// Run with no arguments; non-zero exit + a readable summary means "run
-// `node scripts/sync-version.mjs` and commit the result" — see
-// .github/workflows/release.yml's "Validate application version" step.
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -41,7 +32,7 @@ function main() {
     ['frontend/src-tauri/Cargo.toml', readByRegex('frontend/src-tauri/Cargo.toml', /^version = "([^"]*)"/m, 'version =')],
     ['Directory.Build.props', readByRegex('Directory.Build.props', /<Version>([^<]*)<\/Version>/, '<Version>')],
     ['frontend/package-lock.json', readJsonField('frontend/package-lock.json', 'version')],
-    ['frontend/src-tauri/Cargo.lock', readByRegex('frontend/src-tauri/Cargo.lock', /name = "system-info"\nversion = "([^"]*)"/, 'the system-info package')],
+    ['frontend/src-tauri/Cargo.lock', readByRegex('frontend/src-tauri/Cargo.lock', /name = "system-info"\r?\nversion = "([^"]*)"/, 'the system-info package')],
   ];
 
   const mismatches = checks.filter(([, actual]) => actual !== expected);

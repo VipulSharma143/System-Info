@@ -1,20 +1,3 @@
-#!/usr/bin/env node
-// Single authoritative-version propagation (migration spec sections 34/41):
-// run this once with the new version and it rewrites every place the app
-// version is duplicated, instead of hand-editing five files per release.
-//
-// Usage:
-//   node scripts/sync-version.mjs 2.0.1        # explicit version
-//   node scripts/sync-version.mjs              # reads the top entry of
-//                                               # CHANGELOG.md instead —
-//                                               # this is what CI uses
-//                                               # (release.yml already
-//                                               # derives its own VERSION
-//                                               # from CHANGELOG.md this
-//                                               # same way for the release
-//                                               # tag/notes, so this reuses
-//                                               # that same source instead
-//                                               # of inventing a second one)
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -64,7 +47,7 @@ function patchPackageLock(path, version) {
 
 function patchCargoLock(path, version) {
   const original = readFileSync(path, 'utf-8');
-  const pattern = /(name = "system-info"\nversion = ")[^"]*(")/;
+  const pattern = /(name = "system-info"\r?\nversion = ")[^"]*(")/; // CRLF on Windows checkouts
   if (!pattern.test(original)) throw new Error(`Could not find the system-info package in ${path}`);
   writeFileSync(path, original.replace(pattern, `$1${version}$2`));
 }
