@@ -28,3 +28,14 @@ describe('startup behaviour', () => {
     assert.ok(!needsTray('off'));
   });
 });
+
+import { keepsRunning } from '../src/lib/behaviorClient.ts';
+
+describe('what Exit does', () => {
+  it('keeps running only for a background mode with a working tray', () => {
+    assert.ok(keepsRunning({ behavior: 'background', firstRun: false, trayAvailable: true }));
+    assert.ok(keepsRunning({ behavior: 'startup', firstRun: false, trayAvailable: true }));
+    assert.ok(!keepsRunning({ behavior: 'off', firstRun: false, trayAvailable: true }));
+    assert.ok(!keepsRunning({ behavior: 'background', firstRun: false, trayAvailable: false }));
+  });
+});

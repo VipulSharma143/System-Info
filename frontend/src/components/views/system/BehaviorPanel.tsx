@@ -19,7 +19,7 @@ function BehaviorPanel() {
       ) : (
         <>
           <BehaviorChoice name="startup-behavior" value={state.behavior} disabled={saving} onChange={(v) => void choose(v)} />
-          <p className="mt-3 text-[12px] leading-relaxed text-faint">The change takes effect immediately. Choose Exit in the top bar (or Quit in the tray menu) to close System Info completely.</p>
+          <p className="mt-3 text-[12px] leading-relaxed text-faint">The change takes effect immediately. The window's close button and Exit in the top bar both follow this setting: with a background option they close the window and keep System Info running; otherwise they quit it. Quit in the tray menu always stops it completely.</p>
           {!state.trayAvailable && needsTray(state.behavior) && (
             <div className="mt-3">
               <Callout tone="warn" icon={TriangleAlert}>

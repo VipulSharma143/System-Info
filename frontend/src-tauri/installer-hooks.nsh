@@ -91,21 +91,22 @@ FunctionEnd
 
 !macro NSIS_HOOK_POSTINSTALL
   ; $SIBehavior is empty unless the page above was shown and answered, i.e. only on a fresh installation.
+  ; Only the choice is stored here. Start-at-sign-in for "startup" is registered by the app itself on its first launch:
+  ; System Info runs as administrator, and Windows only starts such a program at sign-in from a scheduled task with
+  ; highest privileges, which only an elevated process (the app, not this per-user installer) can create.
   ${If} $SIBehavior != ""
     CreateDirectory "$LOCALAPPDATA\SystemInfo"
     FileOpen $0 "$LOCALAPPDATA\SystemInfo\settings.json" w
     FileWrite $0 '{"schema":1,"behavior":"$SIBehavior"}$\r$\n'
     FileClose $0
-    ${If} $SIBehavior == "startup"
-      ; Same value the app writes itself (src/autostart.rs); the app reconciles it on every launch.
-      WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "SystemInfo" '"$INSTDIR\${MAINBINARYNAME}.exe" --autostart'
-    ${EndIf}
   ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  ; Uninstalling (not updating) removes the start-at-sign-in entry; the saved preference stays with the user's data.
+  ; Uninstalling (not updating) removes the start-at-sign-in registration; the saved preference stays with the user's data.
   ${If} $UpdateMode <> 1
+    nsExec::Exec 'schtasks /Delete /TN "SystemInfo" /F'
+    Pop $0
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "SystemInfo"
   ${EndIf}
 !macroend

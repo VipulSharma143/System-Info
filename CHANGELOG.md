@@ -5,34 +5,25 @@ All notable changes to SystemInfo are documented here.
 ## [Unreleased]
 
 
-## [2.7.2] - 2026-10-17
+## [2.7.3] - 2026-10-17
 
 ### Added
-- **Background and startup choice.** System Info now has three ways to behave, chosen by you: *Always run in the background* (closing the window keeps it running in the notification area, so history keeps being recorded), *Do not run in the background* (closing the window quits, as in every earlier version) and *Run automatically at system startup* (starts when you sign in, minimised to the notification area, and keeps running there). A tray icon with Show and Quit appears while a background mode is chosen. If the desktop has no notification area, closing the window still quits, so the app can never become unreachable.
-- **Asked once, on a fresh installation only.** The Windows installer shows a new first page with the three choices and stores the answer. On Linux (.deb and AppImage), and on a Windows install that was run silently, the app asks once on its first launch. Updates never ask and never change the choice: an installation that already has data keeps the old behaviour (*Do not run in the background*).
-- **System page: Background and startup.** The same three choices as radio buttons, applied immediately and kept between launches. Exit in the top bar and Quit in the tray menu still close the app completely.
-- **Drive temperatures on the Overlay page.** A new Drives tile lists every SSD, NVMe and SATA drive that reports a temperature, with its hottest reading, each sensor it has and the drive's own high and critical limits, from the same readings as the Storage page. A drive that reports nothing is explained, not shown as 0.
+
+- **Exit and the window's cross button now behave the same.** Both follow the background setting: with *Always run in the background* or *Run automatically at system startup* they close the window and leave System Info (and its monitoring services) running in the tray; with *Do not run in the background* they stop everything and quit. Before, Exit always shut the app down, so it ignored the setting. The Exit confirmation says which will happen. Quit in the tray menu always stops it completely. If there is no tray to bring the window back from, both quit instead of stranding a hidden window.
+- **Loading screen guidance.** While System Info starts, the loading screen now says that the System tab has three startup options.
 - One System Info runs per user. Opening it again brings the running window forward (including from the tray) instead of starting a second copy.
 
-### Changed
-- **Overview redesigned.** A headline that says how the machine is doing (Normal, Elevated or Critical, using the usual 70% / 90% thresholds) with processes, download, upload and battery next to it; processor and memory as dials with their recent trend; network traffic; the shared activity chart; the heaviest processes with their share of process memory; and storage with a plain "Filling up" or "Almost full" label. The battery tile became a figure in the headline, so the Overview no longer draws a battery trend; the Battery page is unchanged.
-- **Network redesigned.** Four headline tiles, a traffic chart with a labelled scale plus peak and average for the visible window, and every interface as a card (active first, busiest first, with its share of traffic). The interface type (Wi-Fi, Ethernet, virtual, loopback) is read from the interface's name only and is labelled as such. The speed test is unchanged.
-- **Processes redesigned.** Four headline tiles (running, memory held, heaviest, share held by the top five) and a Grouped view that folds same-named processes into one row you can open to see each PID, next to the flat All view. Sorting and filtering are unchanged. Memory is still the only per-process measurement shown.
-- The app window now starts hidden and is shown as soon as the shell is ready, so a sign-in start never flashes it.
-- Restarting the app (after Reset data or an update on Linux) now tells the shell first, so the new process waits for the old one instead of being turned away as a second launch.
+- 
 
 ### Fixed
-- Documentation: `AGENT.md`, `README.md` and `PROJECT_STATUS.md` named an unreleased 3.0.0; the battery history, drive/board/memory sensors and Reset data shipped in 2.6.8. They now describe the current implementation.
-- `Cargo.lock` was out of date (version 2.6.9 and an unused `ureq` entry); it now matches `Cargo.toml`.
-- `scripts/sync-version.mjs` and `check-version.mjs` now also cover `package-lock.json` and `Cargo.lock`, which had drifted from the app version.
+- **Start at system startup on Windows.** The release build requires administrator rights, and Windows does not start such a program from the Run key at sign-in, so the option could not work. It is now a scheduled task (at sign-in, highest privileges, not stopped on battery) created by the app itself; the installer only stores the choice. The Run key is kept only as a fallback for an unelevated development run, and any old Run entry is removed. Uninstalling removes the task.
+
 
 ### Notes
-- The preference lives in `settings.json` in System Info's data folder (`%LOCALAPPDATA%\SystemInfo` on Windows, `~/.local/share/SystemInfo` on Linux). Reset data does not delete it.
-- On Linux the tray icon needs the AppIndicator library (the .deb now depends on it) and a desktop that shows tray icons; some GNOME setups need the AppIndicator extension. Without one, closing the window quits.
-- Windows start-at-sign-in uses the per-user Run key; Linux uses `~/.config/autostart/systeminfo.desktop`. Uninstalling on Windows removes the Run entry.
 
-### Known Issues
-- Not yet run on real hardware: the new Windows installer page, the tray icon and hide-on-close on Windows and on a Linux desktop, start-at-sign-in on both, and the three redesigned pages and the Drives tile on screen. They compile, and the logic behind them is covered by tests, but please look at them on your PC and report what you see.
+- Windows start-at-sign-in is a scheduled task named SystemInfo, created by the app on launch (the installer stores the choice only); Linux uses `~/.config/autostart/systeminfo.desktop`.
+
+
 
 ## [2.7.1] - 2026-10-14
 

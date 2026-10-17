@@ -66,7 +66,8 @@ pub fn get_service_status(manager: State<'_, ServiceManager>) -> ServiceStatus {
 /// Shutdown runs on a worker thread; the app exits when it completes.
 #[tauri::command]
 pub fn exit_app(app: AppHandle) {
-    crate::shell::quit(&app);
+    // Same decision as the window's cross button: hide in a background mode, fully quit otherwise.
+    crate::shell::close_window(&app);
 }
 
 /// What the app does when its window is closed and at sign-in, plus whether this is a fresh installation that still

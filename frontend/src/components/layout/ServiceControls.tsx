@@ -1,12 +1,13 @@
 import { Play, Power, Square } from 'lucide-react';
 import { isTauri } from '../../lib/tauri';
 import { confirmExit, showAlert } from '../../lib/alerts';
+import { getBehavior, keepsRunning } from '../../lib/behaviorClient';
 import { reportDiagnostic, type AlertKind } from '../../lib/errors';
 import { useServiceControl, type ServiceHealth } from '../../hooks/useServiceControl';
 import Button from '../common/Button';
 
 // Desktop-only controls: a status readout plus Start/Resume, Stop (keeps the window) and Exit
-// (stops services and closes). Renders nothing in a plain browser tab, where there is no process to control.
+// (follows the background setting: closes the window and keeps running, or stops everything). Renders nothing in a plain browser tab, where there is no process to control.
 export default function ServiceControls() {
   const { status, pending, start, stop, exit } = useServiceControl();
 
@@ -25,8 +26,11 @@ export default function ServiceControls() {
     }
   };
 
+  // Exit follows the background setting (the shell decides): read it fresh so the wording matches what will happen,
+  // even if it was just changed on the System page.
   const handleExit = async () => {
-    if (await confirmExit()) void exit();
+    const background = await getBehavior().then(keepsRunning, () => false);
+    if (await confirmExit(background)) void exit();
   };
 
   return (
@@ -70,7 +74,7 @@ export default function ServiceControls() {
           icon={Power}
           collapseLabel
           onClick={() => void handleExit()}
-          title="Stop services and close System Info"
+          title="Close System Info (keeps running in the background if you chose that on the System page)"
         >
           Exit
         </Button>

@@ -13,7 +13,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::autostart;
 use crate::process::{self, ServiceManager};
-use crate::settings::{self, Behavior, Settings};
+use crate::settings::{self, Behavior, CloseAction, Settings};
 
 const TRAY_ID: &str = "main";
 
@@ -57,9 +57,8 @@ impl Shell {
         self.closing.store(true, Ordering::SeqCst);
     }
 
-    /// Closing the window hides it only when a background mode is chosen AND the tray exists to bring it back.
-    pub fn hides_on_close(&self) -> bool {
-        self.behavior().runs_in_background() && self.tray_ok.load(Ordering::SeqCst) && !self.closing.load(Ordering::SeqCst)
+    pub fn close_action(&self) -> CloseAction {
+        settings::close_action(self.behavior(), self.tray_ok.load(Ordering::SeqCst), self.closing.load(Ordering::SeqCst))
     }
 }
 
@@ -72,7 +71,21 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
-/// Full shutdown (services, then the app): the tray's Quit and the in-app Exit.
+/// The cross button AND the Exit button: follow the saved background preference. In a background mode the window is
+/// hidden and the app (and its services) keep running; otherwise this is a full shutdown. Quitting completely from a
+/// background mode is the tray's Quit.
+pub fn close_window(app: &AppHandle) {
+    match app.state::<Shell>().close_action() {
+        CloseAction::HideWindow => {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.hide();
+            }
+        }
+        CloseAction::Quit => quit(app),
+    }
+}
+
+/// Full shutdown (services, then the app): the tray's Quit, and the close paths when no background mode applies.
 pub fn quit(app: &AppHandle) {
     app.state::<Shell>().mark_closing();
     let app = app.clone();

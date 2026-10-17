@@ -178,13 +178,17 @@ export async function showAlert(kind: AlertKind, options: ShowAlertOptions = {})
   if (result?.isConfirmed && retry) retry();
 }
 
-/** "Exit System Info?" confirmation. Resolves true only if the user chose Exit. */
-export async function confirmExit(): Promise<boolean> {
+/** What Exit says when a background mode is on: the window closes, monitoring keeps running. */
+const KEEPS_RUNNING_TEXT = 'The window closes and System Info keeps running in the background. To stop it completely, use Quit in the tray icon\'s menu.';
+
+/** "Exit System Info?" confirmation. Resolves true only if the user chose Exit. `keepsRunning`: a background mode is on. */
+export async function confirmExit(keepsRunning = false): Promise<boolean> {
   const kind: AlertKind = 'confirmExit';
   const result = await present(kind, (swal) =>
     swal.fire({
       ...baseOptions(ALERT_COPY[kind].tone, kind),
-      confirmButtonText: 'Exit',
+      ...(keepsRunning ? { title: 'Close the window?', text: KEEPS_RUNNING_TEXT } : {}),
+      confirmButtonText: keepsRunning ? 'Close window' : 'Exit',
       showCancelButton: true,
       cancelButtonText: 'Cancel',
       reverseButtons: true,

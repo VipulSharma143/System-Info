@@ -1,5 +1,6 @@
 import { AlertTriangle, Check, RefreshCw } from 'lucide-react';
 import { ALERT_COPY } from '../../lib/errors';
+import { isTauri } from '../../lib/tauri';
 import type { StartupStep } from '../../lib/startupSteps';
 import Button from '../common/Button';
 import BrandMark from './BrandMark';
@@ -82,6 +83,12 @@ export default function StartupScreen({ steps, failed, onRetry }: StartupScreenP
               </li>
             ))}
           </ul>
+          {isTauri() && (
+            <p className="mt-6 rounded-[var(--r-md)] border border-line bg-surface-2 px-4 py-3 text-center text-[12px] leading-relaxed text-muted">
+              While this loads: the <span className="font-medium text-ink">System</span> tab has three startup options. Run in the background,
+              don’t run in the background, or start automatically at system startup. Pick what suits you once the dashboard opens.
+            </p>
+          )}
         </div>
       )}
     </div>

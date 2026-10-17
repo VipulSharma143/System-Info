@@ -121,3 +121,23 @@ pub fn load_or_initialise(root: &Path) -> Settings {
     }
     settings
 }
+
+/// What closing the window (the cross button, the Exit button, a second launch's "close") does. ONE decision for every
+/// way of closing, so they can never disagree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CloseAction {
+    /// Hide the window; the app and its services keep running.
+    HideWindow,
+    /// Stop the services and end the process.
+    Quit,
+}
+
+/// Hides only when a background mode is chosen AND the tray exists to bring the window back AND the app is not already
+/// shutting down or restarting. Every other case quits, so the window can never become unreachable.
+pub fn close_action(behavior: Behavior, tray_working: bool, closing: bool) -> CloseAction {
+    if behavior.runs_in_background() && tray_working && !closing {
+        CloseAction::HideWindow
+    } else {
+        CloseAction::Quit
+    }
+}

@@ -69,7 +69,7 @@ pub fn run() {
 
             // Window starts hidden (tauri.conf.json) so a sign-in launch never flashes it. It is shown unless this
             // launch was started by the OS in Startup mode with a working tray to restore it from.
-            let stay_hidden = started_by_os && behavior == settings::Behavior::Startup && app.state::<Shell>().hides_on_close();
+            let stay_hidden = started_by_os && behavior == settings::Behavior::Startup && app.state::<Shell>().close_action() == settings::CloseAction::HideWindow;
             if !stay_hidden {
                 shell::show_main(app.handle());
             }
@@ -94,14 +94,7 @@ pub fn run() {
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
-                        let shell = app_handle.state::<Shell>();
-                        if shell.hides_on_close() {
-                            if let Some(w) = app_handle.get_webview_window("main") {
-                                let _ = w.hide();
-                            }
-                        } else {
-                            shell::quit(&app_handle);
-                        }
+                        shell::close_window(&app_handle);
                     }
                     // Deliberately no handling of Resized/Moved/Focused — minimize and maximize are plain native
                     // window-manager behavior and never reach services.

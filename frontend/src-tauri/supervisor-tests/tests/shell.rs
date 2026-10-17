@@ -73,6 +73,32 @@ mod settings_tests {
     }
 
     #[test]
+    fn closing_follows_the_preference_the_same_way_for_every_close_path() {
+        // The cross button and the Exit button both go through close_action, so this table is the contract.
+        for behavior in [Behavior::Background, Behavior::Startup] {
+            assert_eq!(close_action(behavior, true, false), CloseAction::HideWindow, "{behavior:?} with a tray hides");
+            assert_eq!(close_action(behavior, false, false), CloseAction::Quit, "{behavior:?} without a tray must quit, never strand the window");
+            assert_eq!(close_action(behavior, true, true), CloseAction::Quit, "{behavior:?} while shutting down/restarting quits");
+        }
+        for tray in [true, false] {
+            assert_eq!(close_action(Behavior::Off, tray, false), CloseAction::Quit, "off always quits");
+        }
+    }
+
+    #[test]
+    fn saved_choice_survives_restarts_for_each_option() {
+        for b in [Behavior::Background, Behavior::Off, Behavior::Startup] {
+            let root = tmp(&format!("persist-{}", b.as_str()));
+            load_or_initialise(&root);
+            save(&root, Settings { behavior: b, first_run_pending: false }).unwrap();
+            for _ in 0..3 {
+                // every later launch (restart, relaunch after an update) reads the same choice and does not ask again
+                assert_eq!(load_or_initialise(&root), Settings { behavior: b, first_run_pending: false });
+            }
+        }
+    }
+
+    #[test]
     fn only_the_two_background_modes_use_the_tray() {
         assert!(Behavior::Background.runs_in_background());
         assert!(Behavior::Startup.runs_in_background());
@@ -103,6 +129,22 @@ mod autostart_tests {
         assert_eq!(linux_entry_path(None, Some(PathBuf::from("/home/u"))), Some(PathBuf::from("/home/u/.config/autostart/systeminfo.desktop")));
         assert_eq!(linux_entry_path(Some(PathBuf::from("")), Some(PathBuf::from("/home/u"))), Some(PathBuf::from("/home/u/.config/autostart/systeminfo.desktop")));
         assert_eq!(linux_entry_path(None, None), None);
+    }
+
+    #[test]
+    fn windows_task_runs_at_logon_with_highest_privileges_and_survives_battery() {
+        let xml = task_xml(r"C:\Users\A & B\AppData\Local\SystemInfo\SystemInfo.exe");
+        assert!(xml.contains("<LogonTrigger>") && xml.contains("<RunLevel>HighestAvailable</RunLevel>"));
+        assert!(xml.contains("<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>") && xml.contains("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"));
+        assert!(xml.contains("<Arguments>--autostart</Arguments>"));
+        assert!(xml.contains("A &amp; B"), "paths are XML-escaped");
+    }
+
+    #[test]
+    fn task_xml_is_written_as_utf16_with_a_bom() {
+        let bytes = utf16le_with_bom("<a>é</a>");
+        assert_eq!(&bytes[..2], &[0xFF, 0xFE]);
+        assert_eq!(bytes.len(), 2 + 2 * "<a>é</a>".chars().count());
     }
 
     #[test]

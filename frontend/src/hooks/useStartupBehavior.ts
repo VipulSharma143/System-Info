@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { parseBehaviorState, type BehaviorState, type StartupBehavior } from '../lib/behavior';
+import type { BehaviorState, StartupBehavior } from '../lib/behavior';
+import { getBehavior, setBehavior } from '../lib/behaviorClient';
 import { reportDiagnostic } from '../lib/errors';
 import { isTauri } from '../lib/tauri';
 
@@ -13,13 +14,6 @@ export interface StartupBehaviorResource {
   choose: (behavior: StartupBehavior) => Promise<boolean>;
 }
 
-async function call(command: 'get_startup_behavior' | 'set_startup_behavior', args?: Record<string, unknown>): Promise<BehaviorState> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  const parsed = parseBehaviorState(await invoke(command, args));
-  if (!parsed) throw new Error(`${command} returned an unexpected reply`);
-  return parsed;
-}
-
 /** Reads and changes the background/startup preference held by the desktop shell. */
 export function useStartupBehavior(): StartupBehaviorResource {
   const supported = isTauri();
@@ -30,7 +24,7 @@ export function useStartupBehavior(): StartupBehaviorResource {
   useEffect(() => {
     if (!supported) return;
     let cancelled = false;
-    call('get_startup_behavior')
+    getBehavior()
       .then((s) => { if (!cancelled) setState(s); })
       .catch((err) => reportDiagnostic('get_startup_behavior failed', err));
     return () => { cancelled = true; };
@@ -40,7 +34,7 @@ export function useStartupBehavior(): StartupBehaviorResource {
     setSaving(true);
     setProblem(null);
     try {
-      setState(await call('set_startup_behavior', { behavior }));
+      setState(await setBehavior(behavior));
       return true;
     } catch (err) {
       reportDiagnostic('set_startup_behavior failed', err);
